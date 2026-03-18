@@ -15,13 +15,12 @@ pub struct WindowPosition {
 }
 
 impl WindowPosition {
-    /// Default recorder position: centered horizontally, near the top.
-    pub fn default_recorder(screen_width: u32, screen_height: u32) -> Self {
+    /// Default recorder position: centered horizontally, just below menu bar.
+    pub fn default_recorder(screen_width: u32, _screen_height: u32) -> Self {
         let width = 200.0;
         let height = 200.0;
         let x = (screen_width as f64 - width) / 2.0;
-        let y = 30.0;
-        let _ = screen_height; // used for future multi-monitor
+        let y = 25.0; // macOS menu bar height
         Self { x, y, width, height }
     }
 
@@ -76,11 +75,23 @@ impl WindowManager {
             return;
         };
 
-        // Restore position from DB (use LogicalPosition for Retina compatibility)
+        // Restore position from DB, or compute default for recorder
         if let Some(pos) = self.load_position(label) {
             let _ = win.set_position(tauri::LogicalPosition::new(pos.x, pos.y));
             let _ = win.set_size(tauri::LogicalSize::new(pos.width, pos.height));
             info!("[wm] '{}' restored to ({}, {})", label, pos.x, pos.y);
+        } else if label == "recorder" {
+            // First time: center below menu bar
+            if let Ok(monitor) = win.current_monitor() {
+                if let Some(m) = monitor {
+                    let s = m.size();
+                    let scale = m.scale_factor();
+                    let sw = s.width as f64 / scale;
+                    let pos = WindowPosition::default_recorder(sw as u32, 0);
+                    let _ = win.set_position(tauri::LogicalPosition::new(pos.x, pos.y));
+                    info!("[wm] '{}' default position ({}, {})", label, pos.x, pos.y);
+                }
+            }
         }
 
         let _ = win.show();

@@ -101,6 +101,7 @@ export default function RecorderFloat() {
 
   return (
     <div
+      data-tauri-drag-region
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -109,7 +110,6 @@ export default function RecorderFloat() {
         width: '100%',
         height: '100%',
         userSelect: 'none',
-        WebkitAppRegion: 'drag' as never,
       }}
     >
       {hasSprite ? (

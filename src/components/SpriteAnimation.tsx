@@ -1,10 +1,10 @@
 /**
- * SpriteAnimation — Plays a sprite sheet animation on a canvas.
+ * SpriteAnimation — Plays a sprite sheet animation via CSS steps().
  *
- * Compatible with VoiceInk native manifest.json format.
- * Features: grid slicing, 12.5fps default, 3s wind-down after stop.
+ * Uses CSS background-position stepping instead of canvas —
+ * works reliably in Tauri transparent windows on macOS.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export interface SpriteManifest {
   id: string;
@@ -23,6 +23,7 @@ interface Props {
   isPlaying: boolean;
   width?: number;
   height?: number;
+  /** Seconds per frame (default 0.08) */
   timePerFrame?: number;
   windDownMs?: number;
 }
@@ -31,100 +32,60 @@ export default function SpriteAnimation({
   manifest,
   imageSrc,
   isPlaying,
-  width = 120,
-  height = 120,
+  width = 160,
+  height = 160,
   timePerFrame = 0.08,
   windDownMs = 3000,
 }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
+  const [animating, setAnimating] = useState(false);
 
-  // Load image
   useEffect(() => {
-    const img = new Image();
-    img.onload = () => setImage(img);
-    img.src = imageSrc;
-    return () => { img.onload = null; };
-  }, [imageSrc]);
-
-  // Draw first frame when image loads
-  useEffect(() => {
-    if (!image || !canvasRef.current) return;
-    drawFrame(canvasRef.current, image, manifest, 0);
-  }, [image, manifest]);
-
-  // Animation loop
-  useEffect(() => {
-    if (!image || !canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    let frame = 0;
-    let lastTime = performance.now();
-    let running = true;
-    let rafId = 0;
-    const intervalMs = timePerFrame * 1000;
-
-    const tick = (timestamp: number) => {
-      if (!running) return;
-      if (timestamp - lastTime >= intervalMs) {
-        lastTime = timestamp;
-        frame = (frame + 1) % manifest.frameCount;
-        drawFrame(canvas, image, manifest, frame);
-      }
-      rafId = requestAnimationFrame(tick);
-    };
-
-    // Always start the animation loop immediately
-    rafId = requestAnimationFrame(tick);
-
-    // If not playing, schedule stop after wind-down
-    let windDownTimer: ReturnType<typeof setTimeout> | null = null;
-    if (!isPlaying) {
-      windDownTimer = setTimeout(() => {
-        running = false;
-        cancelAnimationFrame(rafId);
-        drawFrame(canvas, image, manifest, 0);
-      }, windDownMs);
+    if (isPlaying) {
+      setAnimating(true);
+    } else if (animating) {
+      // Wind-down: keep animating then stop
+      const timer = setTimeout(() => setAnimating(false), windDownMs);
+      return () => clearTimeout(timer);
     }
+  }, [isPlaying, windDownMs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    return () => {
-      running = false;
-      cancelAnimationFrame(rafId);
-      if (windDownTimer) clearTimeout(windDownTimer);
-    };
-  }, [isPlaying, image, manifest, timePerFrame, windDownMs]);
+  const { frameCount, columns, rows } = manifest;
+  const totalDuration = frameCount * timePerFrame;
+  const bgWidth = columns * width;
+  const bgHeight = rows * height;
+  const gridKeyframes = Array.from({ length: frameCount }, (_, i) => {
+    const col = i % columns;
+    const row = Math.floor(i / columns);
+    const pct = (i / frameCount) * 100;
+    const x = -(col * width);
+    const y = -(row * height);
+    return `${pct.toFixed(2)}% { background-position: ${x}px ${y}px; }`;
+  }).join('\n');
+
+  const gridAnimName = `sprite-grid-${manifest.id.replace(/[^a-zA-Z0-9]/g, '')}`;
+  const gridKeyframesCss = `
+    @keyframes ${gridAnimName} {
+      ${gridKeyframes}
+      100% { background-position: 0px 0px; }
+    }
+  `;
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={width}
-      height={height}
-      style={{ width, height }}
-    />
-  );
-}
-
-function drawFrame(
-  canvas: HTMLCanvasElement,
-  img: HTMLImageElement,
-  manifest: SpriteManifest,
-  frameIndex: number,
-) {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  const col = frameIndex % manifest.columns;
-  const row = Math.floor(frameIndex / manifest.columns);
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(
-    img,
-    col * manifest.frameWidth,
-    row * manifest.frameHeight,
-    manifest.frameWidth,
-    manifest.frameHeight,
-    0, 0,
-    canvas.width,
-    canvas.height,
+    <>
+      <style>{gridKeyframesCss}</style>
+      <div
+        style={{
+          width,
+          height,
+          backgroundImage: `url(${imageSrc})`,
+          backgroundSize: `${bgWidth}px ${bgHeight}px`,
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: '0 0',
+          animation: animating
+            ? `${gridAnimName} ${totalDuration}s steps(1) infinite`
+            : 'none',
+        }}
+      />
+    </>
   );
 }
