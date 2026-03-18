@@ -9,17 +9,26 @@ pub struct PermissionStatus {
 }
 
 /// Check microphone permission using AVCaptureDevice authorization status.
-pub fn check_microphone() -> bool {
+/// Returns the raw status: 0=notDetermined, 1=restricted, 2=denied, 3=authorized.
+fn microphone_status() -> i64 {
     unsafe {
         let cls = match objc::runtime::Class::get("AVCaptureDevice") {
             Some(cls) => cls,
-            None => return false,
+            None => return 0,
         };
         let media_type = NSStringTrait::alloc(cocoa::base::nil)
             .init_str("soun"); // AVMediaTypeAudio = "soun"
-        let status: i64 = objc::msg_send![cls, authorizationStatusForMediaType: media_type];
-        status == 3 // AVAuthorizationStatusAuthorized
+        msg_send![cls, authorizationStatusForMediaType: media_type]
     }
+}
+
+pub fn check_microphone() -> bool {
+    microphone_status() == 3 // AVAuthorizationStatusAuthorized
+}
+
+/// Open microphone settings or inform user to try recording first.
+pub fn request_microphone() {
+    open_settings("Privacy_Microphone");
 }
 
 /// Check accessibility permission using AXIsProcessTrusted.
@@ -46,9 +55,16 @@ pub fn open_accessibility_settings() {
         .spawn();
 }
 
+/// Open a specific System Settings privacy pane.
+fn open_settings(pane: &str) {
+    let _ = std::process::Command::new("open")
+        .arg(format!(
+            "x-apple.systempreferences:com.apple.preference.security?{pane}"
+        ))
+        .spawn();
+}
+
 /// Open System Settings to the microphone pane.
 pub fn open_microphone_settings() {
-    let _ = std::process::Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
-        .spawn();
+    open_settings("Privacy_Microphone");
 }

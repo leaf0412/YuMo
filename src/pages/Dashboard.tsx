@@ -88,17 +88,17 @@ export default function Dashboard() {
             ) : (
               <Flex vertical gap={8}>
                 <Alert
-                  message="未授权"
-                  description="需要麦克风权限才能录音"
-                  type="error"
+                  message="待授权"
+                  description="首次录音时系统会弹出授权弹窗，或前往设置手动开启"
+                  type="warning"
                   showIcon
-                  icon={<CloseCircleOutlined />}
                 />
                 <Button
+                  size="small"
                   icon={<SettingOutlined />}
                   onClick={() => openSettings('microphone')}
                 >
-                  去设置
+                  前往系统设置
                 </Button>
               </Flex>
             )}
@@ -117,17 +117,17 @@ export default function Dashboard() {
             ) : (
               <Flex vertical gap={8}>
                 <Alert
-                  message="未授权"
-                  description="需要辅助功能权限才能自动粘贴"
-                  type="error"
+                  message="待授权"
+                  description="需要辅助功能权限才能自动粘贴，前往设置添加本应用"
+                  type="warning"
                   showIcon
-                  icon={<CloseCircleOutlined />}
                 />
                 <Button
+                  size="small"
                   icon={<SettingOutlined />}
                   onClick={() => openSettings('accessibility')}
                 >
-                  去设置
+                  前往系统设置
                 </Button>
               </Flex>
             )}
