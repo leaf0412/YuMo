@@ -107,7 +107,7 @@ export default function SpriteAnimation({
       ref={canvasRef}
       width={width}
       height={height}
-      style={{ width, height }}
+      style={{ width, height, pointerEvents: 'none' }}
     />
   );
 }

@@ -135,6 +135,7 @@ export default function RecorderFloat() {
           alignItems: 'center',
           justifyContent: 'center',
           animation,
+          pointerEvents: 'none',
         }}>
           <span style={{ fontSize: 32, color: '#fff' }}>🎙</span>
         </div>
@@ -151,6 +152,7 @@ export default function RecorderFloat() {
         display: 'flex',
         alignItems: 'center',
         gap: 6,
+        pointerEvents: 'none',
       }}>
         <div style={{
           width: 6,
@@ -171,6 +173,7 @@ export default function RecorderFloat() {
           }}
           style={{
             cursor: 'pointer',
+            pointerEvents: 'auto',
             marginLeft: 4,
             opacity: 0.7,
             fontSize: 14,
