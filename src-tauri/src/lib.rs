@@ -96,6 +96,54 @@ pub fn run() {
                 }
             }
 
+            // Pre-warm MLX daemon in background if a downloaded MLX model is selected
+            {
+                use tauri::Manager;
+                let app_state = app.handle().state::<state::AppState>();
+                let selected_model = saved_settings
+                    .get("selected_model_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let mut warmup_repo: Option<String> = None;
+                if !selected_model.is_empty() {
+                    let all = transcriber::all_models(&app_state.paths.models_dir);
+                    if let Some(model) = all.iter().find(|m| m.id == selected_model) {
+                        if let transcriber::ModelProvider::MlxFunASR = model.provider {
+                            if let Some(repo) = &model.model_repo {
+                                if transcriber::check_mlx_model_downloaded(repo) {
+                                    warmup_repo = Some(repo.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(repo) = warmup_repo {
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        let state = handle.state::<state::AppState>();
+                        info!("[warmup] starting daemon for MLX model: {}", repo);
+                        match state.daemon.start() {
+                            Ok(()) => {
+                                info!("[warmup] daemon started, loading model...");
+                                let cmd = serde_json::json!({"action": "load", "model": &repo});
+                                match state.daemon.send_command(&cmd) {
+                                    Ok(resp) if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" => {
+                                        state.daemon.set_loaded_model(Some(repo.clone()));
+                                        info!("[warmup] model loaded: {}", repo);
+                                    }
+                                    Ok(resp) => info!("[warmup] load response: {}", resp.status),
+                                    Err(e) => info!("[warmup] load failed: {}", e),
+                                }
+                            }
+                            Err(e) => info!("[warmup] daemon start failed: {}", e),
+                        }
+                    });
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -105,6 +153,7 @@ pub fn run() {
             commands::start_recording,
             commands::stop_recording,
             commands::cancel_recording,
+            commands::get_pipeline_state,
             commands::list_audio_devices,
             commands::check_permissions,
             commands::request_permission,

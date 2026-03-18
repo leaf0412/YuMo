@@ -76,10 +76,10 @@ impl WindowManager {
             return;
         };
 
-        // Restore position from DB
+        // Restore position from DB (use LogicalPosition for Retina compatibility)
         if let Some(pos) = self.load_position(label) {
-            let _ = win.set_position(tauri::PhysicalPosition::new(pos.x as i32, pos.y as i32));
-            let _ = win.set_size(tauri::PhysicalSize::new(pos.width as u32, pos.height as u32));
+            let _ = win.set_position(tauri::LogicalPosition::new(pos.x, pos.y));
+            let _ = win.set_size(tauri::LogicalSize::new(pos.width, pos.height));
             info!("[wm] '{}' restored to ({}, {})", label, pos.x, pos.y);
         }
 
@@ -95,13 +95,14 @@ impl WindowManager {
     pub fn hide(&self, label: &str) {
         let Some(win) = self.app.get_webview_window(label) else { return; };
 
-        // Save position before hiding
+        // Save logical position before hiding (divide physical by scale factor)
+        let scale = win.scale_factor().unwrap_or(1.0);
         if let (Ok(pos), Ok(size)) = (win.outer_position(), win.outer_size()) {
             let wp = WindowPosition {
-                x: pos.x as f64,
-                y: pos.y as f64,
-                width: size.width as f64,
-                height: size.height as f64,
+                x: pos.x as f64 / scale,
+                y: pos.y as f64 / scale,
+                width: size.width as f64 / scale,
+                height: size.height as f64 / scale,
             };
             self.save_position(label, &wp);
         }
