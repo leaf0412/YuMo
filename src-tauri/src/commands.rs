@@ -131,7 +131,7 @@ pub async fn stop_recording(
         db::get_all_settings(&conn)?
     };
     let model_id = settings_map
-        .get("selected_model")
+        .get("selected_model_id")
         .and_then(|v| v.as_str())
         .unwrap_or("ggml-base.en")
         .to_string();
@@ -145,25 +145,39 @@ pub async fn stop_recording(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    // 5. Transcribe
-    let model_path = transcriber::model_path(&state.models_dir, &model_id);
-    if !model_path.exists() {
-        // Reset state back to idle on error
-        let mut pipeline = state
-            .pipeline_state
-            .lock()
-            .map_err(|e| AppError::Recording(e.to_string()))?;
-        *pipeline = PipelineState::Idle;
-        let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
-        return Err(AppError::Transcription("No model downloaded".into()));
-    }
-    let ctx = transcriber::load_model(&model_path)?;
-    let result = transcriber::transcribe(
-        &ctx,
-        &audio_data.pcm_samples,
-        audio_data.sample_rate,
-        &language,
-    )?;
+    // 5. Transcribe — route by model provider
+    let all = transcriber::all_models(&state.models_dir);
+    let model_info = all.iter().find(|m| m.id == model_id);
+
+    let result = match model_info.map(|m| &m.provider) {
+        Some(transcriber::ModelProvider::MlxFunASR) => {
+            transcriber::transcribe_via_daemon(
+                &state.daemon,
+                &audio_data.pcm_samples,
+                audio_data.sample_rate,
+                &language,
+            )?
+        }
+        _ => {
+            let model_path = transcriber::model_path(&state.models_dir, &model_id);
+            if !model_path.exists() {
+                let mut pipeline = state
+                    .pipeline_state
+                    .lock()
+                    .map_err(|e| AppError::Recording(e.to_string()))?;
+                *pipeline = PipelineState::Idle;
+                let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
+                return Err(AppError::Transcription("No model downloaded".into()));
+            }
+            let ctx = transcriber::load_model(&model_path)?;
+            transcriber::transcribe(
+                &ctx,
+                &audio_data.pcm_samples,
+                audio_data.sample_rate,
+                &language,
+            )?
+        }
+    };
     let text = result.text;
 
     // 6. Apply text processing

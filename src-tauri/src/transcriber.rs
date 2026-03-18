@@ -297,6 +297,59 @@ pub fn load_model(path: &Path) -> Result<whisper_rs::WhisperContext, AppError> {
     Ok(ctx)
 }
 
+/// Transcribe audio via the MLX FunASR daemon.
+/// Writes samples to a temp WAV file and sends the path to the daemon.
+pub fn transcribe_via_daemon(
+    daemon: &crate::daemon::DaemonManager,
+    samples: &[f32],
+    sample_rate: u32,
+    language: &str,
+) -> Result<TranscriptionResult, AppError> {
+    let start = std::time::Instant::now();
+
+    // Write samples to a temp WAV file (daemon expects a file path)
+    let tmp_dir = std::env::temp_dir().join("voiceink");
+    std::fs::create_dir_all(&tmp_dir)?;
+    let wav_path = tmp_dir.join("recording.wav");
+
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(&wav_path, spec)
+        .map_err(|e| AppError::Io(e.to_string()))?;
+    for &s in samples {
+        writer.write_sample(s).map_err(|e| AppError::Io(e.to_string()))?;
+    }
+    writer.finalize().map_err(|e| AppError::Io(e.to_string()))?;
+
+    let cmd = serde_json::json!({
+        "action": "transcribe",
+        "audio": wav_path.to_string_lossy(),
+        "language": language,
+        "max_tokens": 1900,
+        "temperature": 0.0,
+    });
+
+    let resp = daemon.send_command(&cmd)?;
+
+    // Cleanup temp file
+    let _ = std::fs::remove_file(&wav_path);
+
+    if resp.status == "success" {
+        Ok(TranscriptionResult {
+            text: resp.text.unwrap_or_default(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        })
+    } else {
+        Err(AppError::Transcription(
+            resp.error.unwrap_or_else(|| "Transcription failed".into())
+        ))
+    }
+}
+
 /// Transcribe audio samples using a loaded whisper model.
 pub fn transcribe(
     ctx: &whisper_rs::WhisperContext,
