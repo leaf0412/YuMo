@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Collapse, Switch, Slider, Select, Input, Button, Space, Typography,
+  Collapse, Switch, Slider, Select, Input, Button, Flex, Space, Typography,
   message, Popconfirm, InputNumber,
 } from 'antd';
 import {
@@ -113,7 +113,7 @@ export default function Settings() {
       key: 'audio',
       label: <Space><AudioOutlined />录音</Space>,
       children: (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Flex vertical gap={8} style={{ width: '100%' }}>
           {settingRow(
             '音频设备',
             <Select
@@ -140,7 +140,7 @@ export default function Settings() {
               style={{ width: 250 }}
             />,
           )}
-        </Space>
+        </Flex>
       ),
     },
     {
@@ -158,7 +158,7 @@ export default function Settings() {
       key: 'vad',
       label: <Space><ThunderboltOutlined />VAD 流式转录</Space>,
       children: (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Flex vertical gap={8} style={{ width: '100%' }}>
           {settingRow(
             '启用 VAD',
             <Switch
@@ -185,14 +185,14 @@ export default function Settings() {
               onChange={(v) => updateSetting('vad_silence_timeout', v)}
             />
           </div>
-        </Space>
+        </Flex>
       ),
     },
     {
       key: 'paste',
       label: <Space><CopyOutlined />粘贴</Space>,
       children: (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Flex vertical gap={8} style={{ width: '100%' }}>
           {settingRow(
             '恢复剪贴板',
             <Switch
@@ -210,7 +210,7 @@ export default function Settings() {
               onChange={(v) => updateSetting('paste_delay', v)}
             />
           </div>
-        </Space>
+        </Flex>
       ),
     },
     {
@@ -239,7 +239,7 @@ export default function Settings() {
       key: 'hotkey',
       label: <Space><KeyOutlined />快捷键</Space>,
       children: (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Flex vertical gap={8} style={{ width: '100%' }}>
           <Space.Compact style={{ width: '100%' }}>
             <Input
               placeholder="例如: CommandOrControl+Shift+Space"
@@ -249,7 +249,7 @@ export default function Settings() {
             <Button type="primary" onClick={handleRegisterHotkey}>注册</Button>
             <Button onClick={handleClearHotkey}>清除</Button>
           </Space.Compact>
-        </Space>
+        </Flex>
       ),
     },
     {
@@ -267,7 +267,7 @@ export default function Settings() {
       key: 'history',
       label: <Space><HistoryOutlined />历史管理</Space>,
       children: (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Flex vertical gap={8} style={{ width: '100%' }}>
           {settingRow(
             '自动清理',
             <Switch
@@ -295,14 +295,14 @@ export default function Settings() {
               清空所有记录
             </Button>
           </Popconfirm>
-        </Space>
+        </Flex>
       ),
     },
     {
       key: 'general',
       label: <Space><SettingOutlined />通用</Space>,
       children: (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Flex vertical gap={8} style={{ width: '100%' }}>
           {settingRow(
             '开机自启',
             <Switch
@@ -314,15 +314,15 @@ export default function Settings() {
             '数据目录',
             <Text type="secondary" copyable>{settings.data_path || '未设置'}</Text>,
           )}
-        </Space>
+        </Flex>
       ),
     },
   ];
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <Flex vertical gap="large" style={{ width: '100%' }}>
       <Typography.Title level={3}>设置</Typography.Title>
       <Collapse items={items} defaultActiveKey={['audio', 'hotkey']} />
-    </Space>
+    </Flex>
   );
 }

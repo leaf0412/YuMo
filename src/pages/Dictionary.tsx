@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Tabs, Input, Button, List, Space, Typography, message,
+  Tabs, Input, Button, Flex, Space, Typography, message,
 } from 'antd';
 import {
   PlusOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined,
@@ -116,7 +116,7 @@ export default function Dictionary() {
   };
 
   const vocabularyTab = (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <Flex vertical gap={8} style={{ width: '100%' }}>
       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
         <Space.Compact>
           <Input
@@ -140,30 +140,21 @@ export default function Dictionary() {
         </Space>
       </Space>
 
-      <List
-        dataSource={vocabulary}
-        locale={{ emptyText: '暂无词汇' }}
-        renderItem={(item) => (
-          <List.Item
-            actions={[
-              <Button
-                key="delete"
-                type="text"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => handleDeleteWord(item.id)}
-              />,
-            ]}
-          >
+      {vocabulary.length === 0 ? (
+        <Text type="secondary">暂无词汇</Text>
+      ) : (
+        vocabulary.map((item) => (
+          <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
             <Text>{item.word}</Text>
-          </List.Item>
-        )}
-      />
-    </Space>
+            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDeleteWord(item.id)} />
+          </div>
+        ))
+      )}
+    </Flex>
   );
 
   const replacementsTab = (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <Flex vertical gap={8} style={{ width: '100%' }}>
       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
         <Space.Compact>
           <Input
@@ -194,34 +185,25 @@ export default function Dictionary() {
         </Space>
       </Space>
 
-      <List
-        dataSource={replacements}
-        locale={{ emptyText: '暂无替换规则' }}
-        renderItem={(item) => (
-          <List.Item
-            actions={[
-              <Button
-                key="delete"
-                type="text"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => handleDeleteReplacement(item.id)}
-              />,
-            ]}
-          >
+      {replacements.length === 0 ? (
+        <Text type="secondary">暂无替换规则</Text>
+      ) : (
+        replacements.map((item) => (
+          <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
             <Space>
               <Text>{item.original}</Text>
               <SwapRightOutlined />
               <Text strong>{item.replacement}</Text>
             </Space>
-          </List.Item>
-        )}
-      />
-    </Space>
+            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDeleteReplacement(item.id)} />
+          </div>
+        ))
+      )}
+    </Flex>
   );
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <Flex vertical gap="large" style={{ width: '100%' }}>
       <Title level={3}>词典</Title>
       <Tabs
         items={[
@@ -229,6 +211,6 @@ export default function Dictionary() {
           { key: 'replacements', label: '替换规则', children: replacementsTab },
         ]}
       />
-    </Space>
+    </Flex>
   );
 }

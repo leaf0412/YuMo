@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Card, Alert, Button, List, Space, Tag, Typography, Row, Col } from 'antd';
+import { Card, Alert, Button, Flex, Space, Tag, Typography, Row, Col } from 'antd';
 import {
   AudioOutlined,
   CheckCircleOutlined,
@@ -42,13 +42,13 @@ export default function Dashboard() {
     } catch { /* ignore */ }
 
     try {
-      const m = await invoke<Model[]>('list_models');
+      const m = await invoke<Model[]>('list_available_models');
       setModels(m);
     } catch { /* ignore */ }
 
     try {
-      const t = await invoke<Transcription[]>('get_transcriptions', { limit: 5, offset: 0 });
-      setTranscriptions(t);
+      const result = await invoke<{ items: Transcription[], next_cursor: string | null }>('get_transcriptions', { limit: 5 });
+      setTranscriptions(result.items || []);
     } catch { /* ignore */ }
   }, []);
 
@@ -63,7 +63,7 @@ export default function Dashboard() {
   };
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <Flex vertical gap="large" style={{ width: '100%' }}>
       <Title level={3}>仪表盘</Title>
 
       <Row gutter={[16, 16]}>
@@ -71,14 +71,14 @@ export default function Dashboard() {
           <Card title="麦克风权限" size="small">
             {permissions.microphone ? (
               <Alert
-                message="已授权"
+                title="已授权"
                 type="success"
                 showIcon
                 icon={<CheckCircleOutlined />}
               />
             ) : (
               <Alert
-                message="未授权"
+                title="未授权"
                 type="error"
                 showIcon
                 icon={<CloseCircleOutlined />}
@@ -91,14 +91,14 @@ export default function Dashboard() {
           <Card title="辅助功能权限" size="small">
             {permissions.accessibility ? (
               <Alert
-                message="已授权"
+                title="已授权"
                 type="success"
                 showIcon
                 icon={<CheckCircleOutlined />}
               />
             ) : (
               <Alert
-                message="未授权"
+                title="未授权"
                 type="error"
                 showIcon
                 icon={<CloseCircleOutlined />}
@@ -116,7 +116,7 @@ export default function Dashboard() {
                 <Tag color="blue">{selectedModel.size}</Tag>
               </Space>
             ) : (
-              <Alert message="未选择模型" type="warning" showIcon />
+              <Alert title="未选择模型" type="warning" showIcon />
             )}
           </Card>
         </Col>
@@ -139,24 +139,22 @@ export default function Dashboard() {
       </div>
 
       <Card title="最近转录">
-        <List
-          dataSource={transcriptions}
-          locale={{ emptyText: '暂无转录记录' }}
-          renderItem={(item) => (
-            <List.Item>
-              <List.Item.Meta
-                title={
-                  <Space>
-                    <Text type="secondary">{item.created_at}</Text>
-                    <Tag>{item.model_name}</Tag>
-                  </Space>
-                }
-                description={item.text.length > 100 ? `${item.text.slice(0, 100)}...` : item.text}
-              />
-            </List.Item>
-          )}
-        />
+        {transcriptions.length === 0 ? (
+          <Text type="secondary">暂无转录记录</Text>
+        ) : (
+          transcriptions.map((item) => (
+            <div key={item.id} style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
+              <Space>
+                <Text type="secondary">{item.created_at}</Text>
+                <Tag>{item.model_name}</Tag>
+              </Space>
+              <Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
+                {item.text.length > 100 ? `${item.text.slice(0, 100)}...` : item.text}
+              </Paragraph>
+            </div>
+          ))
+        )}
       </Card>
-    </Space>
+    </Flex>
   );
 }

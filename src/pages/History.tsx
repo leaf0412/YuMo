@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Input, List, Button, Space, Tag, Typography, Popconfirm, message, Card } from 'antd';
+import { Input, Button, Flex, Space, Tag, Typography, Popconfirm, message, Card } from 'antd';
 import { CopyOutlined, DeleteOutlined, ClearOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -20,22 +20,25 @@ export default function History() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
 
-  const loadTranscriptions = useCallback(async (offset: number, reset: boolean) => {
+  const loadTranscriptions = useCallback(async (cursor: string | null, reset: boolean) => {
     setLoading(true);
     try {
-      const result = await invoke<Transcription[]>('get_transcriptions', {
+      const result = await invoke<{ items: Transcription[], next_cursor: string | null }>('get_transcriptions', {
         limit: PAGE_SIZE,
-        offset,
-        search: searchQuery || undefined,
+        cursor: cursor ?? undefined,
+        query: searchQuery || undefined,
       });
+      const items = result.items || [];
       if (reset) {
-        setTranscriptions(result);
+        setTranscriptions(items);
       } else {
-        setTranscriptions((prev) => [...prev, ...result]);
+        setTranscriptions((prev) => [...prev, ...items]);
       }
-      setHasMore(result.length === PAGE_SIZE);
+      setNextCursor(result.next_cursor);
+      setHasMore(result.next_cursor !== null);
     } catch {
       /* ignore */
     } finally {
@@ -44,7 +47,7 @@ export default function History() {
   }, [searchQuery]);
 
   useEffect(() => {
-    loadTranscriptions(0, true);
+    loadTranscriptions(null, true);
   }, [loadTranscriptions]);
 
   const handleSearch = (value: string) => {
@@ -52,7 +55,7 @@ export default function History() {
   };
 
   const handleLoadMore = () => {
-    loadTranscriptions(transcriptions.length, false);
+    loadTranscriptions(nextCursor, false);
   };
 
   const handleCopy = (text: string) => {
@@ -92,7 +95,7 @@ export default function History() {
   const wordCount = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Flex vertical gap="middle" style={{ width: '100%' }}>
       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
         <Input.Search
           placeholder="搜索转录内容..."
@@ -112,62 +115,54 @@ export default function History() {
         </Popconfirm>
       </Space>
 
-      <List
-        loading={loading}
-        dataSource={transcriptions}
-        locale={{ emptyText: '暂无转录记录' }}
-        renderItem={(item) => {
+      {transcriptions.length === 0 && !loading ? (
+        <Text type="secondary">暂无转录记录</Text>
+      ) : (
+        transcriptions.map((item) => {
           const expanded = expandedIds.has(item.id);
           const preview = item.text.length > 120 ? `${item.text.slice(0, 120)}...` : item.text;
 
           return (
-            <List.Item
-              actions={[
-                <Button
-                  key="copy"
-                  type="text"
-                  icon={<CopyOutlined />}
-                  onClick={() => handleCopy(item.enhanced_text || item.text)}
-                />,
-                <Popconfirm
-                  key="delete"
-                  title="确认删除？"
-                  onConfirm={() => handleDelete(item.id)}
-                  okText="确认"
-                  cancelText="取消"
-                >
-                  <Button type="text" danger icon={<DeleteOutlined />} />
-                </Popconfirm>,
-              ]}
-            >
-              <List.Item.Meta
-                title={
+            <Card key={item.id} size="small">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ flex: 1 }}>
                   <Space>
                     <Text type="secondary">{item.created_at}</Text>
                     <Tag>{item.model_name}</Tag>
                     <Tag color="blue">{wordCount(item.text)} 词</Tag>
                   </Space>
-                }
-                description={
-                  <div>
-                    <Paragraph
-                      style={{ cursor: 'pointer', marginBottom: 4 }}
-                      onClick={() => toggleExpand(item.id)}
-                    >
-                      {expanded ? item.text : preview}
-                    </Paragraph>
-                    {expanded && item.enhanced_text && (
-                      <Card size="small" title="AI 增强文本" style={{ marginTop: 8 }}>
-                        <Paragraph>{item.enhanced_text}</Paragraph>
-                      </Card>
-                    )}
-                  </div>
-                }
-              />
-            </List.Item>
+                  <Paragraph
+                    style={{ cursor: 'pointer', marginBottom: 4, marginTop: 8 }}
+                    onClick={() => toggleExpand(item.id)}
+                  >
+                    {expanded ? item.text : preview}
+                  </Paragraph>
+                  {expanded && item.enhanced_text && (
+                    <Card size="small" title="AI 增强文本" style={{ marginTop: 8 }}>
+                      <Paragraph>{item.enhanced_text}</Paragraph>
+                    </Card>
+                  )}
+                </div>
+                <Space>
+                  <Button
+                    type="text"
+                    icon={<CopyOutlined />}
+                    onClick={() => handleCopy(item.enhanced_text || item.text)}
+                  />
+                  <Popconfirm
+                    title="确认删除？"
+                    onConfirm={() => handleDelete(item.id)}
+                    okText="确认"
+                    cancelText="取消"
+                  >
+                    <Button type="text" danger icon={<DeleteOutlined />} />
+                  </Popconfirm>
+                </Space>
+              </div>
+            </Card>
           );
-        }}
-      />
+        })
+      )}
 
       {hasMore && transcriptions.length > 0 && (
         <div style={{ textAlign: 'center' }}>
@@ -176,6 +171,6 @@ export default function History() {
           </Button>
         </div>
       )}
-    </Space>
+    </Flex>
   );
 }

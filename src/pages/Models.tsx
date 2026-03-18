@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Card, Button, Space, Tag, Typography, Row, Col, Progress, Select,
+  Card, Button, Flex, Space, Tag, Typography, Row, Col, Progress, Select,
   Input, message, Divider,
 } from 'antd';
 import {
@@ -45,7 +45,7 @@ export default function Models() {
 
   const loadModels = useCallback(async () => {
     try {
-      const result = await invoke<LocalModel[]>('list_models');
+      const result = await invoke<LocalModel[]>('list_available_models');
       setModels(result);
     } catch { /* ignore */ }
   }, []);
@@ -153,7 +153,7 @@ export default function Models() {
   };
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <Flex vertical gap="large" style={{ width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Title level={3} style={{ margin: 0 }}>模型管理</Title>
         <Space>
@@ -189,7 +189,7 @@ export default function Models() {
               extra={model.selected && <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>}
               style={model.selected ? { borderColor: '#52c41a' } : undefined}
             >
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Flex vertical gap={8} style={{ width: '100%' }}>
                 <div>
                   <Text type="secondary">大小: </Text>
                   <Text>{model.size}</Text>
@@ -233,7 +233,7 @@ export default function Models() {
                     </Button>
                   )}
                 </Space>
-              </Space>
+              </Flex>
             </Card>
           </Col>
         ))}
@@ -243,7 +243,7 @@ export default function Models() {
 
       <Title level={4}>云端模型</Title>
       <Card>
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Flex vertical gap={8} style={{ width: '100%' }}>
           <div>
             <Text>服务商</Text>
             <Select
@@ -268,8 +268,8 @@ export default function Models() {
           <Button icon={<CloudOutlined />} onClick={handleTestConnection}>
             测试连接
           </Button>
-        </Space>
+        </Flex>
       </Card>
-    </Space>
+    </Flex>
   );
 }

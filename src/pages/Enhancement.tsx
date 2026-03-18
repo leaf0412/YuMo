@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Card, Switch, Select, Input, Button, Space, Typography, List, Modal,
+  Card, Switch, Select, Input, Button, Flex, Space, Typography, Modal,
   Form, message, Tag, Divider,
 } from 'antd';
 import {
@@ -168,11 +168,11 @@ export default function Enhancement() {
   const modelOptions = MODEL_OPTIONS[provider] || [];
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <Flex vertical gap="large" style={{ width: '100%' }}>
       <Title level={3}>AI 增强</Title>
 
       <Card>
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Flex vertical gap="middle" style={{ width: '100%' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text strong>启用 AI 增强</Text>
             <Switch
@@ -228,7 +228,7 @@ export default function Enhancement() {
               />
             </div>
           )}
-        </Space>
+        </Flex>
       </Card>
 
       <Card
@@ -239,57 +239,46 @@ export default function Enhancement() {
           </Button>
         }
       >
-        <List
-          dataSource={prompts}
-          locale={{ emptyText: '暂无 Prompt' }}
-          renderItem={(prompt) => (
-            <List.Item
-              actions={[
-                !prompt.is_active && (
-                  <Button
-                    key="select"
-                    type="link"
-                    onClick={() => handleSelectPrompt(prompt.id)}
-                  >
+        {prompts.length === 0 ? (
+          <Text type="secondary">暂无 Prompt</Text>
+        ) : (
+          prompts.map((prompt) => (
+            <div
+              key={prompt.id}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 0',
+                borderBottom: '1px solid #f0f0f0',
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <Space>
+                  <Text>{prompt.name}</Text>
+                  {prompt.is_active && <Tag color="green" icon={<CheckCircleOutlined />}>当前</Tag>}
+                  {!prompt.is_custom && <Tag>内置</Tag>}
+                </Space>
+                <Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ marginBottom: 0, marginTop: 4 }}>
+                  {prompt.system_message}
+                </Paragraph>
+              </div>
+              <Space>
+                {!prompt.is_active && (
+                  <Button type="link" onClick={() => handleSelectPrompt(prompt.id)}>
                     使用
                   </Button>
-                ),
-                prompt.is_custom && (
-                  <Button
-                    key="edit"
-                    type="text"
-                    icon={<EditOutlined />}
-                    onClick={() => openEditModal(prompt)}
-                  />
-                ),
-                prompt.is_custom && (
-                  <Button
-                    key="delete"
-                    type="text"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDeletePrompt(prompt.id)}
-                  />
-                ),
-              ].filter(Boolean)}
-            >
-              <List.Item.Meta
-                title={
-                  <Space>
-                    <Text>{prompt.name}</Text>
-                    {prompt.is_active && <Tag color="green" icon={<CheckCircleOutlined />}>当前</Tag>}
-                    {!prompt.is_custom && <Tag>内置</Tag>}
-                  </Space>
-                }
-                description={
-                  <Paragraph type="secondary" ellipsis={{ rows: 2 }}>
-                    {prompt.system_message}
-                  </Paragraph>
-                }
-              />
-            </List.Item>
-          )}
-        />
+                )}
+                {prompt.is_custom && (
+                  <Button type="text" icon={<EditOutlined />} onClick={() => openEditModal(prompt)} />
+                )}
+                {prompt.is_custom && (
+                  <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDeletePrompt(prompt.id)} />
+                )}
+              </Space>
+            </div>
+          ))
+        )}
       </Card>
 
       <Modal
@@ -327,6 +316,6 @@ export default function Enhancement() {
           </Form.Item>
         </Form>
       </Modal>
-    </Space>
+    </Flex>
   );
 }
