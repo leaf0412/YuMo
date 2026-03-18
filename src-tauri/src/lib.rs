@@ -1,6 +1,7 @@
 pub mod audio_ctrl;
 pub mod cloud;
 pub mod commands;
+pub mod daemon;
 pub mod db;
 pub mod denoiser;
 pub mod downloader;
@@ -32,6 +33,7 @@ pub fn run() {
     std::fs::create_dir_all(&models_dir).expect("Cannot create models dir");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
@@ -52,6 +54,7 @@ pub fn run() {
             commands::list_available_models,
             commands::download_model,
             commands::delete_model,
+            commands::import_model,
             // Transcriptions
             commands::get_transcriptions,
             commands::delete_transcription,
