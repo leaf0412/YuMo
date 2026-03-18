@@ -15,6 +15,20 @@
         "title": "voiceink-tauri",
         "width": 800,
         "height": 600
+      },
+      {
+        "label": "recorder",
+        "title": "VoiceInk Recorder",
+        "url": "recorder.html",
+        "width": 300,
+        "height": 80,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "visible": false,
+        "skipTaskbar": true,
+        "center": true
       }
     ],
     "security": {
