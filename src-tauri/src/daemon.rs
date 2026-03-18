@@ -305,23 +305,82 @@ fn wait_for_ready(reader: &mut BufReader<ChildStdout>) -> AppResult<()> {
     }
 }
 
-/// Locate a Python 3 interpreter, trying `which python3` first then known
-/// fixed paths on macOS.
+/// Check if a Python interpreter has mlx_audio installed.
+fn python_has_mlx(python: &str) -> bool {
+    Command::new(python)
+        .args(["-c", "import mlx_audio"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Collect candidate Python paths, matching VoiceInk's search order:
+/// asdf → mise → miniforge → mambaforge → homebrew → system → local.
+fn python_candidates() -> Vec<String> {
+    let mut candidates = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        let home = home.to_string_lossy().to_string();
+
+        // asdf-managed pythons (newest first)
+        let asdf_dir = format!("{home}/.asdf/installs/python");
+        if let Ok(entries) = std::fs::read_dir(&asdf_dir) {
+            let mut versions: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let bin = e.path().join("bin/python3");
+                    bin.exists().then(|| bin.to_string_lossy().to_string())
+                })
+                .collect();
+            versions.sort();
+            versions.reverse();
+            candidates.extend(versions);
+        }
+
+        // mise-managed pythons (newest first)
+        let mise_dir = format!("{home}/.local/share/mise/installs/python");
+        if let Ok(entries) = std::fs::read_dir(&mise_dir) {
+            let mut versions: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let bin = e.path().join("bin/python3");
+                    bin.exists().then(|| bin.to_string_lossy().to_string())
+                })
+                .collect();
+            versions.sort();
+            versions.reverse();
+            candidates.extend(versions);
+        }
+
+        // conda environments
+        candidates.push(format!("{home}/miniforge3/bin/python"));
+        candidates.push(format!("{home}/mambaforge/bin/python"));
+        candidates.push(format!("{home}/.local/bin/python3"));
+    }
+
+    // System-wide
+    candidates.push("/opt/homebrew/bin/python3".into());
+    candidates.push("/usr/local/bin/python3".into());
+    candidates.push("/usr/bin/python3".into());
+
+    candidates
+}
+
+/// Locate a Python 3 interpreter that has mlx_audio installed.
 fn find_python() -> AppResult<String> {
-    // 1. Try the shell PATH.
-    if let Ok(out) = Command::new("which").arg("python3").output() {
-        if out.status.success() {
-            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Ok(path);
-            }
+    for candidate in python_candidates() {
+        if std::path::Path::new(&candidate).exists() && python_has_mlx(&candidate) {
+            return Ok(candidate);
         }
     }
 
-    // 2. Fall back to well-known macOS locations.
-    for p in &["/opt/homebrew/bin/python3", "/usr/local/bin/python3"] {
-        if std::path::Path::new(p).exists() {
-            return Ok(p.to_string());
+    // Fallback: any working python3 (even without mlx_audio — will fail later
+    // with a clearer error from the daemon itself).
+    for candidate in python_candidates() {
+        if std::path::Path::new(&candidate).exists() {
+            return Ok(candidate);
         }
     }
 
