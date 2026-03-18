@@ -53,19 +53,15 @@ export default function SpriteAnimation({
     drawFrame(canvasRef.current, image, manifest, 0);
   }, [image, manifest]);
 
-  // Track whether we've ever played (to avoid wind-down on initial mount)
-  const hasPlayedRef = useRef(false);
-
-  // Animation loop — all state via refs to avoid stale closures
+  // Animation loop
   useEffect(() => {
     if (!image || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
     let frame = 0;
-    let lastTime = 0;
-    let running = false;
+    let lastTime = performance.now();
+    let running = true;
     let rafId = 0;
-    let windDownTimer: ReturnType<typeof setTimeout> | null = null;
     const intervalMs = timePerFrame * 1000;
 
     const tick = (timestamp: number) => {
@@ -78,25 +74,18 @@ export default function SpriteAnimation({
       rafId = requestAnimationFrame(tick);
     };
 
-    if (isPlaying) {
-      // Start animation
-      hasPlayedRef.current = true;
-      running = true;
-      lastTime = performance.now();
-      rafId = requestAnimationFrame(tick);
-    } else if (hasPlayedRef.current) {
-      // Wind-down: continue playing then stop after delay
-      running = true;
-      lastTime = performance.now();
-      rafId = requestAnimationFrame(tick);
+    // Always start the animation loop immediately
+    rafId = requestAnimationFrame(tick);
+
+    // If not playing, schedule stop after wind-down
+    let windDownTimer: ReturnType<typeof setTimeout> | null = null;
+    if (!isPlaying) {
       windDownTimer = setTimeout(() => {
         running = false;
         cancelAnimationFrame(rafId);
-        // Show first frame when stopped
         drawFrame(canvas, image, manifest, 0);
       }, windDownMs);
     }
-    // else: initial mount with isPlaying=false — just show first frame, no animation
 
     return () => {
       running = false;
