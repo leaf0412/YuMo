@@ -108,7 +108,7 @@ describe('Settings', () => {
     render(<Settings />);
     // These are default expanded panels
     expect(screen.getByText('音频设备')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('例如: CommandOrControl+Shift+Space')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('点击"录制"后按下快捷键')).toBeInTheDocument();
   });
 
   test('renders general settings section', async () => {

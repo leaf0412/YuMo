@@ -10,6 +10,11 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
   emit: vi.fn(),
 }));
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: vi.fn(() => ({
+    onFocusChanged: vi.fn(() => Promise.resolve(() => {})),
+  })),
+}));
 
 describe('App Shell', () => {
   test('renders sidebar with all navigation items', () => {
