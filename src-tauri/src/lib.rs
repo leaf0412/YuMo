@@ -32,14 +32,12 @@ pub fn run() {
     let models_dir = data_dir.join("models");
     std::fs::create_dir_all(&models_dir).expect("Cannot create models dir");
 
-    // Daemon script: for dev, copy from resources/ to data_dir if needed
+    // Always sync daemon script from source to data_dir (handles updates)
     let daemon_script = data_dir.join("mlx_funasr_daemon.py");
-    if !daemon_script.exists() {
-        let dev_script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/mlx_funasr_daemon.py");
-        if dev_script.exists() {
-            let _ = std::fs::copy(&dev_script, &daemon_script);
-        }
+    let dev_script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources/mlx_funasr_daemon.py");
+    if dev_script.exists() {
+        let _ = std::fs::copy(&dev_script, &daemon_script);
     }
     let daemon = daemon::DaemonManager::new(daemon_script, data_dir.clone());
 

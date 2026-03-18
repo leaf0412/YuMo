@@ -198,13 +198,12 @@ impl DaemonManager {
         };
 
         if let Some(mut proc) = guard.take() {
-            let quit = serde_json::json!({"action": "quit"});
-            // Best-effort: ignore send errors during shutdown.
-            let _ = proc.send_command(&quit);
+            // Send quit without reading response (avoids blocking on read_line)
+            let _ = proc.stdin.write_all(b"{\"action\":\"quit\"}\n");
+            let _ = proc.stdin.flush();
+            drop(proc.stdin); // close stdin to signal EOF
 
             // Give it up to 2 s to exit cleanly.
-            let pid = proc._child.id();
-            drop(proc.stdin); // close stdin to signal EOF
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
             loop {
                 match proc._child.try_wait() {
@@ -217,7 +216,6 @@ impl DaemonManager {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
-            let _ = pid;
         }
     }
 
