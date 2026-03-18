@@ -1,11 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { listen } from '@tauri-apps/api/event';
 import { invoke } from '../lib/logger';
 import {
   type PipelineState,
   PIPELINE_IDLE,
   PIPELINE_RECORDING,
-  EVENT_RECORDING_STATE,
   CMD_GET_PIPELINE_STATE,
   PIPELINE_LABELS,
   PIPELINE_COLORS,
@@ -53,18 +51,16 @@ export default function RecorderFloat() {
     setState(next);
   }, []);
 
-  // Listen to backend pipeline state events
+  // Poll pipeline state — cross-window events are unreliable in Tauri
   useEffect(() => {
-    // One-time initial state sync on mount
-    invoke<{ state: string }>(CMD_GET_PIPELINE_STATE)
-      .then((result) => applyState(parsePipelineState(result.state)))
-      .catch(() => { /* ignore */ });
-
-    const unlisten = listen<{ state: string }>(EVENT_RECORDING_STATE, (event) => {
-      applyState(parsePipelineState(event.payload.state));
-    });
-
-    return () => { unlisten.then((fn) => fn()); };
+    const poll = () => {
+      invoke<{ state: string }>(CMD_GET_PIPELINE_STATE)
+        .then((result) => applyState(parsePipelineState(result.state)))
+        .catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 500);
+    return () => clearInterval(id);
   }, [applyState]);
 
   // Timer — only runs while recording
