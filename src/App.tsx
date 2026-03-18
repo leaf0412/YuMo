@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from './lib/logger';
+import { broadcast } from './lib/broadcast';
 import Dashboard from './pages/Dashboard';
 import History from './pages/History';
 import Models from './pages/Models';
@@ -92,6 +93,8 @@ export default function App() {
     });
     const unlistenState = listen<{ state: string }>('recording-state', (event) => {
       pipelineRef.current = event.payload.state;
+      // Relay to all windows via BroadcastChannel
+      broadcast('pipeline-state', event.payload.state);
     });
     return () => {
       unlistenToggle.then((fn) => fn());

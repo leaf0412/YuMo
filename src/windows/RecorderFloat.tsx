@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { invoke } from '../lib/logger';
+import { onBroadcast } from '../lib/broadcast';
 import {
   type PipelineState,
   PIPELINE_IDLE,
@@ -51,16 +52,18 @@ export default function RecorderFloat() {
     setState(next);
   }, []);
 
-  // Poll pipeline state — cross-window events are unreliable in Tauri
+  // Sync state: initial query + BroadcastChannel from main window
   useEffect(() => {
-    const poll = () => {
-      invoke<{ state: string }>(CMD_GET_PIPELINE_STATE)
-        .then((result) => applyState(parsePipelineState(result.state)))
-        .catch(() => {});
-    };
-    poll();
-    const id = setInterval(poll, 500);
-    return () => clearInterval(id);
+    // One-time sync on mount
+    invoke<{ state: string }>(CMD_GET_PIPELINE_STATE)
+      .then((result) => applyState(parsePipelineState(result.state)))
+      .catch(() => {});
+
+    // Listen for state changes broadcast from main window
+    const cleanup = onBroadcast('pipeline-state', (payload) => {
+      applyState(parsePipelineState(payload as string));
+    });
+    return cleanup;
   }, [applyState]);
 
   // Timer — only runs while recording
