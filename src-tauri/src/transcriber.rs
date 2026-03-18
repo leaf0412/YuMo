@@ -1,20 +1,68 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// ---------------------------------------------------------------------------
+// Model Provider — all supported transcription backends
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ModelProvider {
     Local,
+    MlxWhisper,
     MlxFunASR,
+    Groq,
+    Deepgram,
+    ElevenLabs,
+    Mistral,
+    Gemini,
+    Soniox,
 }
+
+impl ModelProvider {
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Local | Self::MlxWhisper | Self::MlxFunASR)
+    }
+
+    pub fn is_cloud(&self) -> bool {
+        matches!(
+            self,
+            Self::Groq | Self::Deepgram | Self::ElevenLabs | Self::Mistral | Self::Gemini | Self::Soniox
+        )
+    }
+
+    pub fn needs_daemon(&self) -> bool {
+        matches!(self, Self::MlxWhisper | Self::MlxFunASR)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Model Filter — for UI filtering
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelFilter {
+    Recommended,
+    Local,
+    Cloud,
+}
+
+// ---------------------------------------------------------------------------
+// Model Info — unified model descriptor
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
     pub name: String,
     pub size_mb: u32,
+    /// Language code → display name, e.g. {"en": "English", "zh": "中文"}
+    pub supported_languages: HashMap<String, String>,
+    /// Kept for backward compat with frontend; derived from supported_languages keys
     pub languages: Vec<String>,
     pub download_url: String,
     pub is_downloaded: bool,
@@ -23,6 +71,12 @@ pub struct ModelInfo {
     pub model_repo: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Speed rating 1-10 (10 = fastest)
+    pub speed: u8,
+    /// Accuracy rating 1-10 (10 = best)
+    pub accuracy: u8,
+    /// Whether this model shows in the "Recommended" filter
+    pub is_recommended: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,157 +85,188 @@ pub struct TranscriptionResult {
     pub duration_ms: u64,
 }
 
-pub fn predefined_models() -> Vec<ModelInfo> {
+// ---------------------------------------------------------------------------
+// Language maps
+// ---------------------------------------------------------------------------
+
+fn english_only() -> HashMap<String, String> {
+    HashMap::from([("en".into(), "English".into())])
+}
+
+fn multilingual() -> HashMap<String, String> {
+    HashMap::from([
+        ("en".into(), "English".into()),
+        ("zh".into(), "中文".into()),
+        ("ja".into(), "日本語".into()),
+        ("ko".into(), "한국어".into()),
+        ("fr".into(), "Français".into()),
+        ("de".into(), "Deutsch".into()),
+        ("es".into(), "Español".into()),
+        ("ru".into(), "Русский".into()),
+        ("pt".into(), "Português".into()),
+        ("it".into(), "Italiano".into()),
+    ])
+}
+
+fn langs_to_vec(map: &HashMap<String, String>) -> Vec<String> {
+    if map.len() > 1 { vec!["multi".into()] } else { map.keys().cloned().collect() }
+}
+
+// ---------------------------------------------------------------------------
+// Helper to build a ModelInfo
+// ---------------------------------------------------------------------------
+
+struct M {
+    id: &'static str,
+    name: &'static str,
+    size_mb: u32,
+    langs: HashMap<String, String>,
+    url: &'static str,
+    provider: ModelProvider,
+    repo: Option<&'static str>,
+    desc: Option<&'static str>,
+    speed: u8,
+    accuracy: u8,
+    recommended: bool,
+}
+
+impl M {
+    fn build(self) -> ModelInfo {
+        let languages = langs_to_vec(&self.langs);
+        ModelInfo {
+            id: self.id.into(),
+            name: self.name.into(),
+            size_mb: self.size_mb,
+            supported_languages: self.langs,
+            languages,
+            download_url: self.url.into(),
+            is_downloaded: false,
+            provider: self.provider,
+            model_repo: self.repo.map(Into::into),
+            description: self.desc.map(Into::into),
+            speed: self.speed,
+            accuracy: self.accuracy,
+            is_recommended: self.recommended,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// All predefined models (single source of truth)
+// ---------------------------------------------------------------------------
+
+pub fn all_predefined_models() -> Vec<ModelInfo> {
     vec![
-        ModelInfo {
-            id: "ggml-tiny.en".into(),
-            name: "Tiny (English)".into(),
-            size_mb: 75,
-            languages: vec!["en".into()],
-            download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin".into(),
-            is_downloaded: false,
-            provider: ModelProvider::Local,
-            model_repo: None,
-            description: None,
-        },
-        ModelInfo {
-            id: "ggml-tiny".into(),
-            name: "Tiny (Multilingual)".into(),
-            size_mb: 75,
-            languages: vec!["multi".into()],
-            download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin".into(),
-            is_downloaded: false,
-            provider: ModelProvider::Local,
-            model_repo: None,
-            description: None,
-        },
-        ModelInfo {
-            id: "ggml-base.en".into(),
-            name: "Base (English)".into(),
-            size_mb: 142,
-            languages: vec!["en".into()],
-            download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin".into(),
-            is_downloaded: false,
-            provider: ModelProvider::Local,
-            model_repo: None,
-            description: None,
-        },
-        ModelInfo {
-            id: "ggml-base".into(),
-            name: "Base (Multilingual)".into(),
-            size_mb: 142,
-            languages: vec!["multi".into()],
-            download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin".into(),
-            is_downloaded: false,
-            provider: ModelProvider::Local,
-            model_repo: None,
-            description: None,
-        },
-        ModelInfo {
-            id: "ggml-small.en".into(),
-            name: "Small (English)".into(),
-            size_mb: 466,
-            languages: vec!["en".into()],
-            download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin".into(),
-            is_downloaded: false,
-            provider: ModelProvider::Local,
-            model_repo: None,
-            description: None,
-        },
-        ModelInfo {
-            id: "ggml-small".into(),
-            name: "Small (Multilingual)".into(),
-            size_mb: 466,
-            languages: vec!["multi".into()],
-            download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin".into(),
-            is_downloaded: false,
-            provider: ModelProvider::Local,
-            model_repo: None,
-            description: None,
-        },
-        ModelInfo {
-            id: "ggml-medium.en".into(),
-            name: "Medium (English)".into(),
-            size_mb: 1457,
-            languages: vec!["en".into()],
-            download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin".into(),
-            is_downloaded: false,
-            provider: ModelProvider::Local,
-            model_repo: None,
-            description: None,
-        },
-        ModelInfo {
-            id: "ggml-medium".into(),
-            name: "Medium (Multilingual)".into(),
-            size_mb: 1457,
-            languages: vec!["multi".into()],
-            download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin".into(),
-            is_downloaded: false,
-            provider: ModelProvider::Local,
-            model_repo: None,
-            description: None,
-        },
-        ModelInfo {
-            id: "ggml-large-v3".into(),
-            name: "Large v3 (Multilingual)".into(),
-            size_mb: 2952,
-            languages: vec!["multi".into()],
-            download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin".into(),
-            is_downloaded: false,
-            provider: ModelProvider::Local,
-            model_repo: None,
-            description: None,
-        },
+        // ---- Local Whisper (ggml) ----
+        M { id: "ggml-tiny.en", name: "Tiny (English)", size_mb: 75, langs: english_only(),
+            url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+            provider: ModelProvider::Local, repo: None, desc: Some("Fastest, lowest accuracy"),
+            speed: 10, accuracy: 3, recommended: false }.build(),
+        M { id: "ggml-tiny", name: "Tiny (Multilingual)", size_mb: 75, langs: multilingual(),
+            url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+            provider: ModelProvider::Local, repo: None, desc: Some("Fastest multilingual"),
+            speed: 10, accuracy: 3, recommended: false }.build(),
+        M { id: "ggml-base.en", name: "Base (English)", size_mb: 142, langs: english_only(),
+            url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+            provider: ModelProvider::Local, repo: None, desc: Some("Good balance for English"),
+            speed: 8, accuracy: 5, recommended: true }.build(),
+        M { id: "ggml-base", name: "Base (Multilingual)", size_mb: 142, langs: multilingual(),
+            url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+            provider: ModelProvider::Local, repo: None, desc: Some("Good balance, multilingual"),
+            speed: 8, accuracy: 5, recommended: false }.build(),
+        M { id: "ggml-small.en", name: "Small (English)", size_mb: 466, langs: english_only(),
+            url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
+            provider: ModelProvider::Local, repo: None, desc: Some("Higher accuracy English"),
+            speed: 6, accuracy: 7, recommended: false }.build(),
+        M { id: "ggml-small", name: "Small (Multilingual)", size_mb: 466, langs: multilingual(),
+            url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+            provider: ModelProvider::Local, repo: None, desc: Some("Higher accuracy, multilingual"),
+            speed: 6, accuracy: 7, recommended: false }.build(),
+        M { id: "ggml-medium.en", name: "Medium (English)", size_mb: 1457, langs: english_only(),
+            url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin",
+            provider: ModelProvider::Local, repo: None, desc: Some("High accuracy English"),
+            speed: 4, accuracy: 8, recommended: false }.build(),
+        M { id: "ggml-medium", name: "Medium (Multilingual)", size_mb: 1457, langs: multilingual(),
+            url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
+            provider: ModelProvider::Local, repo: None, desc: Some("High accuracy, multilingual"),
+            speed: 4, accuracy: 8, recommended: false }.build(),
+        M { id: "ggml-large-v3", name: "Large v3 (Multilingual)", size_mb: 2952, langs: multilingual(),
+            url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
+            provider: ModelProvider::Local, repo: None, desc: Some("Best accuracy, slowest"),
+            speed: 2, accuracy: 10, recommended: true }.build(),
+
+        // ---- MLX Whisper (GPU accelerated) ----
+        M { id: "mlx-whisper-large-v3", name: "MLX Whisper Large v3", size_mb: 3000, langs: multilingual(),
+            url: "", provider: ModelProvider::MlxWhisper,
+            repo: Some("mlx-community/whisper-large-v3-mlx"),
+            desc: Some("GPU accelerated, best quality"), speed: 5, accuracy: 10, recommended: true }.build(),
+        M { id: "mlx-whisper-distil-large-v3", name: "MLX Whisper Distil Large v3", size_mb: 1500, langs: multilingual(),
+            url: "", provider: ModelProvider::MlxWhisper,
+            repo: Some("mlx-community/distil-whisper-large-v3"),
+            desc: Some("GPU accelerated, fast + accurate"), speed: 7, accuracy: 9, recommended: true }.build(),
+        M { id: "mlx-whisper-small", name: "MLX Whisper Small", size_mb: 500, langs: multilingual(),
+            url: "", provider: ModelProvider::MlxWhisper,
+            repo: Some("mlx-community/whisper-small-mlx"),
+            desc: Some("GPU accelerated, lightweight"), speed: 8, accuracy: 6, recommended: false }.build(),
+
+        // ---- MLX FunASR ----
+        M { id: "mlx-funasr-nano-8bit", name: "MLX Fun-ASR Nano (8-bit)", size_mb: 2000, langs: multilingual(),
+            url: "", provider: ModelProvider::MlxFunASR,
+            repo: Some("mlx-community/Fun-ASR-MLT-Nano-2512-8bit"),
+            desc: Some("8-bit quantized, fast inference"), speed: 9, accuracy: 7, recommended: true }.build(),
+        M { id: "mlx-funasr-nano-bf16", name: "MLX Fun-ASR Nano (BF16)", size_mb: 4000, langs: multilingual(),
+            url: "", provider: ModelProvider::MlxFunASR,
+            repo: Some("mlx-community/Fun-ASR-MLT-Nano-2512-bf16"),
+            desc: Some("BF16 precision, higher quality"), speed: 7, accuracy: 8, recommended: false }.build(),
+        M { id: "mlx-qwen3-asr-0.6b-bf16", name: "Qwen3-ASR 0.6B (BF16)", size_mb: 1200, langs: multilingual(),
+            url: "", provider: ModelProvider::MlxFunASR,
+            repo: Some("mlx-community/Qwen3-ASR-0.6B-bf16"),
+            desc: Some("Qwen3 architecture, 30+ languages"), speed: 8, accuracy: 8, recommended: false }.build(),
+        M { id: "mlx-qwen3-asr-0.6b-8bit", name: "Qwen3-ASR 0.6B (8-bit)", size_mb: 700, langs: multilingual(),
+            url: "", provider: ModelProvider::MlxFunASR,
+            repo: Some("mlx-community/Qwen3-ASR-0.6B-8bit"),
+            desc: Some("Qwen3 quantized, fast"), speed: 9, accuracy: 7, recommended: false }.build(),
+
+        // ---- Cloud models ----
+        M { id: "groq-whisper-large-v3", name: "Groq Whisper Large v3", size_mb: 0, langs: multilingual(),
+            url: "", provider: ModelProvider::Groq, repo: None,
+            desc: Some("Ultra-fast cloud transcription via Groq"), speed: 10, accuracy: 9, recommended: true }.build(),
+        M { id: "deepgram-nova-2", name: "Deepgram Nova-2", size_mb: 0, langs: multilingual(),
+            url: "", provider: ModelProvider::Deepgram, repo: None,
+            desc: Some("Enterprise-grade speech-to-text"), speed: 9, accuracy: 9, recommended: false }.build(),
+        M { id: "elevenlabs-scribe", name: "ElevenLabs Scribe", size_mb: 0, langs: multilingual(),
+            url: "", provider: ModelProvider::ElevenLabs, repo: None,
+            desc: Some("High quality transcription"), speed: 8, accuracy: 9, recommended: false }.build(),
+        M { id: "mistral-asr", name: "Mistral ASR", size_mb: 0, langs: multilingual(),
+            url: "", provider: ModelProvider::Mistral, repo: None,
+            desc: Some("Mistral speech recognition"), speed: 8, accuracy: 8, recommended: false }.build(),
+        M { id: "gemini-asr", name: "Gemini ASR", size_mb: 0, langs: multilingual(),
+            url: "", provider: ModelProvider::Gemini, repo: None,
+            desc: Some("Google Gemini speech recognition"), speed: 8, accuracy: 9, recommended: false }.build(),
+        M { id: "soniox-asr", name: "Soniox ASR", size_mb: 0, langs: multilingual(),
+            url: "", provider: ModelProvider::Soniox, repo: None,
+            desc: Some("Real-time speech recognition"), speed: 9, accuracy: 8, recommended: false }.build(),
     ]
 }
 
+// ---------------------------------------------------------------------------
+// Backward-compatible accessors
+// ---------------------------------------------------------------------------
+
+/// Local whisper models only (backward compat).
+pub fn predefined_models() -> Vec<ModelInfo> {
+    all_predefined_models()
+        .into_iter()
+        .filter(|m| matches!(m.provider, ModelProvider::Local))
+        .collect()
+}
+
+/// MLX FunASR models only (backward compat).
 pub fn predefined_mlx_models() -> Vec<ModelInfo> {
-    vec![
-        ModelInfo {
-            id: "mlx-funasr-nano-8bit".into(),
-            name: "MLX Fun-ASR Nano (8-bit)".into(),
-            size_mb: 2000,
-            languages: vec!["multi".into()],
-            download_url: String::new(),
-            is_downloaded: false,
-            provider: ModelProvider::MlxFunASR,
-            model_repo: Some("mlx-community/Fun-ASR-MLT-Nano-2512-8bit".into()),
-            description: Some("8-bit quantized, fast inference".into()),
-        },
-        ModelInfo {
-            id: "mlx-funasr-nano-bf16".into(),
-            name: "MLX Fun-ASR Nano (BF16)".into(),
-            size_mb: 4000,
-            languages: vec!["multi".into()],
-            download_url: String::new(),
-            is_downloaded: false,
-            provider: ModelProvider::MlxFunASR,
-            model_repo: Some("mlx-community/Fun-ASR-MLT-Nano-2512-bf16".into()),
-            description: Some("BF16 precision, higher quality".into()),
-        },
-        ModelInfo {
-            id: "mlx-qwen3-asr-0.6b-bf16".into(),
-            name: "Qwen3-ASR 0.6B (BF16)".into(),
-            size_mb: 1200,
-            languages: vec!["multi".into()],
-            download_url: String::new(),
-            is_downloaded: false,
-            provider: ModelProvider::MlxFunASR,
-            model_repo: Some("mlx-community/Qwen3-ASR-0.6B-bf16".into()),
-            description: Some("Qwen3, 30+ languages".into()),
-        },
-        ModelInfo {
-            id: "mlx-qwen3-asr-0.6b-8bit".into(),
-            name: "Qwen3-ASR 0.6B (8-bit)".into(),
-            size_mb: 700,
-            languages: vec!["multi".into()],
-            download_url: String::new(),
-            is_downloaded: false,
-            provider: ModelProvider::MlxFunASR,
-            model_repo: Some("mlx-community/Qwen3-ASR-0.6B-8bit".into()),
-            description: Some("Qwen3 quantized, fast".into()),
-        },
-    ]
+    all_predefined_models()
+        .into_iter()
+        .filter(|m| matches!(m.provider, ModelProvider::MlxFunASR))
+        .collect()
 }
 
 /// Check if an MLX model is available in the HuggingFace hub cache.
@@ -221,16 +306,27 @@ pub fn check_mlx_model_downloaded(model_repo: &str) -> bool {
 }
 
 pub fn all_models(models_dir: &Path) -> Vec<ModelInfo> {
-    let local_models = check_downloaded_models(models_dir);
+    let dirs = model_search_dirs(models_dir);
+    let mut models = all_predefined_models();
 
-    let mut mlx_models = predefined_mlx_models();
-    for model in &mut mlx_models {
-        if let Some(repo) = &model.model_repo {
-            model.is_downloaded = check_mlx_model_downloaded(repo);
+    for model in &mut models {
+        match model.provider {
+            ModelProvider::Local => {
+                model.is_downloaded = find_model_file(&dirs, &model.id);
+            }
+            ModelProvider::MlxWhisper | ModelProvider::MlxFunASR => {
+                if let Some(repo) = &model.model_repo {
+                    model.is_downloaded = check_mlx_model_downloaded(repo);
+                }
+            }
+            _ => {
+                // Cloud models: always "available" (no download needed)
+                model.is_downloaded = true;
+            }
         }
     }
 
-    local_models.into_iter().chain(mlx_models).collect()
+    models
 }
 
 /// Return the path for a model, preferring a file that already exists in any
