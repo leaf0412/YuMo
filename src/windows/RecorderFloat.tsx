@@ -1,81 +1,72 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '../lib/logger';
+import SpriteAnimation, { type SpriteManifest } from '../components/SpriteAnimation';
 
-interface AudioLevel {
-  average: number;
-  peak: number;
-}
-
-type RecordingState = 'recording' | 'transcribing' | 'enhancing' | 'pasting';
+type PipelineState = 'recording' | 'transcribing' | 'enhancing' | 'pasting' | 'idle';
 
 export default function RecorderFloat() {
-  const [state, setState] = useState<RecordingState>('recording');
+  const [state, setState] = useState<PipelineState>('idle');
   const [duration, setDuration] = useState(0);
-  const [audioLevel, setAudioLevel] = useState<AudioLevel>({ average: 0, peak: 0 });
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const timerRef = useRef<number | null>(null);
-  const levelsRef = useRef<number[]>([]);
+
+  // Sprite
+  const [spriteManifest, setSpriteManifest] = useState<SpriteManifest | null>(null);
+  const [spriteImageSrc, setSpriteImageSrc] = useState<string | null>(null);
+
+  const loadSprite = useCallback(async () => {
+    try {
+      const sprites = await invoke<(SpriteManifest & { dirId: string })[]>('list_sprites');
+      if (sprites.length === 0) return;
+      const first = sprites[0];
+      setSpriteManifest(first);
+      try {
+        const uri = await invoke<string>('get_sprite_image', { dirId: first.dirId, fileName: 'sprite_processed.png' });
+        setSpriteImageSrc(uri);
+      } catch {
+        const uri = await invoke<string>('get_sprite_image', { dirId: first.dirId, fileName: first.spriteFile });
+        setSpriteImageSrc(uri);
+      }
+    } catch { /* no sprites */ }
+  }, []);
+
+  useEffect(() => { loadSprite(); }, [loadSprite]);
 
   // Listen for state changes
   useEffect(() => {
     const unlisten = listen<{ state: string }>('recording-state', (e) => {
-      setState(e.payload.state as RecordingState);
+      const s = e.payload.state as PipelineState;
+      setState(s);
+
+      // Reset timer when a new recording starts
+      if (s === 'recording') {
+        setDuration(0);
+      }
     });
     return () => { unlisten.then(fn => fn()); };
   }, []);
 
-  // Listen for audio levels
+  // Timer — only runs while state === 'recording'
   useEffect(() => {
-    const unlisten = listen<AudioLevel>('audio-level', (e) => {
-      setAudioLevel(e.payload);
-      levelsRef.current.push(e.payload.average);
-      if (levelsRef.current.length > 50) levelsRef.current.shift();
-    });
-    return () => { unlisten.then(fn => fn()); };
-  }, []);
+    // Always clear any existing timer first
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
 
-  // Timer
-  useEffect(() => {
     if (state === 'recording') {
-      setDuration(0);
       timerRef.current = window.setInterval(() => {
         setDuration(d => d + 1);
       }, 1000);
-    } else if (timerRef.current) {
-      clearInterval(timerRef.current);
     }
+
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     };
   }, [state]);
-
-  // Draw waveform
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const draw = () => {
-      const { width, height } = canvas;
-      ctx.clearRect(0, 0, width, height);
-
-      const levels = levelsRef.current;
-      const barWidth = width / 50;
-
-      ctx.fillStyle = '#1890ff';
-      levels.forEach((level, i) => {
-        const barHeight = Math.max(2, level * height * 3);
-        const x = i * barWidth;
-        const y = (height - barHeight) / 2;
-        ctx.fillRect(x, y, barWidth - 1, barHeight);
-      });
-
-      requestAnimationFrame(draw);
-    };
-    const id = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(id);
-  }, []);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -90,48 +81,72 @@ export default function RecorderFloat() {
     pasting: '粘贴中...',
   };
 
+  const hasSprite = spriteManifest && spriteImageSrc;
+  const isRecording = state === 'recording';
+
+  // Don't render anything when idle (window is hidden anyway)
+  if (state === 'idle') return null;
+
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 12,
-      padding: '8px 16px',
-      background: 'rgba(0,0,0,0.85)',
-      borderRadius: 40,
-      color: '#fff',
-      fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-      fontSize: 13,
-      userSelect: 'none',
-      WebkitAppRegion: 'drag' as never,
-    }}>
-      {/* Red dot indicator */}
-      <div style={{
-        width: 10,
-        height: 10,
-        borderRadius: '50%',
-        background: state === 'recording' ? '#ff4d4f' : '#1890ff',
-        animation: state === 'recording' ? 'pulse 1.5s infinite' : 'none',
-      }} />
-
-      {/* Status text */}
-      <span>{stateLabel[state] || state}</span>
-
-      {/* Waveform canvas */}
-      {state === 'recording' && (
-        <canvas
-          ref={canvasRef}
-          width={150}
-          height={30}
-          style={{ display: 'block' }}
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '100%',
+        height: '100%',
+        userSelect: 'none',
+        WebkitAppRegion: 'drag' as never,
+      }}
+    >
+      {hasSprite ? (
+        <SpriteAnimation
+          manifest={spriteManifest}
+          imageSrc={spriteImageSrc}
+          isPlaying={isRecording}
+          width={160}
+          height={160}
         />
+      ) : (
+        <div style={{
+          width: 80,
+          height: 80,
+          borderRadius: '50%',
+          background: isRecording ? '#ff4d4f' : '#1890ff',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          animation: isRecording ? 'pulse 1.5s infinite' : 'none',
+        }}>
+          <span style={{ fontSize: 32, color: '#fff' }}>🎙</span>
+        </div>
       )}
 
-      {/* Timer */}
-      {state === 'recording' && (
-        <span style={{ fontVariantNumeric: 'tabular-nums', minWidth: 36 }}>
-          {formatTime(duration)}
-        </span>
-      )}
+      <div style={{
+        marginTop: 4,
+        padding: '2px 12px',
+        borderRadius: 12,
+        background: 'rgba(0,0,0,0.7)',
+        color: '#fff',
+        fontSize: 12,
+        fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+      }}>
+        <div style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: isRecording ? '#ff4d4f' : '#1890ff',
+          animation: isRecording ? 'pulse 1.5s infinite' : 'none',
+        }} />
+        <span>{stateLabel[state] || state}</span>
+        {isRecording && (
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(duration)}</span>
+        )}
+      </div>
 
       <style>{`
         @keyframes pulse {

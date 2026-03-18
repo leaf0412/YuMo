@@ -1,28 +1,18 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Card, Alert, Button, Flex, Space, Tag, Typography, Row, Col, message } from 'antd';
 import {
   AudioOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined,
   SoundOutlined,
-  ApiOutlined,
   SettingOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
-import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke, formatError } from '../lib/logger';
+import SpriteAnimation, { type SpriteManifest } from '../components/SpriteAnimation';
 
 const { Title, Text, Paragraph } = Typography;
-
-/** Extract a readable message from Tauri invoke errors (serialized AppError enum). */
-function formatError(e: unknown, fallback: string): string {
-  if (typeof e === 'string') return e;
-  if (e && typeof e === 'object') {
-    // AppError serializes as { "Recording": "message" } or similar
-    const vals = Object.values(e as Record<string, unknown>);
-    if (vals.length > 0 && typeof vals[0] === 'string') return vals[0] as string;
-  }
-  return fallback;
-}
 
 interface Permissions {
   microphone: boolean;
@@ -49,42 +39,96 @@ export default function Dashboard() {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [transcriptions, setTranscriptions] = useState<Transcription[]>([]);
   const [recording, setRecording] = useState(false);
+  const [pipelineState, setPipelineState] = useState<string>('idle');
+
+  // Sprite animation state
+  const [spriteManifest, setSpriteManifest] = useState<SpriteManifest | null>(null);
+  const [spriteImageSrc, setSpriteImageSrc] = useState<string | null>(null);
+
+  // Permission polling state: active after user clicks "go to settings"
+  const permPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [refreshingPerm, setRefreshingPerm] = useState(false);
+
+  const loadPermissions = useCallback(async () => {
+    try {
+      const perms = await invoke<Permissions>('check_permissions');
+      setPermissions(perms);
+      return perms;
+    } catch { return null; }
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
       const perms = await invoke<Permissions>('check_permissions');
       setPermissions(perms);
-    } catch { /* ignore */ }
+    } catch { /* logged automatically */ }
 
     try {
       const m = await invoke<ModelInfo[]>('list_available_models');
       setModels(m);
-    } catch { /* ignore */ }
+    } catch { /* logged */ }
 
     try {
       const settings = await invoke<Record<string, unknown>>('get_settings');
       const mid = settings?.selected_model_id;
       setSelectedModelId(typeof mid === 'string' ? mid : null);
-    } catch { /* ignore */ }
+    } catch { /* logged */ }
 
     try {
       const result = await invoke<{ items: Transcription[], next_cursor: string | null }>('get_transcriptions', { limit: 5 });
       setTranscriptions(result.items || []);
-    } catch { /* ignore */ }
+    } catch { /* logged */ }
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  // Load first available sprite
+  const loadSprite = useCallback(async () => {
+    try {
+      const sprites = await invoke<(SpriteManifest & { dirId: string })[]>('list_sprites');
+      if (sprites.length === 0) return;
+      const first = sprites[0];
+      setSpriteManifest(first);
+      // Prefer processed image, fallback to original
+      const fileName = 'sprite_processed.png';
+      try {
+        const dataUri = await invoke<string>('get_sprite_image', { dirId: first.dirId, fileName });
+        setSpriteImageSrc(dataUri);
+      } catch {
+        const dataUri = await invoke<string>('get_sprite_image', { dirId: first.dirId, fileName: first.spriteFile });
+        setSpriteImageSrc(dataUri);
+      }
+    } catch { /* no sprites available */ }
+  }, []);
 
-  // Listen to recording state changes from backend
+  useEffect(() => { loadData(); loadSprite(); }, [loadData, loadSprite]);
+
+  // 1. Window focus: refresh permissions when app regains focus
+  useEffect(() => {
+    const unlisten = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+      if (focused) loadPermissions();
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [loadPermissions]);
+
+  // 2. Short-term polling: cleanup on unmount or when all permissions granted
+  useEffect(() => {
+    if (permissions.microphone && permissions.accessibility && permPollRef.current) {
+      clearInterval(permPollRef.current);
+      permPollRef.current = null;
+    }
+    return () => {
+      if (permPollRef.current) {
+        clearInterval(permPollRef.current);
+        permPollRef.current = null;
+      }
+    };
+  }, [permissions.microphone, permissions.accessibility]);
+
   useEffect(() => {
     const unlisten = listen<{ state: string }>('recording-state', (event) => {
       const s = event.payload.state;
+      setPipelineState(s);
       setRecording(s === 'recording');
-      if (s === 'idle') {
-        loadData(); // refresh permissions & transcriptions
-      }
+      if (s === 'idle') loadData();
     });
     return () => { unlisten.then((fn) => fn()); };
   }, [loadData]);
@@ -112,11 +156,36 @@ export default function Dashboard() {
     }
   };
 
+  // 2. Start short-term polling after opening system settings
   const openSettings = async (permissionType: string) => {
     try {
       await invoke('request_permission', { permissionType });
     } catch {
       message.error('无法打开系统设置');
+      return;
+    }
+    // Start 1s polling until permission granted (auto-stops via effect above)
+    if (!permPollRef.current) {
+      permPollRef.current = setInterval(() => loadPermissions(), 1000);
+    }
+  };
+
+  // 3. Manual refresh button handler
+  const handleRefreshPermissions = async () => {
+    setRefreshingPerm(true);
+    await loadPermissions();
+    setTimeout(() => setRefreshingPerm(false), 500);
+  };
+
+  const hasSprite = spriteManifest && spriteImageSrc;
+
+  const statusText = () => {
+    switch (pipelineState) {
+      case 'recording': return '录音中...';
+      case 'transcribing': return '转录中...';
+      case 'enhancing': return 'AI 增强中...';
+      case 'pasting': return '粘贴中...';
+      default: return '点击开始录音';
     }
   };
 
@@ -126,90 +195,66 @@ export default function Dashboard() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} md={8}>
-          <Card title="麦克风权限" size="small">
+          <Card title="麦克风权限" size="small" extra={
+            <ReloadOutlined spin={refreshingPerm} onClick={handleRefreshPermissions} style={{ cursor: 'pointer' }} />
+          }>
             {permissions.microphone ? (
-              <Alert
-                message="已授权"
-                type="success"
-                showIcon
-                icon={<CheckCircleOutlined />}
-              />
+              <Alert message="已授权" type="success" showIcon icon={<CheckCircleOutlined />} />
             ) : (
               <Flex vertical gap={8}>
-                <Alert
-                  message="待授权"
-                  description="首次录音时系统会弹出授权弹窗，或前往设置手动开启"
-                  type="warning"
-                  showIcon
-                />
-                <Button
-                  size="small"
-                  icon={<SettingOutlined />}
-                  onClick={() => openSettings('microphone')}
-                >
-                  前往系统设置
-                </Button>
+                <Alert message="待授权" description="首次录音时系统会弹出授权弹窗，或前往设置手动开启" type="warning" showIcon />
+                <Button size="small" icon={<SettingOutlined />} onClick={() => openSettings('microphone')}>前往系统设置</Button>
               </Flex>
             )}
           </Card>
         </Col>
-
         <Col xs={24} sm={12} md={8}>
-          <Card title="辅助功能权限" size="small">
+          <Card title="辅助功能权限" size="small" extra={
+            <ReloadOutlined spin={refreshingPerm} onClick={handleRefreshPermissions} style={{ cursor: 'pointer' }} />
+          }>
             {permissions.accessibility ? (
-              <Alert
-                message="已授权"
-                type="success"
-                showIcon
-                icon={<CheckCircleOutlined />}
-              />
+              <Alert message="已授权" type="success" showIcon icon={<CheckCircleOutlined />} />
             ) : (
               <Flex vertical gap={8}>
-                <Alert
-                  message="待授权"
-                  description="需要辅助功能权限才能自动粘贴，前往设置添加本应用"
-                  type="warning"
-                  showIcon
-                />
-                <Button
-                  size="small"
-                  icon={<SettingOutlined />}
-                  onClick={() => openSettings('accessibility')}
-                >
-                  前往系统设置
-                </Button>
+                <Alert message="待授权" description="需要辅助功能权限才能自动粘贴，前往设置添加本应用" type="warning" showIcon />
+                <Button size="small" icon={<SettingOutlined />} onClick={() => openSettings('accessibility')}>前往系统设置</Button>
               </Flex>
             )}
           </Card>
         </Col>
-
         <Col xs={24} sm={12} md={8}>
           <Card title="当前模型" size="small">
             {selectedModel ? (
-              <Space>
-                <ApiOutlined />
-                <Text strong>{selectedModel.name}</Text>
-              </Space>
+              <Space><Text strong>{selectedModel.name}</Text></Space>
             ) : (
-              <Alert title="未选择模型" type="warning" showIcon />
+              <Alert message="未选择模型" type="warning" showIcon />
             )}
           </Card>
         </Col>
       </Row>
 
-      <div style={{ textAlign: 'center', padding: '24px 0' }}>
-        <Button
-          type="primary"
-          shape="circle"
-          size="large"
-          danger={recording}
-          icon={recording ? <SoundOutlined /> : <AudioOutlined />}
-          onClick={handleRecord}
-          style={{ width: 80, height: 80, fontSize: 32 }}
-          aria-label={recording ? '停止录音' : '开始录音'}
-        />
+      {/* Recording area with sprite animation */}
+      <div style={{ textAlign: 'center', padding: '24px 0', position: 'relative' }}>
+        {hasSprite ? (
+          <div style={{ cursor: 'pointer', display: 'inline-block' }} onClick={handleRecord}>
+            <SpriteAnimation
+              manifest={spriteManifest}
+              imageSrc={spriteImageSrc}
+              isPlaying={recording}
+              width={160}
+              height={160}
+            />
+          </div>
+        ) : (
+          <Button type="primary" shape="circle" size="large" danger={recording}
+            icon={recording ? <SoundOutlined /> : <AudioOutlined />}
+            onClick={handleRecord} style={{ width: 80, height: 80, fontSize: 32 }}
+            aria-label={recording ? '停止录音' : '开始录音'}
+          />
+        )}
         <Paragraph style={{ marginTop: 8 }}>
-          {recording ? '录音中...' : '点击开始录音'}
+          {statusText()}
+          {pipelineState === 'transcribing' && <span className="loading-dots"> ...</span>}
         </Paragraph>
       </div>
 
