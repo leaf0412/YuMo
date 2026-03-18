@@ -125,6 +125,19 @@ impl WindowManager {
             .unwrap_or(false);
 
         let _ = win.hide();
+
+        // Force NSWindow orderOut on macOS for transparent windows
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(raw) = win.ns_window() {
+                use objc::{msg_send, sel, sel_impl};
+                let ptr = raw as cocoa::base::id;
+                unsafe {
+                    let _: () = msg_send![ptr, orderOut: cocoa::base::nil];
+                }
+            }
+        }
+
         info!("[wm] '{}' hidden", label);
 
         // If main window wasn't visible before, hide the app to prevent
