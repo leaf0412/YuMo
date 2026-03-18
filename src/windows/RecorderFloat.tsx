@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { invoke } from '../lib/logger';
 import { onBroadcast } from '../lib/broadcast';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   type PipelineState,
   PIPELINE_IDLE,
@@ -98,18 +97,7 @@ export default function RecorderFloat() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Window dragging — attach at document level
-  useEffect(() => {
-    const onMouseDown = (e: MouseEvent) => {
-      if ((e.target as HTMLElement)?.closest?.('[data-cancel]')) return;
-      invoke('frontend_log', { level: 'info', message: '[recorder] mousedown -> startDragging' });
-      getCurrentWindow().startDragging().catch((err) => {
-        invoke('frontend_log', { level: 'error', message: `[recorder] startDragging failed: ${err}` });
-      });
-    };
-    document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
-  }, []);
+  // Dragging handled natively via NSWindow setMovableByWindowBackground
 
   const hasSprite = spriteManifest && spriteImageSrc;
   const isRecording = state === PIPELINE_RECORDING;
