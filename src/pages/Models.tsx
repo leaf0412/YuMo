@@ -28,7 +28,7 @@ interface ModelInfo {
   languages: string[];
   download_url: string;
   is_downloaded: boolean;
-  provider: 'local' | 'mlxFunASR';
+  provider: 'local' | 'mlxFunAsr';
   model_repo?: string;
   description?: string;
 }
@@ -195,13 +195,8 @@ export default function Models() {
     }
   };
 
-  const handleTestConnection = async () => {
-    try {
-      await invoke('test_cloud_connection');
-      message.success('连接成功');
-    } catch {
-      message.error('连接失败');
-    }
+  const handleTestConnection = () => {
+    message.info('云端连接测试暂未实现');
   };
 
   const handleDaemonStart = async () => {
@@ -254,7 +249,7 @@ export default function Models() {
   const isSelected = (modelId: string) => settings.selected_model_id === modelId;
 
   const localModels = models.filter(m => m.provider === 'local');
-  const mlxModels = models.filter(m => m.provider === 'mlxFunASR');
+  const mlxModels = models.filter(m => m.provider === 'mlxFunAsr');
 
   const localTabContent = (
     <>

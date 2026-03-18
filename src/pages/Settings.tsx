@@ -13,8 +13,9 @@ import { invoke } from '@tauri-apps/api/core';
 const { Text } = Typography;
 
 interface AudioDevice {
-  id: string;
+  id: number;
   name: string;
+  is_default: boolean;
 }
 
 interface AppSettings {
@@ -64,7 +65,7 @@ export default function Settings() {
 
   const updateSetting = async (key: string, value: unknown) => {
     try {
-      await invoke('update_setting', { key, value: String(value) });
+      await invoke('update_setting', { key, value });
       setSettings((prev) => ({ ...prev, [key]: value }));
     } catch {
       message.error('设置更新失败');
@@ -73,7 +74,7 @@ export default function Settings() {
 
   const handleRegisterHotkey = async () => {
     try {
-      await invoke('register_hotkey', { hotkey: hotkeyInput });
+      await invoke('register_hotkey', { shortcut: hotkeyInput });
       updateSetting('hotkey', hotkeyInput);
       message.success('快捷键已注册');
     } catch {

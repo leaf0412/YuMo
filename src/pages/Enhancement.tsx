@@ -12,12 +12,11 @@ const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
 
 interface Prompt {
-  id: number;
+  id: string;
   name: string;
   system_message: string;
-  user_template: string;
-  is_custom: boolean;
-  is_active: boolean;
+  user_message_template: string;
+  is_predefined: boolean;
 }
 
 interface Settings {
@@ -53,6 +52,7 @@ const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
 export default function Enhancement() {
   const [settings, setSettings] = useState<Settings>({});
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
@@ -60,8 +60,10 @@ export default function Enhancement() {
 
   const loadSettings = useCallback(async () => {
     try {
-      const result = await invoke<Settings>('get_settings');
-      setSettings(result);
+      const result = await invoke<Record<string, unknown>>('get_settings');
+      setSettings(result as unknown as Settings);
+      const pid = result?.selected_prompt_id;
+      setSelectedPromptId(typeof pid === 'string' ? pid : null);
     } catch { /* ignore */ }
   }, []);
 
@@ -92,7 +94,7 @@ export default function Enhancement() {
 
   const updateSetting = async (key: string, value: unknown) => {
     try {
-      await invoke('update_setting', { key, value: String(value) });
+      await invoke('update_setting', { key, value });
       setSettings((prev) => ({ ...prev, [key]: value }));
     } catch {
       message.error('设置更新失败');
@@ -111,7 +113,7 @@ export default function Enhancement() {
     }
   };
 
-  const handleSelectPrompt = async (id: number) => {
+  const handleSelectPrompt = async (id: string) => {
     try {
       await invoke('select_prompt', { id });
       message.success('已切换 Prompt');
@@ -121,7 +123,7 @@ export default function Enhancement() {
     }
   };
 
-  const handleDeletePrompt = async (id: number) => {
+  const handleDeletePrompt = async (id: string) => {
     try {
       await invoke('delete_prompt', { id });
       message.success('已删除');
@@ -141,8 +143,8 @@ export default function Enhancement() {
     setEditingPrompt(prompt);
     form.setFieldsValue({
       name: prompt.name,
-      system_message: prompt.system_message,
-      user_template: prompt.user_template,
+      systemMsg: prompt.system_message,
+      userMsg: prompt.user_message_template,
     });
     setModalOpen(true);
   };
@@ -151,10 +153,19 @@ export default function Enhancement() {
     try {
       const values = await form.validateFields();
       if (editingPrompt) {
-        await invoke('update_prompt', { id: editingPrompt.id, ...values });
+        await invoke('update_prompt', {
+          id: editingPrompt.id,
+          name: values.name,
+          systemMsg: values.systemMsg,
+          userMsg: values.userMsg,
+        });
         message.success('已更新');
       } else {
-        await invoke('add_prompt', values);
+        await invoke('add_prompt', {
+          name: values.name,
+          systemMsg: values.systemMsg,
+          userMsg: values.userMsg,
+        });
         message.success('已创建');
       }
       setModalOpen(false);
@@ -256,23 +267,23 @@ export default function Enhancement() {
               <div style={{ flex: 1 }}>
                 <Space>
                   <Text>{prompt.name}</Text>
-                  {prompt.is_active && <Tag color="green" icon={<CheckCircleOutlined />}>当前</Tag>}
-                  {!prompt.is_custom && <Tag>内置</Tag>}
+                  {selectedPromptId === prompt.id && <Tag color="green" icon={<CheckCircleOutlined />}>当前</Tag>}
+                  {prompt.is_predefined && <Tag>内置</Tag>}
                 </Space>
                 <Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ marginBottom: 0, marginTop: 4 }}>
                   {prompt.system_message}
                 </Paragraph>
               </div>
               <Space>
-                {!prompt.is_active && (
+                {selectedPromptId !== prompt.id && (
                   <Button type="link" onClick={() => handleSelectPrompt(prompt.id)}>
                     使用
                   </Button>
                 )}
-                {prompt.is_custom && (
+                {!prompt.is_predefined && (
                   <Button type="text" icon={<EditOutlined />} onClick={() => openEditModal(prompt)} />
                 )}
-                {prompt.is_custom && (
+                {!prompt.is_predefined && (
                   <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDeletePrompt(prompt.id)} />
                 )}
               </Space>
@@ -298,14 +309,14 @@ export default function Enhancement() {
             <Input placeholder="Prompt 名称" />
           </Form.Item>
           <Form.Item
-            name="system_message"
+            name="systemMsg"
             label="系统消息"
             rules={[{ required: true, message: '请输入系统消息' }]}
           >
             <TextArea rows={4} placeholder="系统消息..." />
           </Form.Item>
           <Form.Item
-            name="user_template"
+            name="userMsg"
             label="用户消息模板"
             rules={[{ required: true, message: '请输入用户消息模板' }]}
           >

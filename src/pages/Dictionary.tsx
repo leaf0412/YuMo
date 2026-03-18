@@ -11,12 +11,12 @@ import { invoke } from '@tauri-apps/api/core';
 const { Title, Text } = Typography;
 
 interface VocabItem {
-  id: number;
+  id: string;
   word: string;
 }
 
 interface ReplacementItem {
-  id: number;
+  id: string;
   original: string;
   replacement: string;
 }
@@ -59,7 +59,7 @@ export default function Dictionary() {
     }
   };
 
-  const handleDeleteWord = async (id: number) => {
+  const handleDeleteWord = async (id: string) => {
     try {
       await invoke('delete_vocabulary', { id });
       message.success('已删除');
@@ -85,7 +85,7 @@ export default function Dictionary() {
     }
   };
 
-  const handleDeleteReplacement = async (id: number) => {
+  const handleDeleteReplacement = async (id: string) => {
     try {
       await invoke('delete_replacement', { id });
       message.success('已删除');
@@ -95,24 +95,14 @@ export default function Dictionary() {
     }
   };
 
-  const handleExportCsv = async (type: 'vocabulary' | 'replacements') => {
-    try {
-      await invoke('export_csv', { type });
-      message.success('导出成功');
-    } catch {
-      message.error('导出失败');
-    }
+  const handleExportCsv = (_type: 'vocabulary' | 'replacements') => {
+    // TODO: integrate with file picker dialog for path selection
+    message.info('CSV 导出暂未实现');
   };
 
-  const handleImportCsv = async (type: 'vocabulary' | 'replacements') => {
-    try {
-      await invoke('import_csv', { type });
-      message.success('导入成功');
-      if (type === 'vocabulary') loadVocabulary();
-      else loadReplacements();
-    } catch {
-      message.error('导入失败');
-    }
+  const handleImportCsv = (_type: 'vocabulary' | 'replacements') => {
+    // TODO: integrate with file picker dialog for path selection
+    message.info('CSV 导入暂未实现');
   };
 
   const vocabularyTab = (

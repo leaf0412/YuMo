@@ -6,10 +6,10 @@ import { invoke } from '@tauri-apps/api/core';
 const { Text, Paragraph } = Typography;
 
 interface Transcription {
-  id: number;
+  id: string;
   text: string;
   enhanced_text?: string;
-  created_at: string;
+  timestamp: string;
   model_name: string;
 }
 
@@ -21,7 +21,7 @@ export default function History() {
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const loadTranscriptions = useCallback(async (cursor: string | null, reset: boolean) => {
     setLoading(true);
@@ -127,7 +127,7 @@ export default function History() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ flex: 1 }}>
                   <Space>
-                    <Text type="secondary">{item.created_at}</Text>
+                    <Text type="secondary">{item.timestamp}</Text>
                     <Tag>{item.model_name}</Tag>
                     <Tag color="blue">{wordCount(item.text)} 词</Tag>
                   </Space>

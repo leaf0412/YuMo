@@ -29,22 +29,24 @@ interface Permissions {
   accessibility: boolean;
 }
 
-interface Model {
+interface ModelInfo {
+  id: string;
   name: string;
-  size: string;
-  selected: boolean;
+  size_mb: number;
+  provider: string;
 }
 
 interface Transcription {
-  id: number;
+  id: string;
   text: string;
-  created_at: string;
+  timestamp: string;
   model_name: string;
 }
 
 export default function Dashboard() {
   const [permissions, setPermissions] = useState<Permissions>({ microphone: false, accessibility: false });
-  const [models, setModels] = useState<Model[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [transcriptions, setTranscriptions] = useState<Transcription[]>([]);
   const [recording, setRecording] = useState(false);
 
@@ -55,8 +57,14 @@ export default function Dashboard() {
     } catch { /* ignore */ }
 
     try {
-      const m = await invoke<Model[]>('list_available_models');
+      const m = await invoke<ModelInfo[]>('list_available_models');
       setModels(m);
+    } catch { /* ignore */ }
+
+    try {
+      const settings = await invoke<Record<string, unknown>>('get_settings');
+      const mid = settings?.selected_model_id;
+      setSelectedModelId(typeof mid === 'string' ? mid : null);
     } catch { /* ignore */ }
 
     try {
@@ -81,7 +89,7 @@ export default function Dashboard() {
     return () => { unlisten.then((fn) => fn()); };
   }, [loadData]);
 
-  const selectedModel = models.find((m) => m.selected);
+  const selectedModel = selectedModelId ? models.find((m) => m.id === selectedModelId) : null;
 
   const handleRecord = async () => {
     if (recording) {
@@ -181,7 +189,6 @@ export default function Dashboard() {
               <Space>
                 <ApiOutlined />
                 <Text strong>{selectedModel.name}</Text>
-                <Tag color="blue">{selectedModel.size}</Tag>
               </Space>
             ) : (
               <Alert title="未选择模型" type="warning" showIcon />
@@ -213,7 +220,7 @@ export default function Dashboard() {
           transcriptions.map((item) => (
             <div key={item.id} style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
               <Space>
-                <Text type="secondary">{item.created_at}</Text>
+                <Text type="secondary">{item.timestamp}</Text>
                 <Tag>{item.model_name}</Tag>
               </Space>
               <Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
