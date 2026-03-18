@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -71,9 +71,21 @@ impl DaemonProcess {
     }
 
     /// Read lines until a terminal (non-progress, non-downloading) response.
+    /// Times out after `timeout` seconds (default 120s).
     fn read_response(&mut self) -> AppResult<DaemonResponse> {
+        self.read_response_with_timeout(std::time::Duration::from_secs(120))
+    }
+
+    fn read_response_with_timeout(&mut self, timeout: std::time::Duration) -> AppResult<DaemonResponse> {
+        let deadline = std::time::Instant::now() + timeout;
         let mut buf = String::new();
         loop {
+            if std::time::Instant::now() >= deadline {
+                return Err(AppError::Transcription(
+                    format!("daemon response timed out after {}s", timeout.as_secs()),
+                ));
+            }
+
             buf.clear();
             let n = self
                 .reader
@@ -115,7 +127,7 @@ impl DaemonProcess {
 // ---------------------------------------------------------------------------
 
 pub struct DaemonManager {
-    process: Mutex<Option<DaemonProcess>>,
+    process: Arc<Mutex<Option<DaemonProcess>>>,
     script_path: PathBuf,
     data_dir: PathBuf,
 }
@@ -123,7 +135,7 @@ pub struct DaemonManager {
 impl DaemonManager {
     pub fn new(script_path: PathBuf, data_dir: PathBuf) -> Self {
         Self {
-            process: Mutex::new(None),
+            process: Arc::new(Mutex::new(None)),
             script_path,
             data_dir,
         }
@@ -236,6 +248,55 @@ impl DaemonManager {
         })?;
 
         proc.send_command(cmd)
+    }
+
+    /// Async version of send_command — runs blocking IO on a dedicated thread
+    /// with a configurable timeout. Does not block the tokio runtime.
+    pub async fn send_command_async(
+        &self,
+        cmd: &Value,
+        timeout: std::time::Duration,
+    ) -> AppResult<DaemonResponse> {
+        // Serialize command before moving into the blocking closure
+        let cmd_json = serde_json::to_string(cmd)
+            .map_err(|e| AppError::Transcription(format!("serialize cmd: {e}")))?;
+
+        // Write command while holding the lock briefly
+        {
+            let mut guard = self
+                .process
+                .lock()
+                .map_err(|_| AppError::Transcription("daemon mutex poisoned".into()))?;
+            let proc = guard.as_mut().ok_or_else(|| {
+                AppError::Transcription("daemon is not running; call start() first".into())
+            })?;
+            proc.stdin
+                .write_all(cmd_json.as_bytes())
+                .and_then(|_| proc.stdin.write_all(b"\n"))
+                .and_then(|_| proc.stdin.flush())
+                .map_err(|e| AppError::Transcription(format!("write stdin: {e}")))?;
+        }
+
+        // Read response on a blocking thread with timeout
+        let process = self.process.clone();
+        let result = tokio::time::timeout(timeout, tokio::task::spawn_blocking(move || {
+            let mut guard = process
+                .lock()
+                .map_err(|_| AppError::Transcription("daemon mutex poisoned".into()))?;
+            let proc = guard.as_mut().ok_or_else(|| {
+                AppError::Transcription("daemon exited during transcription".into())
+            })?;
+            proc.read_response()
+        }))
+        .await;
+
+        match result {
+            Ok(Ok(resp)) => resp,
+            Ok(Err(e)) => Err(AppError::Transcription(format!("spawn_blocking failed: {e}"))),
+            Err(_) => Err(AppError::Transcription(
+                format!("daemon response timed out after {}s", timeout.as_secs()),
+            )),
+        }
     }
 
     // -----------------------------------------------------------------------

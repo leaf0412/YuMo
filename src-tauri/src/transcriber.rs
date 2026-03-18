@@ -297,9 +297,9 @@ pub fn load_model(path: &Path) -> Result<whisper_rs::WhisperContext, AppError> {
     Ok(ctx)
 }
 
-/// Transcribe audio via the MLX FunASR daemon.
+/// Transcribe audio via the MLX FunASR daemon (async, non-blocking).
 /// Writes samples to a temp WAV file and sends the path to the daemon.
-pub fn transcribe_via_daemon(
+pub async fn transcribe_via_daemon(
     daemon: &crate::daemon::DaemonManager,
     samples: &[f32],
     sample_rate: u32,
@@ -333,7 +333,8 @@ pub fn transcribe_via_daemon(
         "temperature": 0.0,
     });
 
-    let resp = daemon.send_command(&cmd)?;
+    let timeout = std::time::Duration::from_secs(120);
+    let resp = daemon.send_command_async(&cmd, timeout).await?;
 
     // Cleanup temp file
     let _ = std::fs::remove_file(&wav_path);

@@ -267,6 +267,7 @@ pub async fn stop_recording(
                 audio_data.sample_rate,
                 &language,
             )
+            .await
         }
         _ => {
             let model_path = transcriber::model_path(&state.paths.models_dir, &model_id);
@@ -282,17 +283,20 @@ pub async fn stop_recording(
                 return Err(AppError::Transcription("No model downloaded".into()));
             }
             info!("[pipeline] loading whisper model...");
-            let ctx = transcriber::load_model(&model_path).map_err(|e| {
-                error!("[pipeline] load_model failed: {}", e);
-                e
-            })?;
-            info!("[pipeline] transcribing via whisper (language={})...", language);
-            transcriber::transcribe(
-                &ctx,
-                &audio_data.pcm_samples,
-                audio_data.sample_rate,
-                &language,
-            )
+            let model_path_clone = model_path.clone();
+            let samples = audio_data.pcm_samples.clone();
+            let sr = audio_data.sample_rate;
+            let lang = language.clone();
+            tokio::task::spawn_blocking(move || {
+                let ctx = transcriber::load_model(&model_path_clone).map_err(|e| {
+                    log::error!("[pipeline] load_model failed: {}", e);
+                    e
+                })?;
+                log::info!("[pipeline] transcribing via whisper (language={})...", lang);
+                transcriber::transcribe(&ctx, &samples, sr, &lang)
+            })
+            .await
+            .map_err(|e| AppError::Transcription(format!("spawn_blocking: {e}")))?
         }
     };
 
@@ -478,6 +482,22 @@ pub fn cancel_recording(
     let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
     crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_pipeline_state(state: State<AppState>) -> Result<serde_json::Value, AppError> {
+    let pipeline = state
+        .pipeline_state
+        .lock()
+        .map_err(|e| AppError::Recording(e.to_string()))?;
+    let s = match *pipeline {
+        PipelineState::Idle => "idle",
+        PipelineState::Recording => "recording",
+        PipelineState::Transcribing => "transcribing",
+        PipelineState::Enhancing => "enhancing",
+        PipelineState::Pasting => "pasting",
+    };
+    Ok(serde_json::json!({"state": s}))
 }
 
 #[tauri::command]
