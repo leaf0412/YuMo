@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Card, Button, Flex, Space, Tag, Typography, Row, Col, Progress, Select,
-  Input, message, Divider, Badge,
+  Input, message, Divider, Tabs, Badge,
 } from 'antd';
 import {
   DownloadOutlined, DeleteOutlined, CheckCircleOutlined,
-  CloudOutlined, ImportOutlined, ApiOutlined,
+  CloudOutlined, ImportOutlined, ApiOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -19,11 +19,19 @@ interface ModelInfo {
   languages: string[];
   download_url: string;
   is_downloaded: boolean;
+  provider: 'local' | 'mlxFunASR';
+  model_repo?: string;
+  description?: string;
 }
 
 interface DownloadProgress {
   model_id: string;
   progress: number;
+}
+
+interface DaemonStatus {
+  running: boolean;
+  loaded_model: string | null;
 }
 
 interface Settings {
@@ -59,6 +67,9 @@ export default function Models() {
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [settings, setSettings] = useState<Settings>({});
   const [cloudApiKey, setCloudApiKey] = useState('');
+  const [daemonStatus, setDaemonStatus] = useState<DaemonStatus>({ running: false, loaded_model: null });
+  const [activeTab, setActiveTab] = useState('local');
+  const [loadingModel, setLoadingModel] = useState<string | null>(null);
 
   const loadModels = useCallback(async () => {
     try {
@@ -91,6 +102,19 @@ export default function Models() {
       unlisten.then((fn) => fn());
     };
   }, [loadModels]);
+
+  useEffect(() => {
+    if (activeTab !== 'mlx') return;
+    const poll = async () => {
+      try {
+        const status = await invoke<DaemonStatus>('daemon_status');
+        setDaemonStatus(status);
+      } catch { /* ignore */ }
+    };
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+  }, [activeTab]);
 
   const handleDownload = async (modelId: string) => {
     try {
@@ -125,9 +149,11 @@ export default function Models() {
 
   const handleImport = async () => {
     try {
-      await invoke('import_model');
-      message.success('导入完成');
-      loadModels();
+      const imported = await invoke<boolean>('import_model');
+      if (imported) {
+        message.success('导入完成');
+        loadModels();
+      }
     } catch {
       message.error('导入失败');
     }
@@ -169,102 +195,135 @@ export default function Models() {
     }
   };
 
+  const handleDaemonStart = async () => {
+    try {
+      await invoke('daemon_start');
+      message.success('Daemon 已启动');
+      const status = await invoke<DaemonStatus>('daemon_status');
+      setDaemonStatus(status);
+    } catch {
+      message.error('Daemon 启动失败，请检查 Python 3 和 mlx-audio 是否已安装');
+    }
+  };
+
+  const handleDaemonStop = async () => {
+    try {
+      await invoke('daemon_stop');
+      setDaemonStatus({ running: false, loaded_model: null });
+      message.success('Daemon 已停止');
+    } catch {
+      message.error('停止失败');
+    }
+  };
+
+  const handleLoadModel = async (modelRepo: string, modelId: string) => {
+    try {
+      setLoadingModel(modelId);
+      await invoke('daemon_load_model', { modelRepo });
+      message.success('模型已加载');
+      const status = await invoke<DaemonStatus>('daemon_status');
+      setDaemonStatus(status);
+      loadModels();
+    } catch {
+      message.error('模型加载失败');
+    } finally {
+      setLoadingModel(null);
+    }
+  };
+
+  const handleUnloadModel = async () => {
+    try {
+      await invoke('daemon_unload_model');
+      const status = await invoke<DaemonStatus>('daemon_status');
+      setDaemonStatus(status);
+      message.success('模型已卸载');
+    } catch {
+      message.error('卸载失败');
+    }
+  };
+
   const isSelected = (modelId: string) => settings.selected_model_id === modelId;
 
-  return (
-    <Flex vertical gap="large" style={{ width: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={3} style={{ margin: 0 }}>模型管理</Title>
-        <Space>
-          <Select
-            placeholder="语言"
-            value={settings.language}
-            onChange={handleLanguageChange}
-            style={{ width: 160 }}
-            options={[
-              { value: 'auto', label: '自动检测' },
-              { value: 'zh', label: '中文' },
-              { value: 'en', label: 'English' },
-              { value: 'ja', label: '日本語' },
-            ]}
-          />
-          <Button icon={<ImportOutlined />} onClick={handleImport}>
-            导入模型
-          </Button>
-        </Space>
-      </div>
+  const localModels = models.filter(m => m.provider === 'local');
+  const mlxModels = models.filter(m => m.provider === 'mlxFunASR');
 
-      <Title level={4}>本地模型</Title>
+  const localTabContent = (
+    <>
       <Row gutter={[16, 16]}>
-        {models.map((model) => {
+        {localModels.map((model) => {
           const selected = isSelected(model.id);
           const progress = downloadProgress[model.id];
           const downloading = progress !== undefined && progress < 100;
 
           return (
             <Col xs={24} sm={12} md={8} key={model.id}>
-              <Badge.Ribbon
-                text={model.is_downloaded ? '已下载' : '未下载'}
-                color={model.is_downloaded ? 'green' : 'default'}
+              <Card
+                style={selected ? { borderColor: '#52c41a' } : undefined}
+                styles={{ body: { padding: 16 } }}
               >
-                <Card
-                  title={
+                <Flex vertical gap={12} style={{ width: '100%' }}>
+                  <Flex justify="space-between" align="center">
                     <Space>
                       <ApiOutlined />
-                      <span>{model.name}</span>
+                      <Text strong>{model.name}</Text>
                     </Space>
-                  }
-                  extra={selected && <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>}
-                  style={selected ? { borderColor: '#52c41a' } : undefined}
-                >
-                  <Flex vertical gap={8} style={{ width: '100%' }}>
+                    {selected ? (
+                      <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>
+                    ) : model.is_downloaded ? (
+                      <Tag color="green">已下载</Tag>
+                    ) : (
+                      <Tag>未下载</Tag>
+                    )}
+                  </Flex>
+
+                  <Flex gap={16}>
                     <div>
                       <Text type="secondary">大小: </Text>
-                      <Text strong>{formatSize(model.size_mb)}</Text>
+                      <Text>{formatSize(model.size_mb)}</Text>
                     </div>
                     <div>
                       <Text type="secondary">语言: </Text>
                       {model.languages.map((lang) => (
-                        <Tag key={lang} color="blue">{languageLabel(lang)}</Tag>
+                        <Tag key={lang} color="blue" bordered={false}>{languageLabel(lang)}</Tag>
                       ))}
                     </div>
-
-                    {downloading && (
-                      <Progress percent={Math.round(progress)} size="small" />
-                    )}
-
-                    <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-                      {model.is_downloaded ? (
-                        <>
-                          {!selected && (
-                            <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>
-                              使用此模型
-                            </Button>
-                          )}
-                          <Button
-                            danger
-                            size="small"
-                            icon={<DeleteOutlined />}
-                            onClick={() => handleDeleteModel(model.id)}
-                          >
-                            删除
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          type="primary"
-                          size="small"
-                          icon={<DownloadOutlined />}
-                          loading={downloading}
-                          onClick={() => handleDownload(model.id)}
-                        >
-                          下载
-                        </Button>
-                      )}
-                    </Space>
                   </Flex>
-                </Card>
-              </Badge.Ribbon>
+
+                  {downloading && (
+                    <Progress percent={Math.round(progress)} size="small" />
+                  )}
+
+                  <Flex justify="flex-end" gap={8}>
+                    {model.is_downloaded ? (
+                      <>
+                        {!selected && (
+                          <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>
+                            使用此模型
+                          </Button>
+                        )}
+                        <Button
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          onClick={() => handleDeleteModel(model.id)}
+                        >
+                          删除
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        type="primary"
+                        size="small"
+                        icon={<DownloadOutlined />}
+                        loading={downloading}
+                        onClick={() => handleDownload(model.id)}
+                      >
+                        下载
+                      </Button>
+                    )}
+                  </Flex>
+                </Flex>
+              </Card>
             </Col>
           );
         })}
@@ -301,6 +360,137 @@ export default function Models() {
           </Button>
         </Flex>
       </Card>
+    </>
+  );
+
+  const mlxTabContent = (
+    <>
+      <Flex justify="space-between" align="center" style={{ marginBottom: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 8 }}>
+        <Space>
+          <Badge status={daemonStatus.running ? 'success' : 'default'} />
+          <Text>{daemonStatus.running ? 'Daemon 运行中' : 'Daemon 未启动'}</Text>
+          {daemonStatus.loaded_model && (
+            <Tag color="blue">已加载: {daemonStatus.loaded_model.split('/').pop()}</Tag>
+          )}
+        </Space>
+        <Space>
+          {daemonStatus.running ? (
+            <Button size="small" onClick={handleDaemonStop}>停止</Button>
+          ) : (
+            <Button type="primary" size="small" onClick={handleDaemonStart}>启动 Daemon</Button>
+          )}
+        </Space>
+      </Flex>
+
+      <Row gutter={[16, 16]}>
+        {mlxModels.map((model) => (
+          <Col xs={24} sm={12} md={8} key={model.id}>
+            <Card
+              style={isSelected(model.id) ? { borderColor: '#52c41a' } : undefined}
+              styles={{ body: { padding: 16 } }}
+            >
+              <Flex vertical gap={12}>
+                <Flex justify="space-between" align="center">
+                  <Space>
+                    <ThunderboltOutlined />
+                    <Text strong>{model.name}</Text>
+                  </Space>
+                  {isSelected(model.id) ? (
+                    <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>
+                  ) : daemonStatus.loaded_model === model.model_repo ? (
+                    <Tag color="blue">已加载</Tag>
+                  ) : model.is_downloaded ? (
+                    <Tag color="green">已缓存</Tag>
+                  ) : (
+                    <Tag>未下载</Tag>
+                  )}
+                </Flex>
+
+                {model.description && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>
+                )}
+
+                <Flex gap={16}>
+                  <div>
+                    <Text type="secondary">大小: </Text>
+                    <Text>{formatSize(model.size_mb)}</Text>
+                  </div>
+                  <div>
+                    <Text type="secondary">语言: </Text>
+                    {model.languages.map((lang) => (
+                      <Tag key={lang} color="blue" bordered={false}>{languageLabel(lang)}</Tag>
+                    ))}
+                  </div>
+                </Flex>
+
+                <Flex justify="flex-end" gap={8}>
+                  {daemonStatus.loaded_model === model.model_repo ? (
+                    <>
+                      {!isSelected(model.id) && (
+                        <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>
+                          设为默认
+                        </Button>
+                      )}
+                      <Button size="small" onClick={handleUnloadModel}>卸载</Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="primary"
+                      size="small"
+                      loading={loadingModel === model.id}
+                      onClick={() => handleLoadModel(model.model_repo!, model.id)}
+                    >
+                      加载模型
+                    </Button>
+                  )}
+                </Flex>
+              </Flex>
+            </Card>
+          </Col>
+        ))}
+      </Row>
+    </>
+  );
+
+  return (
+    <Flex vertical gap="large" style={{ width: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Title level={3} style={{ margin: 0 }}>模型管理</Title>
+        <Space>
+          <Select
+            placeholder="语言"
+            value={settings.language}
+            onChange={handleLanguageChange}
+            style={{ width: 160 }}
+            options={[
+              { value: 'auto', label: '自动检测' },
+              { value: 'zh', label: '中文' },
+              { value: 'en', label: 'English' },
+              { value: 'ja', label: '日本語' },
+            ]}
+          />
+          <Button icon={<ImportOutlined />} onClick={handleImport}>
+            导入模型
+          </Button>
+        </Space>
+      </div>
+
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            key: 'local',
+            label: '本地模型',
+            children: localTabContent,
+          },
+          {
+            key: 'mlx',
+            label: 'MLX 模型',
+            children: mlxTabContent,
+          },
+        ]}
+      />
     </Flex>
   );
 }
