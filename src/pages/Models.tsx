@@ -12,6 +12,15 @@ import { listen } from '@tauri-apps/api/event';
 
 const { Title, Text } = Typography;
 
+function formatError(e: unknown, fallback: string): string {
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object') {
+    const vals = Object.values(e as Record<string, unknown>);
+    if (vals.length > 0 && typeof vals[0] === 'string') return vals[0] as string;
+  }
+  return fallback;
+}
+
 interface ModelInfo {
   id: string;
   name: string;
@@ -122,8 +131,8 @@ export default function Models() {
       await invoke('download_model', { modelId });
       message.success('下载完成');
       loadModels();
-    } catch {
-      message.error('下载失败');
+    } catch (e) {
+      message.error(formatError(e, '下载失败'));
     }
   };
 
@@ -132,8 +141,8 @@ export default function Models() {
       await invoke('delete_model', { modelId });
       message.success('已删除');
       loadModels();
-    } catch {
-      message.error('删除失败');
+    } catch (e) {
+      message.error(formatError(e, '删除失败'));
     }
   };
 
@@ -142,8 +151,8 @@ export default function Models() {
       await invoke('select_model', { modelId });
       setSettings((prev) => ({ ...prev, selected_model_id: modelId }));
       message.success('已切换模型');
-    } catch {
-      message.error('切换失败');
+    } catch (e) {
+      message.error(formatError(e, '切换失败'));
     }
   };
 
@@ -154,8 +163,8 @@ export default function Models() {
         message.success('导入完成');
         loadModels();
       }
-    } catch {
-      message.error('导入失败');
+    } catch (e) {
+      message.error(formatError(e, '导入失败'));
     }
   };
 
@@ -163,8 +172,8 @@ export default function Models() {
     try {
       await invoke('update_setting', { key: 'language', value });
       setSettings((prev) => ({ ...prev, language: value }));
-    } catch {
-      message.error('设置失败');
+    } catch (e) {
+      message.error(formatError(e, '设置失败'));
     }
   };
 
@@ -172,8 +181,8 @@ export default function Models() {
     try {
       await invoke('update_setting', { key: 'cloud_provider', value });
       setSettings((prev) => ({ ...prev, cloud_provider: value }));
-    } catch {
-      message.error('设置失败');
+    } catch (e) {
+      message.error(formatError(e, '设置失败'));
     }
   };
 
@@ -201,8 +210,8 @@ export default function Models() {
       message.success('Daemon 已启动');
       const status = await invoke<DaemonStatus>('daemon_status');
       setDaemonStatus(status);
-    } catch {
-      message.error('Daemon 启动失败，请检查 Python 3 和 mlx-audio 是否已安装');
+    } catch (e) {
+      message.error(formatError(e, 'Daemon 启动失败，请检查 Python 3 和 mlx-audio 是否已安装'));
     }
   };
 
@@ -211,8 +220,8 @@ export default function Models() {
       await invoke('daemon_stop');
       setDaemonStatus({ running: false, loaded_model: null });
       message.success('Daemon 已停止');
-    } catch {
-      message.error('停止失败');
+    } catch (e) {
+      message.error(formatError(e, '停止失败'));
     }
   };
 
@@ -224,8 +233,8 @@ export default function Models() {
       const status = await invoke<DaemonStatus>('daemon_status');
       setDaemonStatus(status);
       loadModels();
-    } catch {
-      message.error('模型加载失败');
+    } catch (e) {
+      message.error(formatError(e, '模型加载失败'));
     } finally {
       setLoadingModel(null);
     }
@@ -237,8 +246,8 @@ export default function Models() {
       const status = await invoke<DaemonStatus>('daemon_status');
       setDaemonStatus(status);
       message.success('模型已卸载');
-    } catch {
-      message.error('卸载失败');
+    } catch (e) {
+      message.error(formatError(e, '卸载失败'));
     }
   };
 

@@ -13,6 +13,17 @@ import { listen } from '@tauri-apps/api/event';
 
 const { Title, Text, Paragraph } = Typography;
 
+/** Extract a readable message from Tauri invoke errors (serialized AppError enum). */
+function formatError(e: unknown, fallback: string): string {
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object') {
+    // AppError serializes as { "Recording": "message" } or similar
+    const vals = Object.values(e as Record<string, unknown>);
+    if (vals.length > 0 && typeof vals[0] === 'string') return vals[0] as string;
+  }
+  return fallback;
+}
+
 interface Permissions {
   microphone: boolean;
   accessibility: boolean;
@@ -78,17 +89,17 @@ export default function Dashboard() {
         await invoke('stop_recording');
         message.success('转录完成');
       } catch (e: unknown) {
-        message.error(typeof e === 'string' ? e : '停止录音失败');
+        message.error(formatError(e, '停止录音失败'));
       } finally {
         setRecording(false);
         loadData();
       }
     } else {
       try {
-        await invoke('start_recording', {});
+        await invoke('start_recording');
         setRecording(true);
       } catch (e: unknown) {
-        message.error(typeof e === 'string' ? e : '开始录音失败');
+        message.error(formatError(e, '开始录音失败'));
       }
     }
   };
