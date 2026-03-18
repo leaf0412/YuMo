@@ -98,6 +98,13 @@ pub fn run() {
             // CSV
             commands::import_dictionary_csv,
             commands::export_dictionary_csv,
+            // MLX Daemon
+            commands::daemon_start,
+            commands::daemon_stop,
+            commands::daemon_status,
+            commands::daemon_check_deps,
+            commands::daemon_load_model,
+            commands::daemon_unload_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

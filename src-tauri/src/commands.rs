@@ -330,7 +330,7 @@ pub fn request_permission(permission_type: String) {
 
 #[tauri::command]
 pub fn list_available_models(state: State<AppState>) -> Vec<transcriber::ModelInfo> {
-    transcriber::check_downloaded_models(&state.models_dir)
+    transcriber::all_models(&state.models_dir)
 }
 
 #[tauri::command]
@@ -379,6 +379,35 @@ pub fn delete_model(state: State<AppState>, model_id: String) -> Result<(), AppE
         std::fs::remove_file(&path)?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn import_model(app: AppHandle, state: State<'_, AppState>) -> Result<bool, AppError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let file_path = app
+        .dialog()
+        .file()
+        .add_filter("Whisper Model", &["bin"])
+        .blocking_pick_file();
+
+    let file_path = match file_path {
+        Some(f) => f,
+        None => return Ok(false),
+    };
+
+    let src = file_path
+        .as_path()
+        .ok_or_else(|| AppError::Io("无法获取文件路径".into()))?;
+
+    let file_name = src
+        .file_name()
+        .ok_or_else(|| AppError::Io("无效文件名".into()))?;
+
+    let dest = state.models_dir.join(file_name);
+    std::fs::copy(&src, &dest)?;
+
+    Ok(true)
 }
 
 // ---------------------------------------------------------------------------
@@ -602,4 +631,62 @@ pub fn export_dictionary_csv(state: State<AppState>, path: String, dict_type: St
         "replacements" => db::export_replacements_csv(&conn, path),
         _ => Err(AppError::InvalidInput("Unknown dict type".into())),
     }
+}
+
+// ---------------------------------------------------------------------------
+// MLX FunASR Daemon
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn daemon_start(state: State<AppState>) -> Result<(), AppError> {
+    state.daemon.start()
+}
+
+#[tauri::command]
+pub fn daemon_stop(state: State<AppState>) -> Result<(), AppError> {
+    state.daemon.stop();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn daemon_status(state: State<AppState>) -> Result<serde_json::Value, AppError> {
+    Ok(serde_json::json!({
+        "running": state.daemon.is_running(),
+        "loaded_model": state.daemon.loaded_model(),
+    }))
+}
+
+#[tauri::command]
+pub fn daemon_check_deps(state: State<AppState>) -> Result<serde_json::Value, AppError> {
+    if !state.daemon.is_running() {
+        state.daemon.start()?;
+    }
+    let cmd = serde_json::json!({"action": "check_dependencies"});
+    let resp = state.daemon.send_command(&cmd)?;
+    Ok(serde_json::to_value(resp).unwrap_or_default())
+}
+
+#[tauri::command]
+pub fn daemon_load_model(state: State<AppState>, model_repo: String) -> Result<(), AppError> {
+    if !state.daemon.is_running() {
+        state.daemon.start()?;
+    }
+    let cmd = serde_json::json!({"action": "load", "model": model_repo});
+    let resp = state.daemon.send_command(&cmd)?;
+    if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" {
+        state.daemon.set_loaded_model(Some(model_repo));
+        Ok(())
+    } else {
+        Err(AppError::Transcription(
+            resp.error.unwrap_or_else(|| format!("Load failed: {}", resp.status))
+        ))
+    }
+}
+
+#[tauri::command]
+pub fn daemon_unload_model(state: State<AppState>) -> Result<(), AppError> {
+    let cmd = serde_json::json!({"action": "unload"});
+    state.daemon.send_command(&cmd)?;
+    state.daemon.set_loaded_model(None);
+    Ok(())
 }
