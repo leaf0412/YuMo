@@ -101,9 +101,11 @@ export default function RecorderFloat() {
   // Window dragging — attach at document level
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
-      // Skip if clicking the cancel button
       if ((e.target as HTMLElement)?.closest?.('[data-cancel]')) return;
-      getCurrentWindow().startDragging().catch(() => {});
+      invoke('frontend_log', { level: 'info', message: '[recorder] mousedown -> startDragging' });
+      getCurrentWindow().startDragging().catch((err) => {
+        invoke('frontend_log', { level: 'error', message: `[recorder] startDragging failed: ${err}` });
+      });
     };
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);

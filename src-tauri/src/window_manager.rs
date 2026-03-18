@@ -95,6 +95,21 @@ impl WindowManager {
         }
 
         let _ = win.show();
+
+        // Recorder: make the transparent window accept mouse events
+        #[cfg(target_os = "macos")]
+        if label == "recorder" {
+            use objc::{msg_send, sel, sel_impl};
+            if let Ok(raw) = win.ns_window() {
+                unsafe {
+                    let ns_win = raw as cocoa::base::id;
+                    let _: () = msg_send![ns_win, setIgnoresMouseEvents: false];
+                    let _: () = msg_send![ns_win, setMovableByWindowBackground: true];
+                    let _: () = msg_send![ns_win, setAcceptsMouseMovedEvents: true];
+                }
+            }
+        }
+
         // Only focus non-overlay windows (recorder should not steal focus)
         if label != "recorder" {
             let _ = win.set_focus();
