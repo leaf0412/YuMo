@@ -358,7 +358,7 @@ def _transcribe_qwen3_asr(model, audio_path, language=None, max_tokens=8192, tem
             "top_p": 1.0,  # Disable nucleus sampling to avoid MLX boolean indexing bug
             "verbose": False,
         }
-        if language:
+        if language and language != "auto":
             # Map ISO code to Qwen3-ASR language name
             mapped_lang = qwen3_lang_map.get(language.lower(), language)
             generate_kwargs["language"] = mapped_lang
@@ -436,7 +436,7 @@ def _funasr_generate_text(model, audio_path, language, sf, np, max_tokens=500, t
 
 def _build_funasr_lang_param(language):
     """Build language parameter dict for FunASR."""
-    if not language:
+    if not language or language == "auto":
         return {}
     lang_map = {"zh": "中文", "en": "English", "ja": "日文", "ko": "韩文"}
     return {"language": lang_map.get(language, language)}
