@@ -9,6 +9,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -57,10 +58,39 @@ export default function Dashboard() {
     loadData();
   }, [loadData]);
 
+  // Listen to recording state changes from backend
+  useEffect(() => {
+    const unlisten = listen<{ state: string }>('recording-state', (event) => {
+      const s = event.payload.state;
+      setRecording(s === 'recording');
+      if (s === 'idle') {
+        loadData(); // refresh permissions & transcriptions
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [loadData]);
+
   const selectedModel = models.find((m) => m.selected);
 
-  const handleRecord = () => {
-    setRecording((prev) => !prev);
+  const handleRecord = async () => {
+    if (recording) {
+      try {
+        await invoke('stop_recording');
+        message.success('转录完成');
+      } catch (e: unknown) {
+        message.error(typeof e === 'string' ? e : '停止录音失败');
+      } finally {
+        setRecording(false);
+        loadData();
+      }
+    } else {
+      try {
+        await invoke('start_recording', {});
+        setRecording(true);
+      } catch (e: unknown) {
+        message.error(typeof e === 'string' ? e : '开始录音失败');
+      }
+    }
   };
 
   const openSettings = async (permissionType: string) => {
