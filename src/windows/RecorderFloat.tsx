@@ -9,6 +9,7 @@ export default function RecorderFloat() {
   const [state, setState] = useState<PipelineState>('idle');
   const [duration, setDuration] = useState(0);
   const timerRef = useRef<number | null>(null);
+  const prevStateRef = useRef<PipelineState>('idle');
 
   // Sprite
   const [spriteManifest, setSpriteManifest] = useState<SpriteManifest | null>(null);
@@ -32,23 +33,31 @@ export default function RecorderFloat() {
 
   useEffect(() => { loadSprite(); }, [loadSprite]);
 
-  // Listen for state changes
+  // Listen to backend pipeline state events
   useEffect(() => {
-    const unlisten = listen<{ state: string }>('recording-state', (e) => {
-      const s = e.payload.state as PipelineState;
-      setState(s);
+    // One-time initial state sync on mount
+    invoke<{ state: string }>('get_pipeline_state')
+      .then((result) => {
+        const s = (result.state ?? 'idle') as PipelineState;
+        prevStateRef.current = s;
+        setState(s);
+      })
+      .catch(() => { /* ignore */ });
 
-      // Reset timer when a new recording starts
-      if (s === 'recording') {
+    const unlisten = listen<{ state: string }>('recording-state', (event) => {
+      const s = event.payload.state as PipelineState;
+      if (s === 'recording' && prevStateRef.current !== 'recording') {
         setDuration(0);
       }
+      prevStateRef.current = s;
+      setState(s);
     });
-    return () => { unlisten.then(fn => fn()); };
+
+    return () => { unlisten.then((fn) => fn()); };
   }, []);
 
   // Timer — only runs while state === 'recording'
   useEffect(() => {
-    // Always clear any existing timer first
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -79,12 +88,12 @@ export default function RecorderFloat() {
     transcribing: '转录中...',
     enhancing: '增强中...',
     pasting: '粘贴中...',
+    idle: '',
   };
 
   const hasSprite = spriteManifest && spriteImageSrc;
   const isRecording = state === 'recording';
 
-  // Don't render anything when idle (window is hidden anyway)
   if (state === 'idle') return null;
 
   return (
@@ -123,30 +132,32 @@ export default function RecorderFloat() {
         </div>
       )}
 
-      <div style={{
-        marginTop: 4,
-        padding: '2px 12px',
-        borderRadius: 12,
-        background: 'rgba(0,0,0,0.7)',
-        color: '#fff',
-        fontSize: 12,
-        fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-      }}>
+      {state !== 'idle' && (
         <div style={{
-          width: 6,
-          height: 6,
-          borderRadius: '50%',
-          background: isRecording ? '#ff4d4f' : '#1890ff',
-          animation: isRecording ? 'pulse 1.5s infinite' : 'none',
-        }} />
-        <span>{stateLabel[state] || state}</span>
-        {isRecording && (
-          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(duration)}</span>
-        )}
-      </div>
+          marginTop: 4,
+          padding: '2px 12px',
+          borderRadius: 12,
+          background: 'rgba(0,0,0,0.7)',
+          color: '#fff',
+          fontSize: 12,
+          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+        }}>
+          <div style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: isRecording ? '#ff4d4f' : '#1890ff',
+            animation: isRecording ? 'pulse 1.5s infinite' : 'none',
+          }} />
+          <span>{stateLabel[state]}</span>
+          {isRecording && (
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(duration)}</span>
+          )}
+        </div>
+      )}
 
       <style>{`
         @keyframes pulse {
