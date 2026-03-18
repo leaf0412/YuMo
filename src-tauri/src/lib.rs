@@ -1,3 +1,5 @@
+pub mod audio_ctrl;
+pub mod paster;
 pub mod commands;
 pub mod db;
 pub mod error;
