@@ -458,3 +458,55 @@ pub fn delete_prompt(conn: &Connection, id: &str) -> Result<(), AppError> {
     conn.execute("DELETE FROM prompts WHERE id = ?1", params![id])?;
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// CSV Import / Export
+// ---------------------------------------------------------------------------
+
+pub fn export_vocabulary_csv(conn: &Connection, path: &std::path::Path) -> Result<(), AppError> {
+    let words = get_vocabulary(conn)?;
+    let mut wtr = csv::Writer::from_path(path)
+        .map_err(|e| AppError::Io(e.to_string()))?;
+    wtr.write_record(&["word"]).map_err(|e| AppError::Io(e.to_string()))?;
+    for w in words {
+        wtr.write_record(&[&w.word]).map_err(|e| AppError::Io(e.to_string()))?;
+    }
+    wtr.flush().map_err(|e| AppError::Io(e.to_string()))?;
+    Ok(())
+}
+
+pub fn import_vocabulary_csv(conn: &Connection, path: &std::path::Path) -> Result<(), AppError> {
+    let mut rdr = csv::Reader::from_path(path)
+        .map_err(|e| AppError::Io(e.to_string()))?;
+    for result in rdr.records() {
+        let record = result.map_err(|e| AppError::Io(e.to_string()))?;
+        if let Some(word) = record.get(0) {
+            add_vocabulary(conn, word)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn export_replacements_csv(conn: &Connection, path: &std::path::Path) -> Result<(), AppError> {
+    let reps = get_replacements(conn)?;
+    let mut wtr = csv::Writer::from_path(path)
+        .map_err(|e| AppError::Io(e.to_string()))?;
+    wtr.write_record(&["original", "replacement"]).map_err(|e| AppError::Io(e.to_string()))?;
+    for r in reps {
+        wtr.write_record(&[&r.original, &r.replacement]).map_err(|e| AppError::Io(e.to_string()))?;
+    }
+    wtr.flush().map_err(|e| AppError::Io(e.to_string()))?;
+    Ok(())
+}
+
+pub fn import_replacements_csv(conn: &Connection, path: &std::path::Path) -> Result<(), AppError> {
+    let mut rdr = csv::Reader::from_path(path)
+        .map_err(|e| AppError::Io(e.to_string()))?;
+    for result in rdr.records() {
+        let record = result.map_err(|e| AppError::Io(e.to_string()))?;
+        if let (Some(orig), Some(repl)) = (record.get(0), record.get(1)) {
+            set_replacement(conn, orig, repl)?;
+        }
+    }
+    Ok(())
+}

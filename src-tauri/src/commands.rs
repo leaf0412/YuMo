@@ -205,3 +205,29 @@ pub fn register_hotkey(
 pub fn unregister_hotkey(app: AppHandle) -> Result<(), AppError> {
     hotkey::unregister_all(&app).map_err(|e| AppError::Io(e.to_string()))
 }
+
+// ---------------------------------------------------------------------------
+// Dictionary CSV Import / Export
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn import_dictionary_csv(state: State<AppState>, path: String, dict_type: String) -> Result<(), AppError> {
+    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
+    let path = std::path::Path::new(&path);
+    match dict_type.as_str() {
+        "vocabulary" => db::import_vocabulary_csv(&conn, path),
+        "replacements" => db::import_replacements_csv(&conn, path),
+        _ => Err(AppError::InvalidInput("Unknown dict type".into())),
+    }
+}
+
+#[tauri::command]
+pub fn export_dictionary_csv(state: State<AppState>, path: String, dict_type: String) -> Result<(), AppError> {
+    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
+    let path = std::path::Path::new(&path);
+    match dict_type.as_str() {
+        "vocabulary" => db::export_vocabulary_csv(&conn, path),
+        "replacements" => db::export_replacements_csv(&conn, path),
+        _ => Err(AppError::InvalidInput("Unknown dict type".into())),
+    }
+}

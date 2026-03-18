@@ -29,6 +29,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .manage(state::AppState::new(conn))
         .setup(|app| {
             tray::setup_tray(app.handle())?;
@@ -57,6 +58,8 @@ pub fn run() {
             commands::delete_api_key,
             commands::register_hotkey,
             commands::unregister_hotkey,
+            commands::import_dictionary_csv,
+            commands::export_dictionary_csv,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
