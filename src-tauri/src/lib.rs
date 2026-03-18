@@ -8,6 +8,7 @@ pub mod keychain;
 pub mod paster;
 pub mod permissions;
 pub mod pipeline;
+pub mod recorder;
 pub mod state;
 pub mod text_processor;
 
