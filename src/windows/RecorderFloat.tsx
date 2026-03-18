@@ -1,15 +1,26 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '../lib/logger';
+import {
+  type PipelineState,
+  PIPELINE_IDLE,
+  PIPELINE_RECORDING,
+  EVENT_RECORDING_STATE,
+  CMD_GET_PIPELINE_STATE,
+  PIPELINE_LABELS,
+  PIPELINE_COLORS,
+  PIPELINE_ANIMATIONS,
+  parsePipelineState,
+} from '../lib/pipeline';
 import SpriteAnimation, { type SpriteManifest } from '../components/SpriteAnimation';
 
-type PipelineState = 'recording' | 'transcribing' | 'enhancing' | 'pasting' | 'idle';
+const TIMER_INTERVAL_MS = 1000;
 
 export default function RecorderFloat() {
-  const [state, setState] = useState<PipelineState>('idle');
+  const [state, setState] = useState<PipelineState>(PIPELINE_IDLE);
   const [duration, setDuration] = useState(0);
   const timerRef = useRef<number | null>(null);
-  const prevStateRef = useRef<PipelineState>('idle');
+  const prevStateRef = useRef<PipelineState>(PIPELINE_IDLE);
 
   // Sprite
   const [spriteManifest, setSpriteManifest] = useState<SpriteManifest | null>(null);
@@ -33,40 +44,40 @@ export default function RecorderFloat() {
 
   useEffect(() => { loadSprite(); }, [loadSprite]);
 
+  // Shared state-transition handler
+  const applyState = useCallback((next: PipelineState) => {
+    if (next === PIPELINE_RECORDING && prevStateRef.current !== PIPELINE_RECORDING) {
+      setDuration(0);
+    }
+    prevStateRef.current = next;
+    setState(next);
+  }, []);
+
   // Listen to backend pipeline state events
   useEffect(() => {
     // One-time initial state sync on mount
-    invoke<{ state: string }>('get_pipeline_state')
-      .then((result) => {
-        const s = (result.state ?? 'idle') as PipelineState;
-        prevStateRef.current = s;
-        setState(s);
-      })
+    invoke<{ state: string }>(CMD_GET_PIPELINE_STATE)
+      .then((result) => applyState(parsePipelineState(result.state)))
       .catch(() => { /* ignore */ });
 
-    const unlisten = listen<{ state: string }>('recording-state', (event) => {
-      const s = event.payload.state as PipelineState;
-      if (s === 'recording' && prevStateRef.current !== 'recording') {
-        setDuration(0);
-      }
-      prevStateRef.current = s;
-      setState(s);
+    const unlisten = listen<{ state: string }>(EVENT_RECORDING_STATE, (event) => {
+      applyState(parsePipelineState(event.payload.state));
     });
 
     return () => { unlisten.then((fn) => fn()); };
-  }, []);
+  }, [applyState]);
 
-  // Timer — only runs while state === 'recording'
+  // Timer — only runs while recording
   useEffect(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
 
-    if (state === 'recording') {
+    if (state === PIPELINE_RECORDING) {
       timerRef.current = window.setInterval(() => {
         setDuration(d => d + 1);
-      }, 1000);
+      }, TIMER_INTERVAL_MS);
     }
 
     return () => {
@@ -83,18 +94,10 @@ export default function RecorderFloat() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const stateLabel: Record<string, string> = {
-    recording: '录音中',
-    transcribing: '转录中...',
-    enhancing: '增强中...',
-    pasting: '粘贴中...',
-    idle: '',
-  };
-
   const hasSprite = spriteManifest && spriteImageSrc;
-  const isRecording = state === 'recording';
-
-  if (state === 'idle') return null;
+  const isRecording = state === PIPELINE_RECORDING;
+  const color = PIPELINE_COLORS[state];
+  const animation = PIPELINE_ANIMATIONS[state];
 
   return (
     <div
@@ -122,42 +125,40 @@ export default function RecorderFloat() {
           width: 80,
           height: 80,
           borderRadius: '50%',
-          background: isRecording ? '#ff4d4f' : '#1890ff',
+          background: color,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          animation: isRecording ? 'pulse 1.5s infinite' : 'none',
+          animation,
         }}>
           <span style={{ fontSize: 32, color: '#fff' }}>🎙</span>
         </div>
       )}
 
-      {state !== 'idle' && (
+      <div style={{
+        marginTop: 4,
+        padding: '2px 12px',
+        borderRadius: 12,
+        background: 'rgba(0,0,0,0.7)',
+        color: '#fff',
+        fontSize: 12,
+        fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+      }}>
         <div style={{
-          marginTop: 4,
-          padding: '2px 12px',
-          borderRadius: 12,
-          background: 'rgba(0,0,0,0.7)',
-          color: '#fff',
-          fontSize: 12,
-          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-        }}>
-          <div style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: isRecording ? '#ff4d4f' : '#1890ff',
-            animation: isRecording ? 'pulse 1.5s infinite' : 'none',
-          }} />
-          <span>{stateLabel[state]}</span>
-          {isRecording && (
-            <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(duration)}</span>
-          )}
-        </div>
-      )}
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: color,
+          animation,
+        }} />
+        <span>{PIPELINE_LABELS[state]}</span>
+        {isRecording && (
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(duration)}</span>
+        )}
+      </div>
 
       <style>{`
         @keyframes pulse {
