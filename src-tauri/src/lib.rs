@@ -83,6 +83,26 @@ pub fn run() {
         .setup(move |app| {
             tray::setup_tray(app.handle())?;
 
+            // Configure recorder window for transparent dragging on macOS
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Manager;
+                if let Some(win) = app.get_webview_window("recorder") {
+                    match win.ns_window() {
+                        Ok(raw) => {
+                            use objc::{msg_send, sel, sel_impl};
+                            let ptr = raw as cocoa::base::id;
+                            unsafe {
+                                let _: () = msg_send![ptr, setIgnoresMouseEvents: false];
+                                let _: () = msg_send![ptr, setMovableByWindowBackground: true];
+                            }
+                            info!("[wm] recorder NSWindow configured for mouse events");
+                        }
+                        Err(e) => info!("[wm] ns_window() failed: {:?}", e),
+                    }
+                }
+            }
+
             // Restore saved hotkey
             if let Some(shortcut) = &saved_hotkey {
                 let handle = app.handle().clone();
