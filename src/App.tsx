@@ -93,12 +93,28 @@ export default function App() {
     });
     const unlistenState = listen<{ state: string }>('recording-state', (event) => {
       pipelineRef.current = event.payload.state;
-      // Relay to all windows via BroadcastChannel
       broadcast('pipeline-state', event.payload.state);
     });
+
+    // Double ESC to cancel recording
+    let lastEsc = 0;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && pipelineRef.current !== 'idle') {
+        const now = Date.now();
+        if (now - lastEsc < 500) {
+          invoke('cancel_recording').catch(() => {});
+          lastEsc = 0;
+        } else {
+          lastEsc = now;
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+
     return () => {
       unlistenToggle.then((fn) => fn());
       unlistenState.then((fn) => fn());
+      window.removeEventListener('keydown', onKeyDown);
     };
   }, []);
 
