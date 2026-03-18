@@ -18,40 +18,89 @@ pub mod text_processor;
 pub mod tray;
 pub mod transcriber;
 pub mod vad;
+pub mod window_manager;
+
+use log::info;
+use state::AppPaths;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let data_dir = dirs::home_dir()
-        .expect("No home directory")
-        .join(".voiceink");
-    std::fs::create_dir_all(&data_dir).expect("Cannot create data dir");
+    // Bootstrap: use default data_dir for DB + logger init
+    let defaults = AppPaths::defaults();
+    std::fs::create_dir_all(&defaults.data_dir).expect("Cannot create data dir");
 
-    let db_path = data_dir.join("data.db");
+    // Init file logger
+    let log_path = defaults.data_dir.join("log.txt");
+    let log_file = std::fs::File::create(&log_path).expect("Cannot create log file");
+    simplelog::CombinedLogger::init(vec![
+        simplelog::TermLogger::new(
+            simplelog::LevelFilter::Info,
+            simplelog::Config::default(),
+            simplelog::TerminalMode::Mixed,
+            simplelog::ColorChoice::Auto,
+        ),
+        simplelog::WriteLogger::new(
+            simplelog::LevelFilter::Info,
+            simplelog::Config::default(),
+            log_file,
+        ),
+    ])
+    .expect("Cannot init logger");
+    info!("VoiceInk starting, log file: {}", log_path.display());
+
+    // Init DB
+    let db_path = defaults.data_dir.join("data.db");
     let conn = db::init_database(&db_path).expect("Cannot init database");
 
-    let models_dir = data_dir.join("models");
-    std::fs::create_dir_all(&models_dir).expect("Cannot create models dir");
+    // Read settings to build paths (overrides from DB)
+    let saved_settings = db::get_all_settings(&conn).unwrap_or_default();
+    let paths = AppPaths::from_settings(&saved_settings);
+    let saved_hotkey = saved_settings
+        .get("hotkey")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    info!("Paths: data={} models={} sprites={}",
+        paths.data_dir.display(), paths.models_dir.display(), paths.sprites_dir.display());
 
-    // Always sync daemon script from source to data_dir (handles updates)
-    let daemon_script = data_dir.join("mlx_funasr_daemon.py");
+    std::fs::create_dir_all(&paths.models_dir).expect("Cannot create models dir");
+
+    // Sync daemon script
+    let daemon_script = paths.data_dir.join("mlx_funasr_daemon.py");
     let dev_script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("resources/mlx_funasr_daemon.py");
     if dev_script.exists() {
         let _ = std::fs::copy(&dev_script, &daemon_script);
     }
-    let daemon = daemon::DaemonManager::new(daemon_script, data_dir.clone());
+    let daemon = daemon::DaemonManager::new(daemon_script, paths.data_dir.clone());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
-        .manage(state::AppState::new(conn, models_dir, daemon))
-        .setup(|app| {
+        .manage(state::AppState::new(conn, paths, daemon))
+        .setup(move |app| {
             tray::setup_tray(app.handle())?;
+
+            // Restore saved hotkey
+            if let Some(shortcut) = &saved_hotkey {
+                let handle = app.handle().clone();
+                match hotkey::register_shortcut(app.handle(), shortcut, move || {
+                    use tauri::Emitter;
+                    info!("[hotkey] triggered! emitting toggle-recording");
+                    let _ = handle.emit("toggle-recording", ());
+                }) {
+                    Ok(()) => info!("Restored hotkey: {}", shortcut),
+                    Err(e) => info!("Failed to restore hotkey {}: {}", shortcut, e),
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Log bridge
+            commands::frontend_log,
             // Recording pipeline
             commands::start_recording,
             commands::stop_recording,
@@ -103,6 +152,9 @@ pub fn run() {
             commands::daemon_check_deps,
             commands::daemon_load_model,
             commands::daemon_unload_model,
+            // Sprite sheets
+            commands::list_sprites,
+            commands::get_sprite_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

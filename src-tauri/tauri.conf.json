@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "voiceink-tauri",
@@ -22,15 +23,16 @@
         "label": "recorder",
         "title": "VoiceInk Recorder",
         "url": "recorder.html",
-        "width": 300,
-        "height": 80,
+        "width": 200,
+        "height": 200,
+        "x": 600,
+        "y": 30,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
         "resizable": false,
         "visible": false,
-        "skipTaskbar": true,
-        "center": true
+        "skipTaskbar": true
       }
     ],
     "security": {

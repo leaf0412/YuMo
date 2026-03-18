@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use log::{info, error};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, State};
 
@@ -12,6 +13,18 @@ use crate::state::AppState;
 use crate::{audio_ctrl, paster, permissions, recorder, text_processor, transcriber};
 
 // ---------------------------------------------------------------------------
+// Frontend log bridge — writes frontend logs to the same log.txt
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn frontend_log(level: String, message: String) {
+    match level.as_str() {
+        "error" => error!("[frontend] {}", message),
+        _ => info!("[frontend] {}", message),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Recording pipeline
 // ---------------------------------------------------------------------------
 
@@ -21,20 +34,29 @@ pub async fn start_recording(
     state: State<'_, AppState>,
     device_id: Option<u32>,
 ) -> Result<(), AppError> {
+    info!("[pipeline] start_recording called, device_id={:?}", device_id);
+
     // 1. Check we're idle
     {
         let pipeline = state
             .pipeline_state
             .lock()
             .map_err(|e| AppError::Recording(e.to_string()))?;
+        info!("[pipeline] current state: {:?}", *pipeline);
         if *pipeline != PipelineState::Idle {
+            error!("[pipeline] not idle, rejecting start_recording");
             return Err(AppError::Recording("Already recording".into()));
         }
     }
 
     // 2. Get device
     let devices = recorder::list_input_devices();
+    info!("[pipeline] found {} input devices", devices.len());
+    for d in &devices {
+        info!("[pipeline]   device: id={} name={:?} default={}", d.id, d.name, d.is_default);
+    }
     if devices.is_empty() {
+        error!("[pipeline] no input devices found");
         return Err(AppError::Recording("No input devices found".into()));
     }
     let dev_id = device_id.unwrap_or_else(|| {
@@ -44,6 +66,7 @@ pub async fn start_recording(
             .map(|d| d.id)
             .unwrap_or(devices[0].id)
     });
+    info!("[pipeline] using device_id={}", dev_id);
 
     // 3. Mute system audio if enabled
     let settings = {
@@ -53,17 +76,22 @@ pub async fn start_recording(
             .map_err(|e| AppError::Database(e.to_string()))?;
         db::get_all_settings(&conn)?
     };
-    if settings
+    let mute = settings
         .get("system_mute_enabled")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
+        .unwrap_or(false);
+    info!("[pipeline] system_mute_enabled={}", mute);
+    if mute {
         audio_ctrl::set_system_muted(true);
     }
 
     // 4. Start recording
-    let (handle, _level_rx) =
-        recorder::start_recording(dev_id).map_err(|e| AppError::Recording(e.to_string()))?;
+    info!("[pipeline] calling recorder::start_recording...");
+    let (handle, _level_rx) = recorder::start_recording(dev_id).map_err(|e| {
+        error!("[pipeline] recorder::start_recording failed: {}", e);
+        AppError::Recording(e.to_string())
+    })?;
+    info!("[pipeline] recording started successfully");
 
     // 5. Store handle and update state
     {
@@ -80,12 +108,17 @@ pub async fn start_recording(
             .map_err(|e| AppError::Recording(e.to_string()))?;
         *pipeline = PipelineState::Recording;
     }
+    info!("[pipeline] state -> Recording");
 
     // 6. Emit state change
     let _ = app.emit(
         "recording-state",
         serde_json::json!({"state": "recording"}),
     );
+    info!("[pipeline] emitted recording-state=recording");
+
+    // 7. Show floating recorder window
+    crate::window_manager::WindowManager::new(app.clone()).show("recorder");
 
     Ok(())
 }
@@ -95,6 +128,8 @@ pub async fn stop_recording(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), AppError> {
+    info!("[pipeline] stop_recording called");
+
     // 1. Take recording handle
     let handle = {
         state
@@ -102,12 +137,24 @@ pub async fn stop_recording(
             .lock()
             .map_err(|e| AppError::Recording(e.to_string()))?
             .take()
-            .ok_or_else(|| AppError::Recording("Not recording".into()))?
+            .ok_or_else(|| {
+                error!("[pipeline] stop_recording: no recording handle (not recording)");
+                AppError::Recording("Not recording".into())
+            })?
     };
 
     // 2. Stop recording
-    let audio_data =
-        recorder::stop_recording(handle).map_err(|e| AppError::Recording(e.to_string()))?;
+    info!("[pipeline] stopping recorder...");
+    let audio_data = recorder::stop_recording(handle).map_err(|e| {
+        error!("[pipeline] recorder::stop_recording failed: {}", e);
+        AppError::Recording(e.to_string())
+    })?;
+    info!(
+        "[pipeline] recording stopped, samples={} sample_rate={} channels={}",
+        audio_data.pcm_samples.len(),
+        audio_data.sample_rate,
+        audio_data.channels
+    );
 
     // 3. Update state -> Transcribing
     {
@@ -121,6 +168,7 @@ pub async fn stop_recording(
         "recording-state",
         serde_json::json!({"state": "transcribing"}),
     );
+    info!("[pipeline] state -> Transcribing");
 
     // 4. Read settings
     let settings_map = {
@@ -144,23 +192,87 @@ pub async fn stop_recording(
         .get("enhancement_enabled")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    info!(
+        "[pipeline] settings: model_id={:?} language={:?} enhancement={}",
+        model_id, language, enhancement_enabled
+    );
 
     // 5. Transcribe — route by model provider
-    let all = transcriber::all_models(&state.models_dir);
+    let all = transcriber::all_models(&state.paths.models_dir);
     let model_info = all.iter().find(|m| m.id == model_id);
+    info!(
+        "[pipeline] model lookup: found={} provider={:?}",
+        model_info.is_some(),
+        model_info.map(|m| format!("{:?}", m.provider))
+    );
 
-    let result = match model_info.map(|m| &m.provider) {
+    info!("[pipeline] effective language: {:?}", language);
+
+    let transcribe_result = match model_info.map(|m| &m.provider) {
         Some(transcriber::ModelProvider::MlxFunASR) => {
+            // Auto-start daemon if not running
+            if !state.daemon.is_running() {
+                info!("[pipeline] daemon not running, starting...");
+                if let Err(e) = state.daemon.start() {
+                    error!("[pipeline] daemon start failed: {}", e);
+                    let mut pipeline = state
+                        .pipeline_state
+                        .lock()
+                        .map_err(|e| AppError::Recording(e.to_string()))?;
+                    *pipeline = PipelineState::Idle;
+                    let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
+                    return Err(e);
+                }
+                info!("[pipeline] daemon started");
+            }
+            // Auto-load model if not loaded
+            let model_repo = model_info.and_then(|m| m.model_repo.clone());
+            let loaded = state.daemon.loaded_model();
+            if model_repo.is_some() && loaded.as_ref() != model_repo.as_ref() {
+                let repo = model_repo.as_ref().unwrap();
+                info!("[pipeline] loading MLX model: {}", repo);
+                let cmd = serde_json::json!({"action": "load", "model": repo});
+                match state.daemon.send_command(&cmd) {
+                    Ok(resp) if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" => {
+                        state.daemon.set_loaded_model(model_repo.clone());
+                        info!("[pipeline] MLX model loaded");
+                    }
+                    Ok(resp) => {
+                        let msg = resp.error.unwrap_or_else(|| format!("load failed: {}", resp.status));
+                        error!("[pipeline] MLX model load failed: {}", msg);
+                        let mut pipeline = state
+                            .pipeline_state
+                            .lock()
+                            .map_err(|e| AppError::Recording(e.to_string()))?;
+                        *pipeline = PipelineState::Idle;
+                        let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
+                        return Err(AppError::Transcription(msg));
+                    }
+                    Err(e) => {
+                        error!("[pipeline] MLX model load command failed: {}", e);
+                        let mut pipeline = state
+                            .pipeline_state
+                            .lock()
+                            .map_err(|e| AppError::Recording(e.to_string()))?;
+                        *pipeline = PipelineState::Idle;
+                        let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
+                        return Err(e);
+                    }
+                }
+            }
+            info!("[pipeline] transcribing via MLX daemon (language={})...", language);
             transcriber::transcribe_via_daemon(
                 &state.daemon,
                 &audio_data.pcm_samples,
                 audio_data.sample_rate,
                 &language,
-            )?
+            )
         }
         _ => {
-            let model_path = transcriber::model_path(&state.models_dir, &model_id);
+            let model_path = transcriber::model_path(&state.paths.models_dir, &model_id);
+            info!("[pipeline] model path: {:?} exists={}", model_path, model_path.exists());
             if !model_path.exists() {
+                error!("[pipeline] model file not found: {:?}", model_path);
                 let mut pipeline = state
                     .pipeline_state
                     .lock()
@@ -169,16 +281,42 @@ pub async fn stop_recording(
                 let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
                 return Err(AppError::Transcription("No model downloaded".into()));
             }
-            let ctx = transcriber::load_model(&model_path)?;
+            info!("[pipeline] loading whisper model...");
+            let ctx = transcriber::load_model(&model_path).map_err(|e| {
+                error!("[pipeline] load_model failed: {}", e);
+                e
+            })?;
+            info!("[pipeline] transcribing via whisper (language={})...", language);
             transcriber::transcribe(
                 &ctx,
                 &audio_data.pcm_samples,
                 audio_data.sample_rate,
                 &language,
-            )?
+            )
+        }
+    };
+
+    // Handle transcription failure — reset pipeline to Idle
+    let result = match transcribe_result {
+        Ok(r) => r,
+        Err(e) => {
+            error!("[pipeline] transcription failed: {}", e);
+            let mut pipeline = state
+                .pipeline_state
+                .lock()
+                .map_err(|er| AppError::Recording(er.to_string()))?;
+            *pipeline = PipelineState::Idle;
+            let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
+            return Err(e);
         }
     };
     let text = result.text;
+    info!(
+        "[pipeline] transcription done in {}ms, text length={}, text={:?}",
+        result.duration_ms,
+        text.len(),
+        if text.len() > 200 { &text[..200] } else { &text }
+    );
 
     // 6. Apply text processing
     let replacements: Vec<(String, String)> = {
@@ -196,9 +334,11 @@ pub async fn stop_recording(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
     let processed_text = text_processor::process_text(&text, &replacements, auto_capitalize);
+    info!("[pipeline] processed text: {:?}", if processed_text.len() > 200 { &processed_text[..200] } else { &processed_text });
 
     // 7. Optional AI enhancement
     let enhanced_text: Option<String> = if enhancement_enabled {
+        info!("[pipeline] enhancement enabled, entering Enhancing state");
         {
             let mut pipeline = state
                 .pipeline_state
@@ -212,9 +352,10 @@ pub async fn stop_recording(
         );
 
         // TODO: integrate with keychain and enhancer module
-        // For now, skip enhancement if no API key is configured
+        info!("[pipeline] enhancement not implemented yet, skipping");
         None
     } else {
+        info!("[pipeline] enhancement disabled, skipping");
         None
     };
 
@@ -232,14 +373,22 @@ pub async fn stop_recording(
     );
 
     let final_text = enhanced_text.as_deref().unwrap_or(&processed_text);
-    let restore_delay = settings_map
-        .get("clipboard_restore_delay")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(1500.0) as u64;
-    paster::paste_text(final_text, restore_delay);
+
+    if permissions::check_accessibility() {
+        let restore_delay = settings_map
+            .get("clipboard_restore_delay")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1500.0) as u64;
+        info!("[pipeline] accessibility=true, paste+restore (delay={}ms)", restore_delay);
+        paster::paste_text(final_text, restore_delay);
+    } else {
+        info!("[pipeline] accessibility=false, writing to clipboard only");
+        paster::write_clipboard(final_text);
+    }
 
     // 9. Save to DB
     let word_count = final_text.split_whitespace().count() as i32;
+    info!("[pipeline] saving to DB, word_count={}", word_count);
     {
         let conn = state
             .db
@@ -254,6 +403,7 @@ pub async fn stop_recording(
             word_count,
         )?;
     }
+    info!("[pipeline] saved to DB");
 
     // 10. Unmute system audio
     if settings_map
@@ -262,6 +412,7 @@ pub async fn stop_recording(
         .unwrap_or(false)
     {
         audio_ctrl::set_system_muted(false);
+        info!("[pipeline] unmuted system audio");
     }
 
     // 11. Back to idle
@@ -280,6 +431,10 @@ pub async fn stop_recording(
             "enhanced_text": enhanced_text,
         }),
     );
+    info!("[pipeline] stop_recording complete, state -> Idle");
+
+    // Hide floating recorder window
+    crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
 
     Ok(())
 }
@@ -289,6 +444,7 @@ pub fn cancel_recording(
     app: AppHandle,
     state: State<AppState>,
 ) -> Result<(), AppError> {
+    info!("[cmd] cancel_recording");
     let handle = state
         .recording_handle
         .lock()
@@ -320,21 +476,25 @@ pub fn cancel_recording(
     }
 
     let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
+    crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
     Ok(())
 }
 
 #[tauri::command]
 pub fn list_audio_devices() -> Vec<recorder::AudioInputDevice> {
+    info!("[cmd] list_audio_devices");
     recorder::list_input_devices()
 }
 
 #[tauri::command]
 pub fn check_permissions() -> permissions::PermissionStatus {
+    info!("[cmd] check_permissions");
     permissions::check_all()
 }
 
 #[tauri::command]
 pub fn request_permission(permission_type: String) {
+    info!("[cmd] request_permission: {}", permission_type);
     match permission_type.as_str() {
         "microphone" => permissions::open_microphone_settings(),
         "accessibility" => permissions::open_accessibility_settings(),
@@ -344,7 +504,8 @@ pub fn request_permission(permission_type: String) {
 
 #[tauri::command]
 pub fn list_available_models(state: State<AppState>) -> Vec<transcriber::ModelInfo> {
-    transcriber::all_models(&state.models_dir)
+    info!("[cmd] list_available_models");
+    transcriber::all_models(&state.paths.models_dir)
 }
 
 #[tauri::command]
@@ -353,14 +514,15 @@ pub async fn download_model(
     state: State<'_, AppState>,
     model_id: String,
 ) -> Result<(), AppError> {
+    info!("[cmd] download_model: {}", model_id);
     let models = transcriber::predefined_models();
     let model = models
         .iter()
         .find(|m| m.id == model_id)
         .ok_or_else(|| AppError::NotFound(format!("Model {} not found", model_id)))?;
 
-    let dest = transcriber::model_path(&state.models_dir, &model_id);
-    std::fs::create_dir_all(&state.models_dir)?;
+    let dest = transcriber::model_path(&state.paths.models_dir, &model_id);
+    std::fs::create_dir_all(&state.paths.models_dir)?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(100);
     let url = model.download_url.clone();
@@ -388,7 +550,7 @@ pub async fn download_model(
 
 #[tauri::command]
 pub fn delete_model(state: State<AppState>, model_id: String) -> Result<(), AppError> {
-    let path = transcriber::model_path(&state.models_dir, &model_id);
+    let path = transcriber::model_path(&state.paths.models_dir, &model_id);
     if path.exists() {
         std::fs::remove_file(&path)?;
     }
@@ -418,7 +580,7 @@ pub async fn import_model(app: AppHandle, state: State<'_, AppState>) -> Result<
         .file_name()
         .ok_or_else(|| AppError::Io("无效文件名".into()))?;
 
-    let dest = state.models_dir.join(file_name);
+    let dest = state.paths.models_dir.join(file_name);
     std::fs::copy(&src, &dest)?;
 
     Ok(true)
@@ -603,17 +765,27 @@ pub fn register_hotkey(
     state: State<AppState>,
     shortcut: String,
 ) -> Result<(), AppError> {
+    info!("[hotkey] register_hotkey called: {:?}", shortcut);
+
     // Persist the shortcut string in settings
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::update_setting(&conn, "hotkey", &Value::String(shortcut.clone()))?;
     drop(conn);
 
     // Clear any previously registered shortcuts, then register the new one.
-    hotkey::unregister_all(&app).map_err(|e| AppError::Io(e.to_string()))?;
-    hotkey::register_shortcut(&app, &shortcut, || {
-        // TODO: trigger recording toggle via app event
+    hotkey::unregister_all(&app).map_err(|e| {
+        error!("[hotkey] unregister_all failed: {}", e);
+        AppError::Io(e.to_string())
+    })?;
+    let app_clone = app.clone();
+    hotkey::register_shortcut(&app, &shortcut, move || {
+        info!("[hotkey] shortcut triggered, emitting toggle-recording");
+        let _ = app_clone.emit("toggle-recording", ());
     })
-    .map_err(|e| AppError::Io(e.to_string()))
+    .map_err(|e| {
+        error!("[hotkey] register_shortcut failed: {:?} error: {}", shortcut, e);
+        AppError::Io(e.to_string())
+    })
 }
 
 #[tauri::command]
@@ -703,4 +875,120 @@ pub fn daemon_unload_model(state: State<AppState>) -> Result<(), AppError> {
     state.daemon.send_command(&cmd)?;
     state.daemon.set_loaded_model(None);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Sprite Sheets (shared with native VoiceInk)
+// ---------------------------------------------------------------------------
+
+/// List all available sprite sheet manifests.
+#[tauri::command]
+pub fn list_sprites(state: State<AppState>) -> Result<Vec<Value>, AppError> {
+    let base = &state.paths.sprites_dir;
+    if !base.exists() {
+        return Ok(vec![]);
+    }
+    let mut results = Vec::new();
+    for entry in std::fs::read_dir(&base)? {
+        let entry = entry?;
+        if !entry.path().is_dir() { continue; }
+        let manifest_path = entry.path().join("manifest.json");
+        if manifest_path.exists() {
+            let data = std::fs::read_to_string(&manifest_path)?;
+            if let Ok(mut manifest) = serde_json::from_str::<Value>(&data) {
+                // Add the directory id so frontend knows where to find the image
+                let dir_name = entry.file_name().to_string_lossy().to_string();
+                manifest.as_object_mut().map(|m| m.insert("dirId".into(), Value::String(dir_name)));
+                results.push(manifest);
+            }
+        }
+    }
+    Ok(results)
+}
+
+/// Read a sprite sheet image file as base64 data URI.
+#[tauri::command]
+pub fn get_sprite_image(state: State<AppState>, dir_id: String, file_name: String) -> Result<String, AppError> {
+    let path = state.paths.sprites_dir.join(&dir_id).join(&file_name);
+    if !path.exists() {
+        // Try processed version
+        let processed = state.paths.sprites_dir.join(&dir_id).join("sprite_processed.png");
+        if processed.exists() {
+            let data = std::fs::read(&processed)?;
+            let b64 = base64_encode(&data);
+            return Ok(format!("data:image/png;base64,{}", b64));
+        }
+        return Err(AppError::NotFound(format!("Sprite image not found: {}", path.display())));
+    }
+    let data = std::fs::read(&path)?;
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
+    let mime = match ext {
+        "gif" => "image/gif",
+        "jpg" | "jpeg" => "image/jpeg",
+        _ => "image/png",
+    };
+    let b64 = base64_encode(&data);
+    Ok(format!("data:{};base64,{}", mime, b64))
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_base64_encode_empty() {
+        assert_eq!(base64_encode(b""), "");
+    }
+
+    #[test]
+    fn test_base64_encode_one_byte() {
+        // "A" -> "QQ=="
+        assert_eq!(base64_encode(b"A"), "QQ==");
+    }
+
+    #[test]
+    fn test_base64_encode_two_bytes() {
+        // "AB" -> "QUI="
+        assert_eq!(base64_encode(b"AB"), "QUI=");
+    }
+
+    #[test]
+    fn test_base64_encode_three_bytes() {
+        // "ABC" -> "QUJD"
+        assert_eq!(base64_encode(b"ABC"), "QUJD");
+    }
+
+    #[test]
+    fn test_base64_encode_hello_world() {
+        assert_eq!(base64_encode(b"Hello, World!"), "SGVsbG8sIFdvcmxkIQ==");
+    }
+
+    #[test]
+    fn test_base64_encode_binary() {
+        assert_eq!(base64_encode(&[0x00, 0xFF, 0x80]), "AP+A");
+    }
 }
