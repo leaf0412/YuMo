@@ -34,7 +34,9 @@ coreaudio-sys = "0.2"
 cocoa = "0.26"
 objc = "0.2"
 core-graphics = "0.24"
+futures-util = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["full", "test-util"] }
 

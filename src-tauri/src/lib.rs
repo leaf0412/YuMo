@@ -1,6 +1,7 @@
 pub mod audio_ctrl;
 pub mod commands;
 pub mod db;
+pub mod downloader;
 pub mod enhancer;
 pub mod error;
 pub mod paster;
