@@ -1,8 +1,10 @@
 pub mod audio_ctrl;
-pub mod paster;
 pub mod commands;
 pub mod db;
+pub mod enhancer;
 pub mod error;
+pub mod paster;
+pub mod permissions;
 pub mod state;
 pub mod text_processor;
 
