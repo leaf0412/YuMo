@@ -1,51 +1,67 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { Layout, Menu, Typography } from 'antd';
+import {
+  DashboardOutlined,
+  HistoryOutlined,
+  CloudDownloadOutlined,
+  BookOutlined,
+  ThunderboltOutlined,
+  SettingOutlined,
+} from '@ant-design/icons';
+import Dashboard from './pages/Dashboard';
+import History from './pages/History';
+import Models from './pages/Models';
+import Dictionary from './pages/Dictionary';
+import Enhancement from './pages/Enhancement';
+import Settings from './pages/Settings';
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+const { Sider, Content } = Layout;
+const { Title } = Typography;
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+const menuItems = [
+  { key: '/', icon: <DashboardOutlined />, label: '仪表盘' },
+  { key: '/history', icon: <HistoryOutlined />, label: '转录历史' },
+  { key: '/models', icon: <CloudDownloadOutlined />, label: '模型管理' },
+  { key: '/dictionary', icon: <BookOutlined />, label: '词典' },
+  { key: '/enhancement', icon: <ThunderboltOutlined />, label: 'AI 增强' },
+  { key: '/settings', icon: <SettingOutlined />, label: '设置' },
+];
+
+function AppLayout() {
+  const navigate = useNavigate();
+  const location = useLocation();
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
+    <Layout style={{ minHeight: '100vh' }}>
+      <Sider width={200} theme="light">
+        <div style={{ padding: '16px', textAlign: 'center' }}>
+          <Title level={4} style={{ margin: 0 }}>VoiceInk</Title>
+        </div>
+        <Menu
+          mode="inline"
+          selectedKeys={[location.pathname]}
+          items={menuItems}
+          onClick={({ key }) => navigate(key)}
         />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+      </Sider>
+      <Content style={{ padding: '24px' }}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/history" element={<History />} />
+          <Route path="/models" element={<Models />} />
+          <Route path="/dictionary" element={<Dictionary />} />
+          <Route path="/enhancement" element={<Enhancement />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </Content>
+    </Layout>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppLayout />
+    </BrowserRouter>
+  );
+}
