@@ -5,6 +5,7 @@ use tauri::State;
 
 use crate::db::{self, PaginatedResult, Prompt, Replacement, VocabularyWord};
 use crate::error::AppError;
+use crate::keychain;
 use crate::state::AppState;
 
 // ---------------------------------------------------------------------------
@@ -155,4 +156,23 @@ pub fn select_prompt(state: State<AppState>, id: String) -> Result<(), AppError>
 pub fn select_model(state: State<AppState>, model_id: String) -> Result<(), AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::update_setting(&conn, "selected_model_id", &Value::String(model_id))
+}
+
+// ---------------------------------------------------------------------------
+// Keychain (API key storage)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn store_api_key(provider: String, key: String) -> Result<(), AppError> {
+    keychain::store_key("com.voiceink.app", &provider, &key)
+}
+
+#[tauri::command]
+pub fn get_api_key(provider: String) -> Result<Option<String>, AppError> {
+    keychain::get_key("com.voiceink.app", &provider)
+}
+
+#[tauri::command]
+pub fn delete_api_key(provider: String) -> Result<(), AppError> {
+    keychain::delete_key("com.voiceink.app", &provider)
 }

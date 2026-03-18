@@ -4,6 +4,7 @@ pub mod db;
 pub mod downloader;
 pub mod enhancer;
 pub mod error;
+pub mod keychain;
 pub mod paster;
 pub mod permissions;
 pub mod pipeline;
@@ -40,6 +41,9 @@ pub fn run() {
             commands::delete_prompt,
             commands::select_prompt,
             commands::select_model,
+            commands::store_api_key,
+            commands::get_api_key,
+            commands::delete_api_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
