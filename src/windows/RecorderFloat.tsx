@@ -122,8 +122,8 @@ export default function RecorderFloat() {
           manifest={spriteManifest}
           imageSrc={spriteImageSrc}
           isPlaying={isRecording}
-          width={160}
-          height={160}
+          width={180}
+          height={180}
         />
       ) : (
         <div style={{
