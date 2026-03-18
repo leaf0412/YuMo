@@ -5,6 +5,7 @@ pub mod enhancer;
 pub mod error;
 pub mod paster;
 pub mod permissions;
+pub mod pipeline;
 pub mod state;
 pub mod text_processor;
 
