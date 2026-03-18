@@ -118,8 +118,30 @@ impl WindowManager {
             self.save_position(label, &wp);
         }
 
+        // Check if main window is visible before hiding
+        let main_was_visible = self.app.get_webview_window("main")
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false);
+
         let _ = win.hide();
         info!("[wm] '{}' hidden", label);
+
+        // If main window wasn't visible before, hide the app to prevent
+        // macOS from auto-focusing it when recorder disappears
+        if label == "recorder" && !main_was_visible {
+            #[cfg(target_os = "macos")]
+            {
+                use objc::{msg_send, sel, sel_impl};
+                unsafe {
+                    let app: cocoa::base::id = msg_send![
+                        objc::runtime::Class::get("NSApplication").unwrap(),
+                        sharedApplication
+                    ];
+                    let _: () = msg_send![app, hide: cocoa::base::nil];
+                }
+                info!("[wm] app hidden to prevent main window focus");
+            }
+        }
     }
 
     /// Toggle visibility of a window.
