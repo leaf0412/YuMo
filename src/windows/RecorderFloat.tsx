@@ -157,6 +157,23 @@ export default function RecorderFloat() {
         {isRecording && (
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(duration)}</span>
         )}
+        {/* Cancel button — no drag region so it's clickable */}
+        <span
+          onClick={(e) => {
+            e.stopPropagation();
+            invoke('cancel_recording').catch(() => {});
+          }}
+          style={{
+            cursor: 'pointer',
+            marginLeft: 4,
+            opacity: 0.7,
+            fontSize: 14,
+            lineHeight: 1,
+          }}
+          title="取消"
+        >
+          ✕
+        </span>
       </div>
 
       <style>{`
