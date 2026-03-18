@@ -4,6 +4,13 @@ use std::path::{Path, PathBuf};
 use crate::error::AppError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelProvider {
+    Local,
+    MlxFunASR,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
     pub name: String,
@@ -11,6 +18,11 @@ pub struct ModelInfo {
     pub languages: Vec<String>,
     pub download_url: String,
     pub is_downloaded: bool,
+    pub provider: ModelProvider,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_repo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +40,9 @@ pub fn predefined_models() -> Vec<ModelInfo> {
             languages: vec!["en".into()],
             download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin".into(),
             is_downloaded: false,
+            provider: ModelProvider::Local,
+            model_repo: None,
+            description: None,
         },
         ModelInfo {
             id: "ggml-tiny".into(),
@@ -36,6 +51,9 @@ pub fn predefined_models() -> Vec<ModelInfo> {
             languages: vec!["multi".into()],
             download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin".into(),
             is_downloaded: false,
+            provider: ModelProvider::Local,
+            model_repo: None,
+            description: None,
         },
         ModelInfo {
             id: "ggml-base.en".into(),
@@ -44,6 +62,9 @@ pub fn predefined_models() -> Vec<ModelInfo> {
             languages: vec!["en".into()],
             download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin".into(),
             is_downloaded: false,
+            provider: ModelProvider::Local,
+            model_repo: None,
+            description: None,
         },
         ModelInfo {
             id: "ggml-base".into(),
@@ -52,6 +73,9 @@ pub fn predefined_models() -> Vec<ModelInfo> {
             languages: vec!["multi".into()],
             download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin".into(),
             is_downloaded: false,
+            provider: ModelProvider::Local,
+            model_repo: None,
+            description: None,
         },
         ModelInfo {
             id: "ggml-small.en".into(),
@@ -60,6 +84,9 @@ pub fn predefined_models() -> Vec<ModelInfo> {
             languages: vec!["en".into()],
             download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin".into(),
             is_downloaded: false,
+            provider: ModelProvider::Local,
+            model_repo: None,
+            description: None,
         },
         ModelInfo {
             id: "ggml-small".into(),
@@ -68,6 +95,9 @@ pub fn predefined_models() -> Vec<ModelInfo> {
             languages: vec!["multi".into()],
             download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin".into(),
             is_downloaded: false,
+            provider: ModelProvider::Local,
+            model_repo: None,
+            description: None,
         },
         ModelInfo {
             id: "ggml-medium.en".into(),
@@ -76,6 +106,9 @@ pub fn predefined_models() -> Vec<ModelInfo> {
             languages: vec!["en".into()],
             download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin".into(),
             is_downloaded: false,
+            provider: ModelProvider::Local,
+            model_repo: None,
+            description: None,
         },
         ModelInfo {
             id: "ggml-medium".into(),
@@ -84,6 +117,9 @@ pub fn predefined_models() -> Vec<ModelInfo> {
             languages: vec!["multi".into()],
             download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin".into(),
             is_downloaded: false,
+            provider: ModelProvider::Local,
+            model_repo: None,
+            description: None,
         },
         ModelInfo {
             id: "ggml-large-v3".into(),
@@ -92,8 +128,109 @@ pub fn predefined_models() -> Vec<ModelInfo> {
             languages: vec!["multi".into()],
             download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin".into(),
             is_downloaded: false,
+            provider: ModelProvider::Local,
+            model_repo: None,
+            description: None,
         },
     ]
+}
+
+pub fn predefined_mlx_models() -> Vec<ModelInfo> {
+    vec![
+        ModelInfo {
+            id: "mlx-funasr-nano-8bit".into(),
+            name: "MLX Fun-ASR Nano (8-bit)".into(),
+            size_mb: 2000,
+            languages: vec!["multi".into()],
+            download_url: String::new(),
+            is_downloaded: false,
+            provider: ModelProvider::MlxFunASR,
+            model_repo: Some("mlx-community/Fun-ASR-MLT-Nano-2512-8bit".into()),
+            description: Some("8-bit quantized, fast inference".into()),
+        },
+        ModelInfo {
+            id: "mlx-funasr-nano-bf16".into(),
+            name: "MLX Fun-ASR Nano (BF16)".into(),
+            size_mb: 4000,
+            languages: vec!["multi".into()],
+            download_url: String::new(),
+            is_downloaded: false,
+            provider: ModelProvider::MlxFunASR,
+            model_repo: Some("mlx-community/Fun-ASR-MLT-Nano-2512-bf16".into()),
+            description: Some("BF16 precision, higher quality".into()),
+        },
+        ModelInfo {
+            id: "mlx-qwen3-asr-0.6b-bf16".into(),
+            name: "Qwen3-ASR 0.6B (BF16)".into(),
+            size_mb: 1200,
+            languages: vec!["multi".into()],
+            download_url: String::new(),
+            is_downloaded: false,
+            provider: ModelProvider::MlxFunASR,
+            model_repo: Some("mlx-community/Qwen3-ASR-0.6B-bf16".into()),
+            description: Some("Qwen3, 30+ languages".into()),
+        },
+        ModelInfo {
+            id: "mlx-qwen3-asr-0.6b-8bit".into(),
+            name: "Qwen3-ASR 0.6B (8-bit)".into(),
+            size_mb: 700,
+            languages: vec!["multi".into()],
+            download_url: String::new(),
+            is_downloaded: false,
+            provider: ModelProvider::MlxFunASR,
+            model_repo: Some("mlx-community/Qwen3-ASR-0.6B-8bit".into()),
+            description: Some("Qwen3 quantized, fast".into()),
+        },
+    ]
+}
+
+/// Check if an MLX model is available in the HuggingFace hub cache.
+/// Looks for any `.safetensors` file under the model's snapshots directory.
+pub fn check_mlx_model_downloaded(model_repo: &str) -> bool {
+    let cache_name = model_repo.replace('/', "--");
+    let cache_path = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".cache/huggingface/hub")
+        .join(format!("models--{}", cache_name))
+        .join("snapshots");
+
+    if !cache_path.exists() {
+        return false;
+    }
+
+    if let Ok(entries) = std::fs::read_dir(&cache_path) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                if let Ok(files) = std::fs::read_dir(entry.path()) {
+                    for file in files.flatten() {
+                        if file
+                            .path()
+                            .extension()
+                            .map(|e| e == "safetensors")
+                            .unwrap_or(false)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
+pub fn all_models(models_dir: &Path) -> Vec<ModelInfo> {
+    let local_models = check_downloaded_models(models_dir);
+
+    let mut mlx_models = predefined_mlx_models();
+    for model in &mut mlx_models {
+        if let Some(repo) = &model.model_repo {
+            model.is_downloaded = check_mlx_model_downloaded(repo);
+        }
+    }
+
+    local_models.into_iter().chain(mlx_models).collect()
 }
 
 /// Return the path for a model, preferring a file that already exists in any

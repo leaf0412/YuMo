@@ -32,12 +32,23 @@ pub fn run() {
     let models_dir = data_dir.join("models");
     std::fs::create_dir_all(&models_dir).expect("Cannot create models dir");
 
+    // Daemon script: for dev, copy from resources/ to data_dir if needed
+    let daemon_script = data_dir.join("mlx_funasr_daemon.py");
+    if !daemon_script.exists() {
+        let dev_script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources/mlx_funasr_daemon.py");
+        if dev_script.exists() {
+            let _ = std::fs::copy(&dev_script, &daemon_script);
+        }
+    }
+    let daemon = daemon::DaemonManager::new(daemon_script, data_dir.clone());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
-        .manage(state::AppState::new(conn, models_dir))
+        .manage(state::AppState::new(conn, models_dir, daemon))
         .setup(|app| {
             tray::setup_tray(app.handle())?;
             Ok(())
