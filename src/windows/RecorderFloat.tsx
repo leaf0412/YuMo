@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { invoke } from '../lib/logger';
 import { onBroadcast } from '../lib/broadcast';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   type PipelineState,
   PIPELINE_IDLE,
@@ -26,25 +27,29 @@ export default function RecorderFloat() {
   const [spriteImageSrc, setSpriteImageSrc] = useState<string | null>(null);
 
   const loadSprite = useCallback(async () => {
+    invoke('frontend_log', { level: 'info', message: '[recorder] loadSprite start' });
     try {
       const sprites = await invoke<(SpriteManifest & { dirId: string })[]>('list_sprites');
+      invoke('frontend_log', { level: 'info', message: `[recorder] sprites found: ${sprites.length}` });
       if (sprites.length === 0) return;
       const first = sprites[0];
       setSpriteManifest(first);
       try {
         const uri = await invoke<string>('get_sprite_image', { dirId: first.dirId, fileName: 'sprite_processed.png' });
+        invoke('frontend_log', { level: 'info', message: `[recorder] sprite image loaded, len=${uri.length}` });
         setSpriteImageSrc(uri);
       } catch {
         const uri = await invoke<string>('get_sprite_image', { dirId: first.dirId, fileName: first.spriteFile });
         setSpriteImageSrc(uri);
       }
-    } catch { /* no sprites */ }
+    } catch (e) { invoke('frontend_log', { level: 'error', message: `[recorder] loadSprite failed: ${e}` }); }
   }, []);
 
   useEffect(() => { loadSprite(); }, [loadSprite]);
 
   // Shared state-transition handler
   const applyState = useCallback((next: PipelineState) => {
+    invoke('frontend_log', { level: 'info', message: `[recorder] state: ${prevStateRef.current} -> ${next}` });
     if (next === PIPELINE_RECORDING && prevStateRef.current !== PIPELINE_RECORDING) {
       setDuration(0);
     }
@@ -100,7 +105,7 @@ export default function RecorderFloat() {
 
   return (
     <div
-      data-tauri-drag-region
+      onMouseDown={() => getCurrentWindow().startDragging()}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -109,6 +114,7 @@ export default function RecorderFloat() {
         width: '100%',
         height: '100%',
         userSelect: 'none',
+        cursor: 'grab',
       }}
     >
       {hasSprite ? (
