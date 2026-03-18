@@ -23,7 +23,16 @@ fn microphone_status() -> i64 {
 }
 
 pub fn check_microphone() -> bool {
-    microphone_status() == 3 // AVAuthorizationStatusAuthorized
+    let status = microphone_status();
+    if status == 3 {
+        return true; // AVAuthorizationStatusAuthorized
+    }
+    if status == 2 {
+        return false; // AVAuthorizationStatusDenied
+    }
+    // notDetermined(0) or restricted(1): check if CoreAudio can list input devices
+    // If we can see input devices, the system has granted audio access
+    !crate::recorder::list_input_devices().is_empty()
 }
 
 /// Open microphone settings or inform user to try recording first.
