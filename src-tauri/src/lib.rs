@@ -4,6 +4,7 @@ pub mod db;
 pub mod downloader;
 pub mod enhancer;
 pub mod error;
+pub mod hotkey;
 pub mod keychain;
 pub mod paster;
 pub mod permissions;
@@ -25,6 +26,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(state::AppState::new(conn))
         .setup(|app| {
             tray::setup_tray(app.handle())?;
@@ -51,6 +53,8 @@ pub fn run() {
             commands::store_api_key,
             commands::get_api_key,
             commands::delete_api_key,
+            commands::register_hotkey,
+            commands::unregister_hotkey,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

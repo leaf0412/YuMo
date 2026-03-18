@@ -38,6 +38,7 @@ core-graphics = "0.24"
 futures-util = "0.3"
 security-framework = "2"
 whisper-rs = "0.16"
+tauri-plugin-global-shortcut = "2"
 
 [dev-dependencies]
 tempfile = "3"

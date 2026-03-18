@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::db::{self, PaginatedResult, Prompt, Replacement, VocabularyWord};
 use crate::error::AppError;
+use crate::hotkey;
 use crate::keychain;
 use crate::state::AppState;
 
@@ -175,4 +176,32 @@ pub fn get_api_key(provider: String) -> Result<Option<String>, AppError> {
 #[tauri::command]
 pub fn delete_api_key(provider: String) -> Result<(), AppError> {
     keychain::delete_key("com.voiceink.app", &provider)
+}
+
+// ---------------------------------------------------------------------------
+// Hotkey
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn register_hotkey(
+    app: AppHandle,
+    state: State<AppState>,
+    shortcut: String,
+) -> Result<(), AppError> {
+    // Persist the shortcut string in settings
+    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
+    db::update_setting(&conn, "hotkey", &Value::String(shortcut.clone()))?;
+    drop(conn);
+
+    // Clear any previously registered shortcuts, then register the new one.
+    hotkey::unregister_all(&app).map_err(|e| AppError::Io(e.to_string()))?;
+    hotkey::register_shortcut(&app, &shortcut, || {
+        // TODO: trigger recording toggle via app event
+    })
+    .map_err(|e| AppError::Io(e.to_string()))
+}
+
+#[tauri::command]
+pub fn unregister_hotkey(app: AppHandle) -> Result<(), AppError> {
+    hotkey::unregister_all(&app).map_err(|e| AppError::Io(e.to_string()))
 }
