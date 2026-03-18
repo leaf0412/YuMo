@@ -1,8 +1,10 @@
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager,
+    AppHandle,
     menu::{Menu, MenuItem},
 };
+
+use crate::window_manager::WindowManager;
 
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let menu = Menu::with_items(app, &[
@@ -14,16 +16,10 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .on_menu_event(|app, event| {
+            let wm = WindowManager::new(app.clone());
             match event.id.as_ref() {
-                "show" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                }
-                "quit" => {
-                    app.exit(0);
-                }
+                "show" => wm.show("main"),
+                "quit" => app.exit(0),
                 _ => {}
             }
         })
@@ -34,11 +30,8 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } = event
             {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                let wm = WindowManager::new(tray.app_handle().clone());
+                wm.show("main");
             }
         })
         .build(app)?;
