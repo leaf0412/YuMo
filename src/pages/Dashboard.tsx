@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Card, Alert, Button, Flex, Space, Tag, Typography, Row, Col } from 'antd';
+import { Card, Alert, Button, Flex, Space, Tag, Typography, Row, Col, message } from 'antd';
 import {
   AudioOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   SoundOutlined,
   ApiOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -62,6 +63,14 @@ export default function Dashboard() {
     setRecording((prev) => !prev);
   };
 
+  const openSettings = async (permissionType: string) => {
+    try {
+      await invoke('request_permission', { permissionType });
+    } catch {
+      message.error('无法打开系统设置');
+    }
+  };
+
   return (
     <Flex vertical gap="large" style={{ width: '100%' }}>
       <Title level={3}>仪表盘</Title>
@@ -71,18 +80,27 @@ export default function Dashboard() {
           <Card title="麦克风权限" size="small">
             {permissions.microphone ? (
               <Alert
-                title="已授权"
+                message="已授权"
                 type="success"
                 showIcon
                 icon={<CheckCircleOutlined />}
               />
             ) : (
-              <Alert
-                title="未授权"
-                type="error"
-                showIcon
-                icon={<CloseCircleOutlined />}
-              />
+              <Flex vertical gap={8}>
+                <Alert
+                  message="未授权"
+                  description="需要麦克风权限才能录音"
+                  type="error"
+                  showIcon
+                  icon={<CloseCircleOutlined />}
+                />
+                <Button
+                  icon={<SettingOutlined />}
+                  onClick={() => openSettings('microphone')}
+                >
+                  去设置
+                </Button>
+              </Flex>
             )}
           </Card>
         </Col>
@@ -91,18 +109,27 @@ export default function Dashboard() {
           <Card title="辅助功能权限" size="small">
             {permissions.accessibility ? (
               <Alert
-                title="已授权"
+                message="已授权"
                 type="success"
                 showIcon
                 icon={<CheckCircleOutlined />}
               />
             ) : (
-              <Alert
-                title="未授权"
-                type="error"
-                showIcon
-                icon={<CloseCircleOutlined />}
-              />
+              <Flex vertical gap={8}>
+                <Alert
+                  message="未授权"
+                  description="需要辅助功能权限才能自动粘贴"
+                  type="error"
+                  showIcon
+                  icon={<CloseCircleOutlined />}
+                />
+                <Button
+                  icon={<SettingOutlined />}
+                  onClick={() => openSettings('accessibility')}
+                >
+                  去设置
+                </Button>
+              </Flex>
             )}
           </Card>
         </Col>

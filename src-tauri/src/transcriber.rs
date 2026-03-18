@@ -96,15 +96,46 @@ pub fn predefined_models() -> Vec<ModelInfo> {
     ]
 }
 
+/// Return the path for a model, preferring a file that already exists in any
+/// known directory.  Falls back to the app-local models dir.
 pub fn model_path(models_dir: &Path, model_id: &str) -> PathBuf {
-    models_dir.join(format!("{}.bin", model_id))
+    let bin_name = format!("{}.bin", model_id);
+    let dirs = model_search_dirs(models_dir);
+    for d in &dirs {
+        let p = d.join(&bin_name);
+        if p.exists() {
+            return p;
+        }
+    }
+    // Default: app-local dir (used for new downloads)
+    models_dir.join(bin_name)
+}
+
+/// Directories where VoiceInk (native) or this app may store downloaded models.
+fn model_search_dirs(app_models_dir: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![app_models_dir.to_path_buf()];
+    if let Some(home) = dirs::home_dir() {
+        // VoiceInk native app model location
+        dirs.push(
+            home.join("Library/Application Support/com.prakashjoshipax.VoiceInk/Models"),
+        );
+        // whisper.cpp build tree sometimes used by VoiceInk
+        dirs.push(home.join("VoiceInk-Dependencies/whisper.cpp/models"));
+    }
+    dirs
+}
+
+/// Check whether a model file exists in any of the known directories.
+fn find_model_file(dirs: &[PathBuf], model_id: &str) -> bool {
+    let bin_name = format!("{}.bin", model_id);
+    dirs.iter().any(|d| d.join(&bin_name).exists())
 }
 
 pub fn check_downloaded_models(models_dir: &Path) -> Vec<ModelInfo> {
+    let dirs = model_search_dirs(models_dir);
     let mut models = predefined_models();
     for model in &mut models {
-        let path = model_path(models_dir, &model.id);
-        model.is_downloaded = path.exists();
+        model.is_downloaded = find_model_file(&dirs, &model.id);
     }
     models
 }
