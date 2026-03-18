@@ -24,18 +24,19 @@ fn microphone_status() -> i64 {
 
 pub fn check_microphone() -> bool {
     let status = microphone_status();
-    if status == 3 {
-        return true; // AVAuthorizationStatusAuthorized
-    }
-    if status == 2 {
-        return false; // AVAuthorizationStatusDenied
-    }
-    // notDetermined(0) or restricted(1): check if CoreAudio can list input devices
-    // If we can see input devices, the system has granted audio access
-    !crate::recorder::list_input_devices().is_empty()
+    let devices = crate::recorder::list_input_devices();
+    let result = if status == 3 {
+        true
+    } else if status == 2 {
+        false
+    } else {
+        !devices.is_empty()
+    };
+    log::info!("[permissions] microphone: AVStatus={} devices={} result={}", status, devices.len(), result);
+    result
 }
 
-/// Open microphone settings or inform user to try recording first.
+/// Open microphone settings.
 pub fn request_microphone() {
     open_settings("Privacy_Microphone");
 }
@@ -46,7 +47,9 @@ pub fn check_accessibility() -> bool {
     unsafe extern "C" {
         fn AXIsProcessTrusted() -> bool;
     }
-    unsafe { AXIsProcessTrusted() }
+    let trusted = unsafe { AXIsProcessTrusted() };
+    log::info!("[permissions] AXIsProcessTrusted = {}", trusted);
+    trusted
 }
 
 /// Check all permissions at once.

@@ -149,11 +149,18 @@ pub async fn stop_recording(
         error!("[pipeline] recorder::stop_recording failed: {}", e);
         AppError::Recording(e.to_string())
     })?;
+    let rms = if audio_data.pcm_samples.is_empty() {
+        0.0
+    } else {
+        let sum_sq: f64 = audio_data.pcm_samples.iter().map(|&s| (s as f64) * (s as f64)).sum();
+        (sum_sq / audio_data.pcm_samples.len() as f64).sqrt()
+    };
     info!(
-        "[pipeline] recording stopped, samples={} sample_rate={} channels={}",
+        "[pipeline] recording stopped, samples={} sample_rate={} channels={} rms={:.6}",
         audio_data.pcm_samples.len(),
         audio_data.sample_rate,
-        audio_data.channels
+        audio_data.channels,
+        rms
     );
 
     // 3. Update state -> Transcribing
