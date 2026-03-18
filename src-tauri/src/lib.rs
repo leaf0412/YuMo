@@ -1,4 +1,5 @@
 pub mod audio_ctrl;
+pub mod cloud;
 pub mod commands;
 pub mod db;
 pub mod downloader;
@@ -14,6 +15,7 @@ pub mod state;
 pub mod text_processor;
 pub mod tray;
 pub mod transcriber;
+pub mod vad;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
