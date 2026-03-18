@@ -51,7 +51,8 @@
     ],
     "resources": ["resources/mlx_funasr_daemon.py"],
     "macOS": {
-      "entitlements": null
+      "entitlements": null,
+      "signingIdentity": "-"
     }
   }
 }
