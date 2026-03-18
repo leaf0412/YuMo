@@ -7,19 +7,9 @@ import {
   DownloadOutlined, DeleteOutlined, CheckCircleOutlined,
   CloudOutlined, ImportOutlined, ApiOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
-import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-
+import { invoke, formatError } from '../lib/logger';
 const { Title, Text } = Typography;
-
-function formatError(e: unknown, fallback: string): string {
-  if (typeof e === 'string') return e;
-  if (e && typeof e === 'object') {
-    const vals = Object.values(e as Record<string, unknown>);
-    if (vals.length > 0 && typeof vals[0] === 'string') return vals[0] as string;
-  }
-  return fallback;
-}
 
 interface ModelInfo {
   id: string;
@@ -57,10 +47,7 @@ const CLOUD_PROVIDERS = [
 ];
 
 function formatSize(mb: number): string {
-  if (mb >= 1000) {
-    return `${(mb / 1000).toFixed(1)} GB`;
-  }
-  return `${mb} MB`;
+  return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${mb} MB`;
 }
 
 function languageLabel(lang: string): string {
@@ -84,14 +71,14 @@ export default function Models() {
     try {
       const result = await invoke<ModelInfo[]>('list_available_models');
       setModels(result);
-    } catch { /* ignore */ }
+    } catch { /* logged */ }
   }, []);
 
   const loadSettings = useCallback(async () => {
     try {
       const result = await invoke<Settings>('get_settings');
       setSettings(result);
-    } catch { /* ignore */ }
+    } catch { /* logged */ }
   }, []);
 
   useEffect(() => {
@@ -103,13 +90,9 @@ export default function Models() {
     const unlisten = listen<DownloadProgress>('model-download-progress', (event) => {
       const { model_id, progress } = event.payload;
       setDownloadProgress((prev) => ({ ...prev, [model_id]: progress }));
-      if (progress >= 100) {
-        loadModels();
-      }
+      if (progress >= 100) loadModels();
     });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+    return () => { unlisten.then((fn) => fn()); };
   }, [loadModels]);
 
   useEffect(() => {
@@ -118,7 +101,7 @@ export default function Models() {
       try {
         const status = await invoke<DaemonStatus>('daemon_status');
         setDaemonStatus(status);
-      } catch { /* ignore */ }
+      } catch { /* logged */ }
     };
     poll();
     const interval = setInterval(poll, 3000);
@@ -190,8 +173,8 @@ export default function Models() {
     try {
       await invoke('update_setting', { key: 'cloud_api_key', value: cloudApiKey });
       message.success('API Key 已保存');
-    } catch {
-      message.error('保存失败');
+    } catch (e) {
+      message.error(formatError(e, '保存失败'));
     }
   };
 
@@ -247,7 +230,6 @@ export default function Models() {
   };
 
   const isSelected = (modelId: string) => settings.selected_model_id === modelId;
-
   const localModels = models.filter(m => m.provider === 'local');
   const mlxModels = models.filter(m => m.provider === 'mlxFunAsr');
 
@@ -258,72 +240,29 @@ export default function Models() {
           const selected = isSelected(model.id);
           const progress = downloadProgress[model.id];
           const downloading = progress !== undefined && progress < 100;
-
           return (
             <Col xs={24} sm={12} md={8} key={model.id}>
-              <Card
-                style={selected ? { borderColor: '#52c41a' } : undefined}
-                styles={{ body: { padding: 16 } }}
-              >
+              <Card style={selected ? { borderColor: '#52c41a' } : undefined} styles={{ body: { padding: 16 } }}>
                 <Flex vertical gap={12} style={{ width: '100%' }}>
                   <Flex justify="space-between" align="center">
-                    <Space>
-                      <ApiOutlined />
-                      <Text strong>{model.name}</Text>
-                    </Space>
-                    {selected ? (
-                      <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>
-                    ) : model.is_downloaded ? (
-                      <Tag color="green">已下载</Tag>
-                    ) : (
-                      <Tag>未下载</Tag>
-                    )}
+                    <Space><ApiOutlined /><Text strong>{model.name}</Text></Space>
+                    {selected ? <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>
+                      : model.is_downloaded ? <Tag color="green">已下载</Tag>
+                      : <Tag>未下载</Tag>}
                   </Flex>
-
                   <Flex gap={16}>
-                    <div>
-                      <Text type="secondary">大小: </Text>
-                      <Text>{formatSize(model.size_mb)}</Text>
-                    </div>
-                    <div>
-                      <Text type="secondary">语言: </Text>
-                      {model.languages.map((lang) => (
-                        <Tag key={lang} color="blue" bordered={false}>{languageLabel(lang)}</Tag>
-                      ))}
-                    </div>
+                    <div><Text type="secondary">大小: </Text><Text>{formatSize(model.size_mb)}</Text></div>
+                    <div><Text type="secondary">语言: </Text>{model.languages.map((lang) => <Tag key={lang} color="blue" bordered={false}>{languageLabel(lang)}</Tag>)}</div>
                   </Flex>
-
-                  {downloading && (
-                    <Progress percent={Math.round(progress)} size="small" />
-                  )}
-
+                  {downloading && <Progress percent={Math.round(progress)} size="small" />}
                   <Flex justify="flex-end" gap={8}>
                     {model.is_downloaded ? (
                       <>
-                        {!selected && (
-                          <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>
-                            使用此模型
-                          </Button>
-                        )}
-                        <Button
-                          danger
-                          size="small"
-                          icon={<DeleteOutlined />}
-                          onClick={() => handleDeleteModel(model.id)}
-                        >
-                          删除
-                        </Button>
+                        {!selected && <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>使用此模型</Button>}
+                        <Button danger size="small" icon={<DeleteOutlined />} onClick={() => handleDeleteModel(model.id)}>删除</Button>
                       </>
                     ) : (
-                      <Button
-                        type="primary"
-                        size="small"
-                        icon={<DownloadOutlined />}
-                        loading={downloading}
-                        onClick={() => handleDownload(model.id)}
-                      >
-                        下载
-                      </Button>
+                      <Button type="primary" size="small" icon={<DownloadOutlined />} loading={downloading} onClick={() => handleDownload(model.id)}>下载</Button>
                     )}
                   </Flex>
                 </Flex>
@@ -332,36 +271,22 @@ export default function Models() {
           );
         })}
       </Row>
-
       <Divider />
-
       <Title level={4}>云端模型</Title>
       <Card>
         <Flex vertical gap={8} style={{ width: '100%' }}>
           <div>
             <Text>服务商</Text>
-            <Select
-              placeholder="选择云端服务商"
-              value={settings.cloud_provider}
-              onChange={handleCloudProviderChange}
-              style={{ width: '100%', marginTop: 8 }}
-              options={CLOUD_PROVIDERS}
-            />
+            <Select placeholder="选择云端服务商" value={settings.cloud_provider} onChange={handleCloudProviderChange} style={{ width: '100%', marginTop: 8 }} options={CLOUD_PROVIDERS} />
           </div>
           <div>
             <Text>API Key</Text>
             <Space.Compact style={{ width: '100%', marginTop: 8 }}>
-              <Input.Password
-                placeholder="输入 API Key"
-                value={cloudApiKey}
-                onChange={(e) => setCloudApiKey(e.target.value)}
-              />
+              <Input.Password placeholder="输入 API Key" value={cloudApiKey} onChange={(e) => setCloudApiKey(e.target.value)} />
               <Button onClick={handleSaveApiKey}>保存</Button>
             </Space.Compact>
           </div>
-          <Button icon={<CloudOutlined />} onClick={handleTestConnection}>
-            测试连接
-          </Button>
+          <Button icon={<CloudOutlined />} onClick={handleTestConnection}>测试连接</Button>
         </Flex>
       </Card>
     </>
@@ -373,79 +298,39 @@ export default function Models() {
         <Space>
           <Badge status={daemonStatus.running ? 'success' : 'default'} />
           <Text>{daemonStatus.running ? 'Daemon 运行中' : 'Daemon 未启动'}</Text>
-          {daemonStatus.loaded_model && (
-            <Tag color="blue">已加载: {daemonStatus.loaded_model.split('/').pop()}</Tag>
-          )}
+          {daemonStatus.loaded_model && <Tag color="blue">已加载: {daemonStatus.loaded_model.split('/').pop()}</Tag>}
         </Space>
         <Space>
-          {daemonStatus.running ? (
-            <Button size="small" onClick={handleDaemonStop}>停止</Button>
-          ) : (
-            <Button type="primary" size="small" onClick={handleDaemonStart}>启动 Daemon</Button>
-          )}
+          {daemonStatus.running
+            ? <Button size="small" onClick={handleDaemonStop}>停止</Button>
+            : <Button type="primary" size="small" onClick={handleDaemonStart}>启动 Daemon</Button>}
         </Space>
       </Flex>
-
       <Row gutter={[16, 16]}>
         {mlxModels.map((model) => (
           <Col xs={24} sm={12} md={8} key={model.id}>
-            <Card
-              style={isSelected(model.id) ? { borderColor: '#52c41a' } : undefined}
-              styles={{ body: { padding: 16 } }}
-            >
+            <Card style={isSelected(model.id) ? { borderColor: '#52c41a' } : undefined} styles={{ body: { padding: 16 } }}>
               <Flex vertical gap={12}>
                 <Flex justify="space-between" align="center">
-                  <Space>
-                    <ThunderboltOutlined />
-                    <Text strong>{model.name}</Text>
-                  </Space>
-                  {isSelected(model.id) ? (
-                    <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>
-                  ) : daemonStatus.loaded_model === model.model_repo ? (
-                    <Tag color="blue">已加载</Tag>
-                  ) : model.is_downloaded ? (
-                    <Tag color="green">已缓存</Tag>
-                  ) : (
-                    <Tag>未下载</Tag>
-                  )}
+                  <Space><ThunderboltOutlined /><Text strong>{model.name}</Text></Space>
+                  {isSelected(model.id) ? <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>
+                    : daemonStatus.loaded_model === model.model_repo ? <Tag color="blue">已加载</Tag>
+                    : model.is_downloaded ? <Tag color="green">已缓存</Tag>
+                    : <Tag>未下载</Tag>}
                 </Flex>
-
-                {model.description && (
-                  <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>
-                )}
-
+                {model.description && <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>}
                 <Flex gap={16}>
-                  <div>
-                    <Text type="secondary">大小: </Text>
-                    <Text>{formatSize(model.size_mb)}</Text>
-                  </div>
-                  <div>
-                    <Text type="secondary">语言: </Text>
-                    {model.languages.map((lang) => (
-                      <Tag key={lang} color="blue" bordered={false}>{languageLabel(lang)}</Tag>
-                    ))}
-                  </div>
+                  <div><Text type="secondary">大小: </Text><Text>{formatSize(model.size_mb)}</Text></div>
+                  <div><Text type="secondary">语言: </Text>{model.languages.map((lang) => <Tag key={lang} color="blue" bordered={false}>{languageLabel(lang)}</Tag>)}</div>
                 </Flex>
-
                 <Flex justify="flex-end" gap={8}>
                   {daemonStatus.loaded_model === model.model_repo ? (
                     <>
-                      {!isSelected(model.id) && (
-                        <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>
-                          设为默认
-                        </Button>
-                      )}
+                      {!isSelected(model.id) && <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>设为默认</Button>}
                       <Button size="small" onClick={handleUnloadModel}>卸载</Button>
                     </>
                   ) : (
-                    <Button
-                      type="primary"
-                      size="small"
-                      loading={loadingModel === model.id}
-                      onClick={() => handleLoadModel(model.model_repo!, model.id)}
-                    >
-                      加载模型
-                    </Button>
+                    <Button type="primary" size="small" loading={loadingModel === model.id} onClick={() => handleLoadModel(model.model_repo!, model.id)}>加载模型</Button>
                   )}
                 </Flex>
               </Flex>
@@ -461,11 +346,7 @@ export default function Models() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Title level={3} style={{ margin: 0 }}>模型管理</Title>
         <Space>
-          <Select
-            placeholder="语言"
-            value={settings.language}
-            onChange={handleLanguageChange}
-            style={{ width: 160 }}
+          <Select placeholder="语言" value={settings.language} onChange={handleLanguageChange} style={{ width: 160 }}
             options={[
               { value: 'auto', label: '自动检测' },
               { value: 'zh', label: '中文' },
@@ -473,26 +354,13 @@ export default function Models() {
               { value: 'ja', label: '日本語' },
             ]}
           />
-          <Button icon={<ImportOutlined />} onClick={handleImport}>
-            导入模型
-          </Button>
+          <Button icon={<ImportOutlined />} onClick={handleImport}>导入模型</Button>
         </Space>
       </div>
-
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
+      <Tabs activeKey={activeTab} onChange={setActiveTab}
         items={[
-          {
-            key: 'local',
-            label: '本地模型',
-            children: localTabContent,
-          },
-          {
-            key: 'mlx',
-            label: 'MLX 模型',
-            children: mlxTabContent,
-          },
+          { key: 'local', label: '本地模型', children: localTabContent },
+          { key: 'mlx', label: 'MLX 模型', children: mlxTabContent },
         ]}
       />
     </Flex>

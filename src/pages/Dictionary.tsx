@@ -6,7 +6,7 @@ import {
   PlusOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined,
   SwapRightOutlined,
 } from '@ant-design/icons';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, formatError } from '../lib/logger';
 
 const { Title, Text } = Typography;
 
@@ -32,14 +32,14 @@ export default function Dictionary() {
     try {
       const result = await invoke<VocabItem[]>('get_vocabulary');
       setVocabulary(result);
-    } catch { /* ignore */ }
+    } catch { /* logged */ }
   }, []);
 
   const loadReplacements = useCallback(async () => {
     try {
       const result = await invoke<ReplacementItem[]>('get_replacements');
       setReplacements(result);
-    } catch { /* ignore */ }
+    } catch { /* logged */ }
   }, []);
 
   useEffect(() => {
@@ -54,8 +54,8 @@ export default function Dictionary() {
       setNewWord('');
       message.success('已添加');
       loadVocabulary();
-    } catch {
-      message.error('添加失败');
+    } catch (e) {
+      message.error(formatError(e, '添加失败'));
     }
   };
 
@@ -64,8 +64,8 @@ export default function Dictionary() {
       await invoke('delete_vocabulary', { id });
       message.success('已删除');
       loadVocabulary();
-    } catch {
-      message.error('删除失败');
+    } catch (e) {
+      message.error(formatError(e, '删除失败'));
     }
   };
 
@@ -80,8 +80,8 @@ export default function Dictionary() {
       setNewReplacement('');
       message.success('已添加');
       loadReplacements();
-    } catch {
-      message.error('添加失败');
+    } catch (e) {
+      message.error(formatError(e, '添加失败'));
     }
   };
 
@@ -90,18 +90,16 @@ export default function Dictionary() {
       await invoke('delete_replacement', { id });
       message.success('已删除');
       loadReplacements();
-    } catch {
-      message.error('删除失败');
+    } catch (e) {
+      message.error(formatError(e, '删除失败'));
     }
   };
 
   const handleExportCsv = (_type: 'vocabulary' | 'replacements') => {
-    // TODO: integrate with file picker dialog for path selection
     message.info('CSV 导出暂未实现');
   };
 
   const handleImportCsv = (_type: 'vocabulary' | 'replacements') => {
-    // TODO: integrate with file picker dialog for path selection
     message.info('CSV 导入暂未实现');
   };
 
@@ -109,27 +107,14 @@ export default function Dictionary() {
     <Flex vertical gap={8} style={{ width: '100%' }}>
       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
         <Space.Compact>
-          <Input
-            placeholder="添加新词汇..."
-            value={newWord}
-            onChange={(e) => setNewWord(e.target.value)}
-            onPressEnter={handleAddWord}
-            style={{ width: 300 }}
-          />
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAddWord}>
-            添加
-          </Button>
+          <Input placeholder="添加新词汇..." value={newWord} onChange={(e) => setNewWord(e.target.value)} onPressEnter={handleAddWord} style={{ width: 300 }} />
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAddWord}>添加</Button>
         </Space.Compact>
         <Space>
-          <Button icon={<UploadOutlined />} onClick={() => handleImportCsv('vocabulary')}>
-            导入 CSV
-          </Button>
-          <Button icon={<DownloadOutlined />} onClick={() => handleExportCsv('vocabulary')}>
-            导出 CSV
-          </Button>
+          <Button icon={<UploadOutlined />} onClick={() => handleImportCsv('vocabulary')}>导入 CSV</Button>
+          <Button icon={<DownloadOutlined />} onClick={() => handleExportCsv('vocabulary')}>导出 CSV</Button>
         </Space>
       </Space>
-
       {vocabulary.length === 0 ? (
         <Text type="secondary">暂无词汇</Text>
       ) : (
@@ -147,34 +132,16 @@ export default function Dictionary() {
     <Flex vertical gap={8} style={{ width: '100%' }}>
       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
         <Space.Compact>
-          <Input
-            placeholder="原文..."
-            value={newOriginal}
-            onChange={(e) => setNewOriginal(e.target.value)}
-            style={{ width: 180 }}
-          />
+          <Input placeholder="原文..." value={newOriginal} onChange={(e) => setNewOriginal(e.target.value)} style={{ width: 180 }} />
           <Button type="text" icon={<SwapRightOutlined />} disabled />
-          <Input
-            placeholder="替换为..."
-            value={newReplacement}
-            onChange={(e) => setNewReplacement(e.target.value)}
-            onPressEnter={handleAddReplacement}
-            style={{ width: 180 }}
-          />
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAddReplacement}>
-            添加
-          </Button>
+          <Input placeholder="替换为..." value={newReplacement} onChange={(e) => setNewReplacement(e.target.value)} onPressEnter={handleAddReplacement} style={{ width: 180 }} />
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAddReplacement}>添加</Button>
         </Space.Compact>
         <Space>
-          <Button icon={<UploadOutlined />} onClick={() => handleImportCsv('replacements')}>
-            导入 CSV
-          </Button>
-          <Button icon={<DownloadOutlined />} onClick={() => handleExportCsv('replacements')}>
-            导出 CSV
-          </Button>
+          <Button icon={<UploadOutlined />} onClick={() => handleImportCsv('replacements')}>导入 CSV</Button>
+          <Button icon={<DownloadOutlined />} onClick={() => handleExportCsv('replacements')}>导出 CSV</Button>
         </Space>
       </Space>
-
       {replacements.length === 0 ? (
         <Text type="secondary">暂无替换规则</Text>
       ) : (
