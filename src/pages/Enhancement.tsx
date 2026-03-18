@@ -1,3 +1,332 @@
+import { useEffect, useState, useCallback } from 'react';
+import {
+  Card, Switch, Select, Input, Button, Space, Typography, List, Modal,
+  Form, message, Tag, Divider,
+} from 'antd';
+import {
+  PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined,
+} from '@ant-design/icons';
+import { invoke } from '@tauri-apps/api/core';
+
+const { Title, Text, Paragraph } = Typography;
+const { TextArea } = Input;
+
+interface Prompt {
+  id: number;
+  name: string;
+  system_message: string;
+  user_template: string;
+  is_custom: boolean;
+  is_active: boolean;
+}
+
+interface Settings {
+  ai_enhancement_enabled?: boolean;
+  llm_provider?: string;
+  llm_model?: string;
+  ollama_url?: string;
+}
+
+const PROVIDERS = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'ollama', label: 'Ollama' },
+];
+
+const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  openai: [
+    { value: 'gpt-4o', label: 'GPT-4o' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+  ],
+  anthropic: [
+    { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+    { value: 'claude-haiku-4-20250414', label: 'Claude Haiku 4' },
+  ],
+  ollama: [
+    { value: 'llama3', label: 'Llama 3' },
+    { value: 'mistral', label: 'Mistral' },
+    { value: 'qwen2', label: 'Qwen 2' },
+  ],
+};
+
 export default function Enhancement() {
-  return <div>AI 增强</div>;
+  const [settings, setSettings] = useState<Settings>({});
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [apiKey, setApiKey] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
+  const [form] = Form.useForm();
+
+  const loadSettings = useCallback(async () => {
+    try {
+      const result = await invoke<Settings>('get_settings');
+      setSettings(result);
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadPrompts = useCallback(async () => {
+    try {
+      const result = await invoke<Prompt[]>('list_prompts');
+      setPrompts(result);
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadApiKey = useCallback(async () => {
+    try {
+      const result = await invoke<string>('get_api_key', { provider: settings.llm_provider });
+      setApiKey(result ? '********' : '');
+    } catch { /* ignore */ }
+  }, [settings.llm_provider]);
+
+  useEffect(() => {
+    loadSettings();
+    loadPrompts();
+  }, [loadSettings, loadPrompts]);
+
+  useEffect(() => {
+    if (settings.llm_provider) {
+      loadApiKey();
+    }
+  }, [settings.llm_provider, loadApiKey]);
+
+  const updateSetting = async (key: string, value: unknown) => {
+    try {
+      await invoke('update_setting', { key, value: String(value) });
+      setSettings((prev) => ({ ...prev, [key]: value }));
+    } catch {
+      message.error('设置更新失败');
+    }
+  };
+
+  const handleSaveApiKey = async () => {
+    try {
+      await invoke('store_api_key', {
+        provider: settings.llm_provider,
+        key: apiKey,
+      });
+      message.success('API Key 已保存');
+    } catch {
+      message.error('保存失败');
+    }
+  };
+
+  const handleSelectPrompt = async (id: number) => {
+    try {
+      await invoke('select_prompt', { id });
+      message.success('已切换 Prompt');
+      loadPrompts();
+    } catch {
+      message.error('切换失败');
+    }
+  };
+
+  const handleDeletePrompt = async (id: number) => {
+    try {
+      await invoke('delete_prompt', { id });
+      message.success('已删除');
+      loadPrompts();
+    } catch {
+      message.error('删除失败');
+    }
+  };
+
+  const openCreateModal = () => {
+    setEditingPrompt(null);
+    form.resetFields();
+    setModalOpen(true);
+  };
+
+  const openEditModal = (prompt: Prompt) => {
+    setEditingPrompt(prompt);
+    form.setFieldsValue({
+      name: prompt.name,
+      system_message: prompt.system_message,
+      user_template: prompt.user_template,
+    });
+    setModalOpen(true);
+  };
+
+  const handleModalOk = async () => {
+    try {
+      const values = await form.validateFields();
+      if (editingPrompt) {
+        await invoke('update_prompt', { id: editingPrompt.id, ...values });
+        message.success('已更新');
+      } else {
+        await invoke('add_prompt', values);
+        message.success('已创建');
+      }
+      setModalOpen(false);
+      loadPrompts();
+    } catch {
+      /* validation error */
+    }
+  };
+
+  const provider = settings.llm_provider || 'openai';
+  const modelOptions = MODEL_OPTIONS[provider] || [];
+
+  return (
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <Title level={3}>AI 增强</Title>
+
+      <Card>
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text strong>启用 AI 增强</Text>
+            <Switch
+              checked={settings.ai_enhancement_enabled}
+              onChange={(checked) => updateSetting('ai_enhancement_enabled', checked)}
+            />
+          </div>
+
+          <Divider style={{ margin: '8px 0' }} />
+
+          <div>
+            <Text>LLM 服务商</Text>
+            <Select
+              value={settings.llm_provider}
+              onChange={(v) => updateSetting('llm_provider', v)}
+              style={{ width: '100%', marginTop: 8 }}
+              options={PROVIDERS}
+              placeholder="选择服务商"
+            />
+          </div>
+
+          <div>
+            <Text>模型</Text>
+            <Select
+              value={settings.llm_model}
+              onChange={(v) => updateSetting('llm_model', v)}
+              style={{ width: '100%', marginTop: 8 }}
+              options={modelOptions}
+              placeholder="选择模型"
+            />
+          </div>
+
+          <div>
+            <Text>API Key</Text>
+            <Space.Compact style={{ width: '100%', marginTop: 8 }}>
+              <Input.Password
+                placeholder="输入 API Key"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+              />
+              <Button onClick={handleSaveApiKey}>保存</Button>
+            </Space.Compact>
+          </div>
+
+          {provider === 'ollama' && (
+            <div>
+              <Text>Ollama URL</Text>
+              <Input
+                placeholder="http://localhost:11434"
+                value={settings.ollama_url || ''}
+                onChange={(e) => updateSetting('ollama_url', e.target.value)}
+                style={{ marginTop: 8 }}
+              />
+            </div>
+          )}
+        </Space>
+      </Card>
+
+      <Card
+        title="Prompt 管理"
+        extra={
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+            新建 Prompt
+          </Button>
+        }
+      >
+        <List
+          dataSource={prompts}
+          locale={{ emptyText: '暂无 Prompt' }}
+          renderItem={(prompt) => (
+            <List.Item
+              actions={[
+                !prompt.is_active && (
+                  <Button
+                    key="select"
+                    type="link"
+                    onClick={() => handleSelectPrompt(prompt.id)}
+                  >
+                    使用
+                  </Button>
+                ),
+                prompt.is_custom && (
+                  <Button
+                    key="edit"
+                    type="text"
+                    icon={<EditOutlined />}
+                    onClick={() => openEditModal(prompt)}
+                  />
+                ),
+                prompt.is_custom && (
+                  <Button
+                    key="delete"
+                    type="text"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleDeletePrompt(prompt.id)}
+                  />
+                ),
+              ].filter(Boolean)}
+            >
+              <List.Item.Meta
+                title={
+                  <Space>
+                    <Text>{prompt.name}</Text>
+                    {prompt.is_active && <Tag color="green" icon={<CheckCircleOutlined />}>当前</Tag>}
+                    {!prompt.is_custom && <Tag>内置</Tag>}
+                  </Space>
+                }
+                description={
+                  <Paragraph type="secondary" ellipsis={{ rows: 2 }}>
+                    {prompt.system_message}
+                  </Paragraph>
+                }
+              />
+            </List.Item>
+          )}
+        />
+      </Card>
+
+      <Modal
+        title={editingPrompt ? '编辑 Prompt' : '新建 Prompt'}
+        open={modalOpen}
+        onOk={handleModalOk}
+        onCancel={() => setModalOpen(false)}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Form form={form} layout="vertical">
+          <Form.Item
+            name="name"
+            label="名称"
+            rules={[{ required: true, message: '请输入名称' }]}
+          >
+            <Input placeholder="Prompt 名称" />
+          </Form.Item>
+          <Form.Item
+            name="system_message"
+            label="系统消息"
+            rules={[{ required: true, message: '请输入系统消息' }]}
+          >
+            <TextArea rows={4} placeholder="系统消息..." />
+          </Form.Item>
+          <Form.Item
+            name="user_template"
+            label="用户消息模板"
+            rules={[{ required: true, message: '请输入用户消息模板' }]}
+          >
+            <TextArea
+              rows={4}
+              placeholder="使用 {{text}} 作为转录文本占位符"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </Space>
+  );
 }
