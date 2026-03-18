@@ -98,6 +98,17 @@ export default function RecorderFloat() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  // Window dragging — attach at document level
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      // Skip if clicking the cancel button
+      if ((e.target as HTMLElement)?.closest?.('[data-cancel]')) return;
+      getCurrentWindow().startDragging().catch(() => {});
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, []);
+
   const hasSprite = spriteManifest && spriteImageSrc;
   const isRecording = state === PIPELINE_RECORDING;
   const color = PIPELINE_COLORS[state];
@@ -105,7 +116,6 @@ export default function RecorderFloat() {
 
   return (
     <div
-      onMouseDown={() => getCurrentWindow().startDragging()}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -167,6 +177,7 @@ export default function RecorderFloat() {
         )}
         {/* Cancel button — no drag region so it's clickable */}
         <span
+          data-cancel
           onClick={(e) => {
             e.stopPropagation();
             invoke('cancel_recording').catch(() => {});
