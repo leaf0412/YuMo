@@ -269,13 +269,13 @@ pub fn predefined_mlx_models() -> Vec<ModelInfo> {
         .collect()
 }
 
-/// Check if an MLX model is available in the HuggingFace hub cache.
+/// Check if an MLX model is available in the app's mlx-cache directory.
 /// Looks for any `.safetensors` file under the model's snapshots directory.
 pub fn check_mlx_model_downloaded(model_repo: &str) -> bool {
     let cache_name = model_repo.replace('/', "--");
     let cache_path = dirs::home_dir()
         .unwrap_or_default()
-        .join(".cache/huggingface/hub")
+        .join(".voiceink/mlx-cache")
         .join(format!("models--{}", cache_name))
         .join("snapshots");
 
@@ -344,18 +344,9 @@ pub fn model_path(models_dir: &Path, model_id: &str) -> PathBuf {
     models_dir.join(bin_name)
 }
 
-/// Directories where VoiceInk (native) or this app may store downloaded models.
+/// Directories where this app stores downloaded models.
 fn model_search_dirs(app_models_dir: &Path) -> Vec<PathBuf> {
-    let mut dirs = vec![app_models_dir.to_path_buf()];
-    if let Some(home) = dirs::home_dir() {
-        // VoiceInk native app model location
-        dirs.push(
-            home.join("Library/Application Support/com.prakashjoshipax.VoiceInk/Models"),
-        );
-        // whisper.cpp build tree sometimes used by VoiceInk
-        dirs.push(home.join("VoiceInk-Dependencies/whisper.cpp/models"));
-    }
-    dirs
+    vec![app_models_dir.to_path_buf()]
 }
 
 /// Check whether a model file exists in any of the known directories.
@@ -400,6 +391,8 @@ pub async fn transcribe_via_daemon(
     samples: &[f32],
     sample_rate: u32,
     language: &str,
+    temperature: f64,
+    max_tokens: u32,
 ) -> Result<TranscriptionResult, AppError> {
     let start = std::time::Instant::now();
 
@@ -425,8 +418,8 @@ pub async fn transcribe_via_daemon(
         "action": "transcribe",
         "audio": wav_path.to_string_lossy(),
         "language": language,
-        "max_tokens": 1900,
-        "temperature": 0.0,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
     });
 
     let timeout = std::time::Duration::from_secs(120);
@@ -453,10 +446,12 @@ pub fn transcribe(
     samples: &[f32],
     _sample_rate: u32,
     language: &str,
+    temperature: f32,
 ) -> Result<TranscriptionResult, AppError> {
     let mut params =
         whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
     params.set_language(Some(language));
+    params.set_temperature(temperature);
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);

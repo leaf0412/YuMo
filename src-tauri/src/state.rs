@@ -39,9 +39,7 @@ impl AppPaths {
             .get("path_sprites")
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                home.join("Library/Application Support/VoiceInk/SpriteSheets")
-            });
+            .unwrap_or_else(|| data_dir.join("sprites"));
 
         let recordings_dir = settings
             .get("path_recordings")
@@ -58,7 +56,7 @@ impl AppPaths {
         let data_dir = home.join(".voiceink");
         Self {
             models_dir: data_dir.join("models"),
-            sprites_dir: home.join("Library/Application Support/VoiceInk/SpriteSheets"),
+            sprites_dir: data_dir.join("sprites"),
             recordings_dir: data_dir.join("recordings"),
             data_dir,
         }

@@ -21,6 +21,12 @@ import os
 import json
 import gc
 
+# All model cache lives under ~/.voiceink/mlx-cache
+_mlx_cache = os.path.join(os.path.expanduser("~"), ".voiceink", "mlx-cache")
+os.makedirs(_mlx_cache, exist_ok=True)
+os.environ["HF_HUB_CACHE"] = _mlx_cache
+os.environ["HF_HOME"] = _mlx_cache
+
 # Disable tqdm and reduce logging noise before imports
 os.environ["TQDM_DISABLE"] = "1"
 
@@ -68,10 +74,9 @@ def get_install_command(missing_packages):
 
 
 def get_model_cache_path(model_repo):
-    """Get the HuggingFace cache path for a model."""
-    cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+    """Get the model cache path under ~/.voiceink/mlx-cache."""
     hf_model_dir = f"models--{model_repo.replace('/', '--')}"
-    return os.path.join(cache_dir, hf_model_dir)
+    return os.path.join(_mlx_cache, hf_model_dir)
 
 
 def check_model_downloaded(model_repo):
@@ -137,7 +142,16 @@ def download_model(model_repo):
         for i, (filename, size) in enumerate(files):
             size_mb = size / 1024 / 1024
             log(f"Downloading [{i+1}/{len(files)}]: {filename} ({size_mb:.1f} MB)")
-            hf_hub_download(model_repo, filename, tqdm_class=DownloadProgress)
+            try:
+                hf_hub_download(model_repo, filename, tqdm_class=DownloadProgress)
+            except TypeError:
+                # Newer huggingface_hub removed tqdm_class parameter
+                hf_hub_download(model_repo, filename)
+                state["downloaded"] += size
+                progress = min(int(state["downloaded"] * 100 / total_bytes), 99) if total_bytes > 0 else 0
+                if progress != state["last_progress"]:
+                    state["last_progress"] = progress
+                    send_response({"status": "downloading", "model": model_repo, "progress": progress})
 
         send_response({"status": "download_complete", "model": model_repo})
         log(f"Download complete: {model_repo}")
