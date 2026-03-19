@@ -18,9 +18,13 @@ interface ModelInfo {
   languages: string[];
   download_url: string;
   is_downloaded: boolean;
-  provider: 'local' | 'mlxFunAsr';
+  provider: string;
   model_repo?: string;
   description?: string;
+  speed?: number;
+  accuracy?: number;
+  is_recommended?: boolean;
+  supported_languages?: Record<string, string>;
 }
 
 interface DownloadProgress {
@@ -230,8 +234,13 @@ export default function Models() {
   };
 
   const isSelected = (modelId: string) => settings.selected_model_id === modelId;
-  const localModels = models.filter(m => m.provider === 'local');
-  const mlxModels = models.filter(m => m.provider === 'mlxFunAsr');
+  const LOCAL_PROVIDERS = ['local'];
+  const MLX_PROVIDERS = ['mlxWhisper', 'mlxFunASR'];
+  const CLOUD_PROVIDERS_LIST = ['groq', 'deepgram', 'elevenLabs', 'mistral', 'gemini', 'soniox'];
+
+  const localModels = models.filter(m => LOCAL_PROVIDERS.includes(m.provider));
+  const mlxModels = models.filter(m => MLX_PROVIDERS.includes(m.provider));
+  const cloudModels = models.filter(m => CLOUD_PROVIDERS_LIST.includes(m.provider));
 
   const localTabContent = (
     <>
@@ -271,24 +280,6 @@ export default function Models() {
           );
         })}
       </Row>
-      <Divider />
-      <Title level={4}>云端模型</Title>
-      <Card>
-        <Flex vertical gap={8} style={{ width: '100%' }}>
-          <div>
-            <Text>服务商</Text>
-            <Select placeholder="选择云端服务商" value={settings.cloud_provider} onChange={handleCloudProviderChange} style={{ width: '100%', marginTop: 8 }} options={CLOUD_PROVIDERS} />
-          </div>
-          <div>
-            <Text>API Key</Text>
-            <Space.Compact style={{ width: '100%', marginTop: 8 }}>
-              <Input.Password placeholder="输入 API Key" value={cloudApiKey} onChange={(e) => setCloudApiKey(e.target.value)} />
-              <Button onClick={handleSaveApiKey}>保存</Button>
-            </Space.Compact>
-          </div>
-          <Button icon={<CloudOutlined />} onClick={handleTestConnection}>测试连接</Button>
-        </Flex>
-      </Card>
     </>
   );
 
@@ -341,6 +332,52 @@ export default function Models() {
     </>
   );
 
+  const cloudTabContent = (
+    <>
+      <Row gutter={[16, 16]}>
+        {cloudModels.map((model) => (
+          <Col xs={24} sm={12} md={8} key={model.id}>
+            <Card style={isSelected(model.id) ? { borderColor: '#52c41a' } : undefined} styles={{ body: { padding: 16 } }}>
+              <Flex vertical gap={12}>
+                <Flex justify="space-between" align="center">
+                  <Space><CloudOutlined /><Text strong>{model.name}</Text></Space>
+                  {isSelected(model.id) ? (
+                    <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>
+                  ) : (
+                    <Tag color="blue">云端</Tag>
+                  )}
+                </Flex>
+                {model.description && <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>}
+                <Flex justify="flex-end" gap={8}>
+                  {!isSelected(model.id) && (
+                    <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>使用此模型</Button>
+                  )}
+                </Flex>
+              </Flex>
+            </Card>
+          </Col>
+        ))}
+      </Row>
+      <Divider />
+      <Card title="API 配置">
+        <Flex vertical gap={8} style={{ width: '100%' }}>
+          <div>
+            <Text>服务商</Text>
+            <Select placeholder="选择云端服务商" value={settings.cloud_provider} onChange={handleCloudProviderChange} style={{ width: '100%', marginTop: 8 }} options={CLOUD_PROVIDERS} />
+          </div>
+          <div>
+            <Text>API Key</Text>
+            <Space.Compact style={{ width: '100%', marginTop: 8 }}>
+              <Input.Password placeholder="输入 API Key" value={cloudApiKey} onChange={(e) => setCloudApiKey(e.target.value)} />
+              <Button onClick={handleSaveApiKey}>保存</Button>
+            </Space.Compact>
+          </div>
+          <Button icon={<CloudOutlined />} onClick={handleTestConnection}>测试连接</Button>
+        </Flex>
+      </Card>
+    </>
+  );
+
   return (
     <Flex vertical gap="large" style={{ width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -359,8 +396,9 @@ export default function Models() {
       </div>
       <Tabs activeKey={activeTab} onChange={setActiveTab}
         items={[
-          { key: 'local', label: '本地模型', children: localTabContent },
-          { key: 'mlx', label: 'MLX 模型', children: mlxTabContent },
+          { key: 'local', label: `本地模型 (${localModels.length})`, children: localTabContent },
+          { key: 'mlx', label: `MLX 模型 (${mlxModels.length})`, children: mlxTabContent },
+          { key: 'cloud', label: `云端模型 (${cloudModels.length})`, children: cloudTabContent },
         ]}
       />
     </Flex>
