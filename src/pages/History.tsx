@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Input, Button, Flex, Space, Tag, Typography, Popconfirm, message, Card } from 'antd';
-import { CopyOutlined, DeleteOutlined, ClearOutlined } from '@ant-design/icons';
+import { CopyOutlined, DeleteOutlined, ClearOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
 import { invoke, formatError } from '../lib/logger';
 const { Text, Paragraph } = Typography;
 
@@ -10,6 +10,7 @@ interface Transcription {
   enhanced_text?: string;
   timestamp: string;
   model_name: string;
+  recording_path?: string;
 }
 
 const PAGE_SIZE = 20;
@@ -21,6 +22,35 @@ export default function History() {
   const [hasMore, setHasMore] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const handlePlay = async (item: Transcription) => {
+    if (!item.recording_path) return;
+
+    // If same item is playing, stop it
+    if (playingId === item.id) {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      setPlayingId(null);
+      return;
+    }
+
+    // Stop any current playback
+    audioRef.current?.pause();
+
+    try {
+      const dataUri = await invoke<string>('get_recording', { recordingPath: item.recording_path });
+      const audio = new Audio(dataUri);
+      audio.onended = () => { setPlayingId(null); audioRef.current = null; };
+      audio.onerror = () => { setPlayingId(null); audioRef.current = null; message.error('播放失败'); };
+      audioRef.current = audio;
+      setPlayingId(item.id);
+      audio.play();
+    } catch (e) {
+      message.error(formatError(e, '无法加载录音'));
+    }
+  };
 
   const loadTranscriptions = useCallback(async (cursor: string | null, reset: boolean) => {
     setLoading(true);
@@ -138,6 +168,14 @@ export default function History() {
                   )}
                 </div>
                 <Space>
+                  {item.recording_path && (
+                    <Button
+                      type="text"
+                      icon={playingId === item.id ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                      onClick={() => handlePlay(item)}
+                      title={playingId === item.id ? '停止' : '播放录音'}
+                    />
+                  )}
                   <Button type="text" icon={<CopyOutlined />} onClick={() => handleCopy(item.enhanced_text || item.text)} />
                   <Popconfirm title="确认删除？" onConfirm={() => handleDelete(item.id)} okText="确认" cancelText="取消">
                     <Button type="text" danger icon={<DeleteOutlined />} />
