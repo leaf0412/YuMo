@@ -38,8 +38,9 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
 
   try {
     const result = await tauriInvoke<T>(cmd, args);
-    console.log(`${tag} ok`);
-    sendToBackend('info', `${tag} ok`);
+    const resultStr = result && typeof result === 'object' ? ` => ${JSON.stringify(result)}` : '';
+    console.log(`${tag} ok${resultStr}`);
+    sendToBackend('info', `${tag} ok${resultStr}`);
     return result;
   } catch (e) {
     const detail = formatError(e, 'unknown error');
