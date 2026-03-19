@@ -1,41 +1,22 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Card, Button, Flex, Space, Tag, Typography, Row, Col, Select,
-  Input, message, Divider, Tabs, Badge,
+  Input, InputNumber, Slider, Progress, message, Divider, Tabs, Badge,
 } from 'antd';
 import {
   CheckCircleOutlined, CloudOutlined, ImportOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
+import { listen } from '@tauri-apps/api/event';
 import { invoke, formatError } from '../lib/logger';
+import useAppStore from '../stores/useAppStore';
 const { Title, Text } = Typography;
 
-interface ModelInfo {
-  id: string;
-  name: string;
-  size_mb: number;
-  languages: string[];
-  download_url: string;
-  is_downloaded: boolean;
-  provider: string;
-  model_repo?: string;
-  description?: string;
-  speed?: number;
-  accuracy?: number;
-  is_recommended?: boolean;
-  supported_languages?: Record<string, string>;
+interface ModelSettings {
+  temperature: number;
+  max_tokens: number;
 }
 
-interface DaemonStatus {
-  running: boolean;
-  loaded_model: string | null;
-}
-
-interface Settings {
-  language?: string;
-  selected_model_id?: string;
-  cloud_provider?: string;
-  cloud_api_key?: string;
-}
+const DEFAULT_MODEL_SETTINGS: ModelSettings = { temperature: 0, max_tokens: 1900 };
 
 const CLOUD_PROVIDERS = [
   { value: 'openai', label: 'OpenAI Whisper' },
@@ -56,50 +37,70 @@ function languageLabel(lang: string): string {
 }
 
 export default function Models() {
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [settings, setSettings] = useState<Settings>({});
+  const { models, settings, daemonStatus, fetchModels, fetchSettings, fetchDaemonStatus, setSettings: storeSetSettings, setDaemonStatus: storeSetDaemonStatus } = useAppStore();
   const [cloudApiKey, setCloudApiKey] = useState('');
-  const [daemonStatus, setDaemonStatus] = useState<DaemonStatus>({ running: false, loaded_model: null });
   const [activeTab, setActiveTab] = useState('mlx');
   const [loadingModel, setLoadingModel] = useState<string | null>(null);
+  const [daemonBusy, setDaemonBusy] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
+  const [modelSettings, setModelSettings] = useState<Record<string, ModelSettings>>({});
 
-  const loadModels = useCallback(async () => {
-    try {
-      const result = await invoke<ModelInfo[]>('list_available_models');
-      setModels(result);
-    } catch { /* logged */ }
-  }, []);
+  const getModelSettings = (modelId: string): ModelSettings =>
+    modelSettings[modelId] ?? DEFAULT_MODEL_SETTINGS;
 
-  const loadSettings = useCallback(async () => {
+  const handleModelSettingChange = async (modelId: string, key: keyof ModelSettings, value: number) => {
+    const settingKey = `model_${modelId}_${key}`;
     try {
-      const result = await invoke<Settings>('get_settings');
-      setSettings(result);
-    } catch { /* logged */ }
-  }, []);
+      await invoke('update_setting', { key: settingKey, value: JSON.stringify(value) });
+      setModelSettings((prev) => ({
+        ...prev,
+        [modelId]: { ...getModelSettings(modelId), [key]: value },
+      }));
+    } catch (e) {
+      message.error(formatError(e, '设置失败'));
+    }
+  };
+
+  // Extract per-model settings whenever store settings change
+  useEffect(() => {
+    const ms: Record<string, ModelSettings> = {};
+    for (const [k, v] of Object.entries(settings)) {
+      const match = k.match(/^model_(.+)_(temperature|max_tokens)$/);
+      if (match) {
+        const [, modelId, field] = match;
+        if (!ms[modelId]) ms[modelId] = { ...DEFAULT_MODEL_SETTINGS };
+        ms[modelId][field as keyof ModelSettings] = typeof v === 'string' ? parseFloat(v as string) : Number(v);
+      }
+    }
+    setModelSettings(ms);
+  }, [settings]);
 
   useEffect(() => {
-    loadModels();
-    loadSettings();
-  }, [loadModels, loadSettings]);
+    fetchModels();
+    fetchSettings();
+  }, [fetchModels, fetchSettings]);
+
+  // Listen for model download progress events
+  useEffect(() => {
+    const unlisten = listen<{ model_repo: string; progress: number }>('model-download-progress', (event) => {
+      const { model_repo, progress } = event.payload;
+      setDownloadProgress((prev) => ({ ...prev, [model_repo]: progress }));
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
 
   useEffect(() => {
     if (activeTab !== 'mlx') return;
-    const poll = async () => {
-      try {
-        const status = await invoke<DaemonStatus>('daemon_status');
-        setDaemonStatus(status);
-      } catch { /* logged */ }
-    };
-    poll();
-    const interval = setInterval(poll, 3000);
+    fetchDaemonStatus();
+    const interval = setInterval(fetchDaemonStatus, 3000);
     return () => clearInterval(interval);
-  }, [activeTab]);
+  }, [activeTab, fetchDaemonStatus]);
 
 
   const handleSelect = async (modelId: string) => {
     try {
       await invoke('select_model', { modelId });
-      setSettings((prev) => ({ ...prev, selected_model_id: modelId }));
+      storeSetSettings({ selected_model_id: modelId });
       message.success('已切换模型');
     } catch (e) {
       message.error(formatError(e, '切换失败'));
@@ -111,7 +112,7 @@ export default function Models() {
       const imported = await invoke<boolean>('import_model');
       if (imported) {
         message.success('导入完成');
-        loadModels();
+        fetchModels();
       }
     } catch (e) {
       message.error(formatError(e, '导入失败'));
@@ -121,7 +122,7 @@ export default function Models() {
   const handleLanguageChange = async (value: string) => {
     try {
       await invoke('update_setting', { key: 'language', value });
-      setSettings((prev) => ({ ...prev, language: value }));
+      storeSetSettings({ language: value });
     } catch (e) {
       message.error(formatError(e, '设置失败'));
     }
@@ -130,7 +131,7 @@ export default function Models() {
   const handleCloudProviderChange = async (value: string) => {
     try {
       await invoke('update_setting', { key: 'cloud_provider', value });
-      setSettings((prev) => ({ ...prev, cloud_provider: value }));
+      storeSetSettings({ cloud_provider: value });
     } catch (e) {
       message.error(formatError(e, '设置失败'));
     }
@@ -150,20 +151,23 @@ export default function Models() {
   };
 
   const handleDaemonStart = async () => {
+    if (daemonBusy) return;
+    setDaemonBusy(true);
     try {
       await invoke('daemon_start');
       message.success('Daemon 已启动');
-      const status = await invoke<DaemonStatus>('daemon_status');
-      setDaemonStatus(status);
+      fetchDaemonStatus();
     } catch (e) {
       message.error(formatError(e, 'Daemon 启动失败，请检查 Python 3 和 mlx-audio 是否已安装'));
+    } finally {
+      setDaemonBusy(false);
     }
   };
 
   const handleDaemonStop = async () => {
     try {
       await invoke('daemon_stop');
-      setDaemonStatus({ running: false, loaded_model: null });
+      storeSetDaemonStatus({ running: false, loaded_model: null });
       message.success('Daemon 已停止');
     } catch (e) {
       message.error(formatError(e, '停止失败'));
@@ -171,25 +175,32 @@ export default function Models() {
   };
 
   const handleLoadModel = async (modelRepo: string, modelId: string) => {
+    if (loadingModel || daemonBusy) return;
+    setLoadingModel(modelId);
+    setDaemonBusy(true);
+    setDownloadProgress((prev) => ({ ...prev, [modelRepo]: 0 }));
     try {
-      setLoadingModel(modelId);
       await invoke('daemon_load_model', { modelRepo });
       message.success('模型已加载');
-      const status = await invoke<DaemonStatus>('daemon_status');
-      setDaemonStatus(status);
-      loadModels();
+      fetchDaemonStatus();
+      fetchModels();
     } catch (e) {
       message.error(formatError(e, '模型加载失败'));
     } finally {
       setLoadingModel(null);
+      setDaemonBusy(false);
+      setDownloadProgress((prev) => {
+        const next = { ...prev };
+        delete next[modelRepo];
+        return next;
+      });
     }
   };
 
   const handleUnloadModel = async () => {
     try {
       await invoke('daemon_unload_model');
-      const status = await invoke<DaemonStatus>('daemon_status');
-      setDaemonStatus(status);
+      fetchDaemonStatus();
       message.success('模型已卸载');
     } catch (e) {
       message.error(formatError(e, '卸载失败'));
@@ -219,7 +230,7 @@ export default function Models() {
         <Space>
           {daemonStatus.running
             ? <Button size="small" onClick={handleDaemonStop}>停止</Button>
-            : <Button type="primary" size="small" onClick={handleDaemonStart}>启动 Daemon</Button>}
+            : <Button type="primary" size="small" loading={daemonBusy} onClick={handleDaemonStart}>启动 Daemon</Button>}
         </Space>
       </Flex>
       <Row gutter={[16, 16]}>
@@ -229,16 +240,46 @@ export default function Models() {
               <Flex vertical gap={12}>
                 <Flex justify="space-between" align="center">
                   <Space><ThunderboltOutlined /><Text strong>{model.name}</Text></Space>
-                  {isSelected(model.id) ? <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>
-                    : daemonStatus.loaded_model === model.model_repo ? <Tag color="blue">已加载</Tag>
-                    : model.is_downloaded ? <Tag color="green">已缓存</Tag>
-                    : <Tag>未下载</Tag>}
+                  {daemonStatus.loaded_model === model.model_repo
+                    ? <Tag color="blue" icon={isSelected(model.id) ? <CheckCircleOutlined /> : undefined}>{isSelected(model.id) ? '使用中 · 已加载' : '已加载'}</Tag>
+                    : model.is_downloaded
+                      ? <Tag color="green" icon={isSelected(model.id) ? <CheckCircleOutlined /> : undefined}>{isSelected(model.id) ? '使用中 · 已缓存' : '已缓存'}</Tag>
+                      : isSelected(model.id)
+                        ? <Tag color="orange">使用中 · 未下载</Tag>
+                        : <Tag>未下载</Tag>}
                 </Flex>
                 {model.description && <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>}
                 <Flex gap={16}>
                   <div><Text type="secondary">大小: </Text><Text>{formatSize(model.size_mb)}</Text></div>
                   <div><Text type="secondary">语言: </Text>{model.languages.map((lang) => <Tag key={lang} color="blue" bordered={false}>{languageLabel(lang)}</Tag>)}</div>
                 </Flex>
+                {model.is_downloaded && (
+                  <Flex vertical gap={4} style={{ padding: '8px 0' }}>
+                    <Flex align="center" gap={8}>
+                      <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>温度:</Text>
+                      <Slider
+                        min={0} max={1} step={0.1}
+                        value={getModelSettings(model.id).temperature}
+                        onChange={(v) => handleModelSettingChange(model.id, 'temperature', v)}
+                        style={{ flex: 1 }}
+                      />
+                      <Text style={{ fontSize: 12, minWidth: 28 }}>{getModelSettings(model.id).temperature}</Text>
+                    </Flex>
+                    <Flex align="center" gap={8}>
+                      <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>Token:</Text>
+                      <InputNumber
+                        size="small"
+                        min={100} max={10000} step={100}
+                        value={getModelSettings(model.id).max_tokens}
+                        onChange={(v) => v != null && handleModelSettingChange(model.id, 'max_tokens', v)}
+                        style={{ flex: 1 }}
+                      />
+                    </Flex>
+                  </Flex>
+                )}
+                {model.model_repo && downloadProgress[model.model_repo] != null && (
+                  <Progress percent={downloadProgress[model.model_repo]} size="small" status="active" />
+                )}
                 <Flex justify="flex-end" gap={8}>
                   {daemonStatus.loaded_model === model.model_repo ? (
                     <>
@@ -246,7 +287,9 @@ export default function Models() {
                       <Button size="small" onClick={handleUnloadModel}>卸载</Button>
                     </>
                   ) : (
-                    <Button type="primary" size="small" loading={loadingModel === model.id} onClick={() => handleLoadModel(model.model_repo!, model.id)}>加载模型</Button>
+                    <Button type="primary" size="small" loading={loadingModel === model.id} onClick={() => handleLoadModel(model.model_repo!, model.id)}>
+                      {loadingModel === model.id ? '下载中...' : '加载模型'}
+                    </Button>
                   )}
                 </Flex>
               </Flex>
@@ -269,10 +312,32 @@ export default function Models() {
                   {isSelected(model.id) ? (
                     <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>
                   ) : (
-                    <Tag color="blue">云端</Tag>
+                    <Tag color="blue">云端可用</Tag>
                   )}
                 </Flex>
                 {model.description && <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>}
+                <Flex vertical gap={4} style={{ padding: '8px 0' }}>
+                  <Flex align="center" gap={8}>
+                    <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>温度:</Text>
+                    <Slider
+                      min={0} max={1} step={0.1}
+                      value={getModelSettings(model.id).temperature}
+                      onChange={(v) => handleModelSettingChange(model.id, 'temperature', v)}
+                      style={{ flex: 1 }}
+                    />
+                    <Text style={{ fontSize: 12, minWidth: 28 }}>{getModelSettings(model.id).temperature}</Text>
+                  </Flex>
+                  <Flex align="center" gap={8}>
+                    <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>Token:</Text>
+                    <InputNumber
+                      size="small"
+                      min={100} max={10000} step={100}
+                      value={getModelSettings(model.id).max_tokens}
+                      onChange={(v) => v != null && handleModelSettingChange(model.id, 'max_tokens', v)}
+                      style={{ flex: 1 }}
+                    />
+                  </Flex>
+                </Flex>
                 <Flex justify="flex-end" gap={8}>
                   {!isSelected(model.id) && (
                     <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>使用此模型</Button>

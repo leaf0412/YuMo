@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::db::{self, PaginatedResult, Prompt, Replacement, VocabularyWord};
 use crate::error::AppError;
+use crate::mask;
 use crate::hotkey;
 use crate::keychain;
 use crate::pipeline::PipelineState;
@@ -211,9 +212,20 @@ pub async fn stop_recording(
         .get("enhancement_enabled")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let temperature_key = format!("model_{}_temperature", model_id);
+    let max_tokens_key = format!("model_{}_max_tokens", model_id);
+    let temperature: f64 = settings_map
+        .get(&temperature_key)
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let max_tokens: u32 = settings_map
+        .get(&max_tokens_key)
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32)
+        .unwrap_or(1900);
     info!(
-        "[pipeline] settings: model_id={:?} language={:?} enhancement={}",
-        model_id, language, enhancement_enabled
+        "[pipeline] settings: model_id={:?} language={:?} enhancement={} temperature={} max_tokens={}",
+        model_id, language, enhancement_enabled, temperature, max_tokens
     );
 
     // 5. Transcribe — route by model provider
@@ -285,6 +297,8 @@ pub async fn stop_recording(
                 &audio_data.pcm_samples,
                 audio_data.sample_rate,
                 &language,
+                temperature,
+                max_tokens,
             )
             .await
         }
@@ -306,13 +320,14 @@ pub async fn stop_recording(
             let samples = audio_data.pcm_samples.clone();
             let sr = audio_data.sample_rate;
             let lang = language.clone();
+            let temp = temperature as f32;
             tokio::task::spawn_blocking(move || {
                 let ctx = transcriber::load_model(&model_path_clone).map_err(|e| {
                     log::error!("[pipeline] load_model failed: {}", e);
                     e
                 })?;
                 log::info!("[pipeline] transcribing via whisper (language={})...", lang);
-                transcriber::transcribe(&ctx, &samples, sr, &lang)
+                transcriber::transcribe(&ctx, &samples, sr, &lang, temp)
             })
             .await
             .map_err(|e| AppError::Transcription(format!("spawn_blocking: {e}")))?
@@ -335,10 +350,9 @@ pub async fn stop_recording(
     };
     let text = result.text;
     info!(
-        "[pipeline] transcription done in {}ms, text length={}, text={:?}",
+        "[pipeline] transcription done in {}ms, text={}",
         result.duration_ms,
-        text.len(),
-        if text.len() > 200 { &text[..200] } else { &text }
+        mask::mask_text(&text)
     );
 
     // 6. Apply text processing
@@ -357,7 +371,7 @@ pub async fn stop_recording(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
     let processed_text = text_processor::process_text(&text, &replacements, auto_capitalize);
-    info!("[pipeline] processed text: {:?}", if processed_text.len() > 200 { &processed_text[..200] } else { &processed_text });
+    info!("[pipeline] processed text={}", mask::mask_text(&processed_text));
 
     // 7. Optional AI enhancement
     let enhanced_text: Option<String> = if enhancement_enabled {
@@ -788,6 +802,7 @@ pub fn select_model(state: State<AppState>, model_id: String) -> Result<(), AppE
 
 #[tauri::command]
 pub fn store_api_key(provider: String, key: String) -> Result<(), AppError> {
+    info!("[cmd] store_api_key provider={} key={}", provider, mask::mask(&key));
     keychain::store_key("com.voiceink.app", &provider, &key)
 }
 
@@ -899,18 +914,47 @@ pub fn daemon_check_deps(state: State<AppState>) -> Result<serde_json::Value, Ap
 }
 
 #[tauri::command]
-pub fn daemon_load_model(state: State<AppState>, model_repo: String) -> Result<(), AppError> {
+pub async fn daemon_load_model(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    model_repo: String,
+) -> Result<(), AppError> {
     if !state.daemon.is_running() {
         state.daemon.start()?;
     }
     let cmd = serde_json::json!({"action": "load", "model": model_repo});
-    let resp = state.daemon.send_command(&cmd)?;
-    if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" {
+    let timeout = std::time::Duration::from_secs(600);
+    let rx = state.daemon.send_command_streaming(&cmd, timeout)?;
+
+    // Read responses on a blocking thread, emit progress events
+    let repo_clone = model_repo.clone();
+    let final_resp = tokio::task::spawn_blocking(move || {
+        let mut last_resp = None;
+        while let Ok(resp) = rx.recv() {
+            if resp.status == "downloading" {
+                let progress = resp.progress.as_ref()
+                    .and_then(|p| p.as_f64())
+                    .unwrap_or(0.0);
+                let _ = app.emit("model-download-progress", serde_json::json!({
+                    "model_repo": repo_clone,
+                    "progress": progress,
+                }));
+            }
+            let is_terminal = resp.status != "downloading";
+            last_resp = Some(resp);
+            if is_terminal { break; }
+        }
+        last_resp.ok_or_else(|| AppError::Transcription("no response from daemon".into()))
+    })
+    .await
+    .map_err(|e| AppError::Transcription(format!("spawn_blocking: {e}")))??;
+
+    if final_resp.status == "success" || final_resp.status == "loaded" || final_resp.status == "download_complete" {
         state.daemon.set_loaded_model(Some(model_repo));
         Ok(())
     } else {
         Err(AppError::Transcription(
-            resp.error.unwrap_or_else(|| format!("Load failed: {}", resp.status))
+            final_resp.error.unwrap_or_else(|| format!("Load failed: {}", final_resp.status))
         ))
     }
 }
