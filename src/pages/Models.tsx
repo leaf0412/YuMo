@@ -1,13 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Card, Button, Flex, Space, Tag, Typography, Row, Col, Progress, Select,
+  Card, Button, Flex, Space, Tag, Typography, Row, Col, Select,
   Input, message, Divider, Tabs, Badge,
 } from 'antd';
 import {
-  DownloadOutlined, DeleteOutlined, CheckCircleOutlined,
-  CloudOutlined, ImportOutlined, ApiOutlined, ThunderboltOutlined,
+  CheckCircleOutlined, CloudOutlined, ImportOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
-import { listen } from '@tauri-apps/api/event';
 import { invoke, formatError } from '../lib/logger';
 const { Title, Text } = Typography;
 
@@ -25,11 +23,6 @@ interface ModelInfo {
   accuracy?: number;
   is_recommended?: boolean;
   supported_languages?: Record<string, string>;
-}
-
-interface DownloadProgress {
-  model_id: string;
-  progress: number;
 }
 
 interface DaemonStatus {
@@ -64,11 +57,10 @@ function languageLabel(lang: string): string {
 
 export default function Models() {
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [settings, setSettings] = useState<Settings>({});
   const [cloudApiKey, setCloudApiKey] = useState('');
   const [daemonStatus, setDaemonStatus] = useState<DaemonStatus>({ running: false, loaded_model: null });
-  const [activeTab, setActiveTab] = useState('local');
+  const [activeTab, setActiveTab] = useState('mlx');
   const [loadingModel, setLoadingModel] = useState<string | null>(null);
 
   const loadModels = useCallback(async () => {
@@ -91,15 +83,6 @@ export default function Models() {
   }, [loadModels, loadSettings]);
 
   useEffect(() => {
-    const unlisten = listen<DownloadProgress>('model-download-progress', (event) => {
-      const { model_id, progress } = event.payload;
-      setDownloadProgress((prev) => ({ ...prev, [model_id]: progress }));
-      if (progress >= 100) loadModels();
-    });
-    return () => { unlisten.then((fn) => fn()); };
-  }, [loadModels]);
-
-  useEffect(() => {
     if (activeTab !== 'mlx') return;
     const poll = async () => {
       try {
@@ -112,26 +95,6 @@ export default function Models() {
     return () => clearInterval(interval);
   }, [activeTab]);
 
-  const handleDownload = async (modelId: string) => {
-    try {
-      setDownloadProgress((prev) => ({ ...prev, [modelId]: 0 }));
-      await invoke('download_model', { modelId });
-      message.success('下载完成');
-      loadModels();
-    } catch (e) {
-      message.error(formatError(e, '下载失败'));
-    }
-  };
-
-  const handleDeleteModel = async (modelId: string) => {
-    try {
-      await invoke('delete_model', { modelId });
-      message.success('已删除');
-      loadModels();
-    } catch (e) {
-      message.error(formatError(e, '删除失败'));
-    }
-  };
 
   const handleSelect = async (modelId: string) => {
     try {
@@ -242,46 +205,8 @@ export default function Models() {
   const mlxModels = models.filter(m => MLX_PROVIDERS.includes(m.provider));
   const cloudModels = models.filter(m => CLOUD_PROVIDERS_LIST.includes(m.provider));
 
-  const localTabContent = (
-    <>
-      <Row gutter={[16, 16]}>
-        {localModels.map((model) => {
-          const selected = isSelected(model.id);
-          const progress = downloadProgress[model.id];
-          const downloading = progress !== undefined && progress < 100;
-          return (
-            <Col xs={24} sm={12} md={8} key={model.id}>
-              <Card style={selected ? { borderColor: '#52c41a' } : undefined} styles={{ body: { padding: 16 } }}>
-                <Flex vertical gap={12} style={{ width: '100%' }}>
-                  <Flex justify="space-between" align="center">
-                    <Space><ApiOutlined /><Text strong>{model.name}</Text></Space>
-                    {selected ? <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>
-                      : model.is_downloaded ? <Tag color="green">已下载</Tag>
-                      : <Tag>未下载</Tag>}
-                  </Flex>
-                  <Flex gap={16}>
-                    <div><Text type="secondary">大小: </Text><Text>{formatSize(model.size_mb)}</Text></div>
-                    <div><Text type="secondary">语言: </Text>{model.languages.map((lang) => <Tag key={lang} color="blue" bordered={false}>{languageLabel(lang)}</Tag>)}</div>
-                  </Flex>
-                  {downloading && <Progress percent={Math.round(progress)} size="small" />}
-                  <Flex justify="flex-end" gap={8}>
-                    {model.is_downloaded ? (
-                      <>
-                        {!selected && <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>使用此模型</Button>}
-                        <Button danger size="small" icon={<DeleteOutlined />} onClick={() => handleDeleteModel(model.id)}>删除</Button>
-                      </>
-                    ) : (
-                      <Button type="primary" size="small" icon={<DownloadOutlined />} loading={downloading} onClick={() => handleDownload(model.id)}>下载</Button>
-                    )}
-                  </Flex>
-                </Flex>
-              </Card>
-            </Col>
-          );
-        })}
-      </Row>
-    </>
-  );
+  // Local whisper models tab hidden — kept for future use
+  void localModels;
 
   const mlxTabContent = (
     <>
@@ -396,7 +321,6 @@ export default function Models() {
       </div>
       <Tabs activeKey={activeTab} onChange={setActiveTab}
         items={[
-          { key: 'local', label: `本地模型 (${localModels.length})`, children: localTabContent },
           { key: 'mlx', label: `MLX 模型 (${mlxModels.length})`, children: mlxTabContent },
           { key: 'cloud', label: `云端模型 (${cloudModels.length})`, children: cloudTabContent },
         ]}
