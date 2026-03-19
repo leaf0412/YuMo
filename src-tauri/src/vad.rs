@@ -1,3 +1,4 @@
+use log::info;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +39,7 @@ impl ChunkManager {
     }
 
     pub fn feed_samples(&mut self, samples: &[f32], is_speech: bool) {
+        info!("[vad] feed_samples count={} is_speech={}", samples.len(), is_speech);
         if is_speech {
             self.in_speech = true;
             self.silence_start_ms = None;
@@ -58,6 +60,7 @@ impl ChunkManager {
         is_speech: bool,
         elapsed_ms: u64,
     ) {
+        info!("[vad] feed_samples_with_timestamp count={} is_speech={} elapsed_ms={}", samples.len(), is_speech, elapsed_ms);
         if is_speech {
             self.in_speech = true;
             self.silence_start_ms = None;

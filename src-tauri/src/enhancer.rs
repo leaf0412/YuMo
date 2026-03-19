@@ -1,4 +1,6 @@
 use crate::error::AppError;
+use crate::mask;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +27,7 @@ pub fn build_prompt(
     text: &str,
     vocabulary: &[String],
 ) -> (String, String) {
+    info!("[enhancer] building prompt, text_length={} vocabulary_count={}", text.len(), vocabulary.len());
     let user_msg = if user_template.contains("{{text}}") {
         user_template.replace("{{text}}", text)
     } else {
@@ -46,6 +49,7 @@ pub fn build_prompt(
 
 /// Build OpenAI-compatible chat completion request body.
 pub fn build_openai_request_body(model: &str, system: &str, user: &str) -> String {
+    info!("[enhancer] building OpenAI request body, model={}", model);
     serde_json::json!({
         "model": model,
         "messages": [
@@ -58,6 +62,7 @@ pub fn build_openai_request_body(model: &str, system: &str, user: &str) -> Strin
 
 /// Build Anthropic Messages API request body.
 pub fn build_anthropic_request_body(model: &str, system: &str, user: &str) -> String {
+    info!("[enhancer] building request body, model={}", model);
     serde_json::json!({
         "model": model,
         "system": system,
@@ -71,42 +76,56 @@ pub fn build_anthropic_request_body(model: &str, system: &str, user: &str) -> St
 
 /// Parse OpenAI-compatible response to extract the assistant message.
 pub fn parse_openai_response(body: &str) -> Result<String, AppError> {
+    info!("[enhancer] parsing OpenAI response");
     let v: serde_json::Value =
-        serde_json::from_str(body).map_err(|e| AppError::Network(e.to_string()))?;
+        serde_json::from_str(body).map_err(|e| {
+            error!("[enhancer] failed to parse response JSON: {}", e);
+            AppError::Network(e.to_string())
+        })?;
 
     if let Some(error) = v.get("error") {
-        return Err(AppError::Network(
-            error["message"]
-                .as_str()
-                .unwrap_or("Unknown error")
-                .to_string(),
-        ));
+        let msg = error["message"]
+            .as_str()
+            .unwrap_or("Unknown error")
+            .to_string();
+        error!("[enhancer] API error: {}", msg);
+        return Err(AppError::Network(msg));
     }
 
     v["choices"][0]["message"]["content"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| AppError::Network("Invalid response format".to_string()))
+        .ok_or_else(|| {
+            error!("[enhancer] invalid response format");
+            AppError::Network("Invalid response format".to_string())
+        })
 }
 
 /// Parse Anthropic Messages API response.
 pub fn parse_anthropic_response(body: &str) -> Result<String, AppError> {
+    info!("[enhancer] parsing response");
     let v: serde_json::Value =
-        serde_json::from_str(body).map_err(|e| AppError::Network(e.to_string()))?;
+        serde_json::from_str(body).map_err(|e| {
+            error!("[enhancer] failed to parse response JSON: {}", e);
+            AppError::Network(e.to_string())
+        })?;
 
     if let Some(error) = v.get("error") {
-        return Err(AppError::Network(
-            error["message"]
-                .as_str()
-                .unwrap_or("Unknown error")
-                .to_string(),
-        ));
+        let msg = error["message"]
+            .as_str()
+            .unwrap_or("Unknown error")
+            .to_string();
+        error!("[enhancer] API error: {}", msg);
+        return Err(AppError::Network(msg));
     }
 
     v["content"][0]["text"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| AppError::Network("Invalid response format".to_string()))
+        .ok_or_else(|| {
+            error!("[enhancer] invalid response format");
+            AppError::Network("Invalid response format".to_string())
+        })
 }
 
 /// Call LLM API and return enhanced text.
@@ -115,9 +134,11 @@ pub async fn enhance(
     system_msg: &str,
     user_msg: &str,
 ) -> Result<String, AppError> {
+    info!("[enhancer] enhance start provider={:?} model={} api_key={}", config.provider, config.model, mask::mask(&config.api_key));
+    info!("[enhancer] input text={}", mask::mask_text(user_msg));
     let client = reqwest::Client::new();
 
-    match config.provider {
+    let result = match config.provider {
         LLMProvider::OpenAI | LLMProvider::Ollama => {
             let base = config
                 .base_url
@@ -126,6 +147,7 @@ pub async fn enhance(
             let url = format!("{}/chat/completions", base);
             let body = build_openai_request_body(&config.model, system_msg, user_msg);
 
+            info!("[enhancer] sending request to {}", url);
             let resp = client
                 .post(&url)
                 .header("Authorization", format!("Bearer {}", config.api_key))
@@ -142,6 +164,7 @@ pub async fn enhance(
             let url = "https://api.anthropic.com/v1/messages";
             let body = build_anthropic_request_body(&config.model, system_msg, user_msg);
 
+            info!("[enhancer] sending request to {}", url);
             let resp = client
                 .post(url)
                 .header("x-api-key", &config.api_key)
@@ -155,5 +178,11 @@ pub async fn enhance(
 
             parse_anthropic_response(&resp)
         }
+    };
+
+    match &result {
+        Ok(text) => info!("[enhancer] enhance complete, result={}", mask::mask_text(text)),
+        Err(e) => error!("[enhancer] enhance failed: {}", e),
     }
+    result
 }

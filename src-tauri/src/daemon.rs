@@ -58,6 +58,9 @@ impl DaemonProcess {
     /// intermediate `{"status":"downloading",...}` lines so callers only see
     /// terminal responses.
     fn send_command(&mut self, cmd: &Value) -> AppResult<DaemonResponse> {
+        let action = cmd.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
+        log::info!("[daemon] sending command: {}", action);
+
         let line = serde_json::to_string(cmd)
             .map_err(|e| AppError::Transcription(format!("serialize cmd: {e}")))?;
 
@@ -113,10 +116,40 @@ impl DaemonProcess {
             })?;
 
             // Skip intermediate downloading status lines; keep reading.
+            // Use read_response_raw() if you need downloading lines.
             if resp.status == "downloading" {
                 continue;
             }
 
+            log::info!("[daemon] response received, status={}", resp.status);
+            return Ok(resp);
+        }
+    }
+
+    /// Read the next single JSON response (including downloading status).
+    /// Skips only bare PROGRESS: lines and empty lines.
+    fn read_one_response(&mut self, timeout: std::time::Duration) -> AppResult<DaemonResponse> {
+        let deadline = std::time::Instant::now() + timeout;
+        let mut buf = String::new();
+        loop {
+            if std::time::Instant::now() >= deadline {
+                return Err(AppError::Transcription(
+                    format!("daemon response timed out after {}s", timeout.as_secs()),
+                ));
+            }
+            buf.clear();
+            let n = self.reader.read_line(&mut buf)
+                .map_err(|e| AppError::Transcription(format!("read stdout: {e}")))?;
+            if n == 0 {
+                return Err(AppError::Transcription("daemon stdout closed unexpectedly".into()));
+            }
+            let trimmed = buf.trim();
+            if trimmed.is_empty() || trimmed.starts_with("PROGRESS:") {
+                continue;
+            }
+            let resp: DaemonResponse = serde_json::from_str(trimmed).map_err(|e| {
+                AppError::Transcription(format!("parse daemon response: {e} — raw: {trimmed}"))
+            })?;
             return Ok(resp);
         }
     }
@@ -158,6 +191,7 @@ impl DaemonManager {
         }
 
         let python = find_python()?;
+        log::info!("[daemon] using python: {}", python);
         let stderr_path = self.data_dir.join("daemon_stderr.log");
         let stderr_file = std::fs::File::create(&stderr_path)
             .map_err(|e| AppError::Io(format!("create stderr log: {e}")))?;
@@ -189,7 +223,22 @@ impl DaemonManager {
         let mut reader = BufReader::new(stdout);
 
         // Wait for the ready handshake.
-        wait_for_ready(&mut reader)?;
+        if let Err(e) = wait_for_ready(&mut reader) {
+            // Read stderr log for more context
+            let stderr_content = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+            let detail = if stderr_content.is_empty() {
+                e.to_string()
+            } else {
+                // Take last 500 chars to keep it readable
+                let tail = if stderr_content.len() > 500 {
+                    &stderr_content[stderr_content.len() - 500..]
+                } else {
+                    &stderr_content
+                };
+                format!("{e}\n--- daemon stderr ---\n{tail}")
+            };
+            return Err(AppError::Transcription(detail));
+        }
 
         *guard = Some(DaemonProcess {
             _child: child,
@@ -204,6 +253,7 @@ impl DaemonManager {
     /// Send `{"action":"quit"}`, give the process a moment, then kill if still
     /// alive.
     pub fn stop(&self) {
+        log::info!("[daemon] stop requested");
         let mut guard = match self.process.lock() {
             Ok(g) => g,
             Err(_) => return,
@@ -219,10 +269,14 @@ impl DaemonManager {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
             loop {
                 match proc._child.try_wait() {
-                    Ok(Some(_)) => break,
+                    Ok(Some(_)) => {
+                        log::info!("[daemon] stopped cleanly");
+                        break;
+                    }
                     _ => {}
                 }
                 if std::time::Instant::now() >= deadline {
+                    log::warn!("[daemon] force killing after timeout");
                     let _ = proc._child.kill();
                     break;
                 }
@@ -238,6 +292,9 @@ impl DaemonManager {
     /// Write a JSON command to the daemon's stdin and return the terminal
     /// response.  Skips PROGRESS: lines and intermediate "downloading" lines.
     pub fn send_command(&self, cmd: &Value) -> AppResult<DaemonResponse> {
+        let action = cmd.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
+        log::info!("[daemon] send_command: {}", action);
+
         let mut guard = self
             .process
             .lock()
@@ -250,6 +307,65 @@ impl DaemonManager {
         proc.send_command(cmd)
     }
 
+    /// Send a command and read responses one-by-one (including "downloading").
+    /// Returns a channel of responses. The caller should read until a terminal
+    /// status (not "downloading") is received.
+    pub fn send_command_streaming(
+        &self,
+        cmd: &Value,
+        timeout: std::time::Duration,
+    ) -> AppResult<std::sync::mpsc::Receiver<DaemonResponse>> {
+        let action = cmd.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
+        log::info!("[daemon] send_command_streaming: {}", action);
+
+        let cmd_json = serde_json::to_string(cmd)
+            .map_err(|e| AppError::Transcription(format!("serialize cmd: {e}")))?;
+
+        // Write command
+        {
+            let mut guard = self.process.lock()
+                .map_err(|_| AppError::Transcription("daemon mutex poisoned".into()))?;
+            let proc = guard.as_mut().ok_or_else(|| {
+                AppError::Transcription("daemon is not running; call start() first".into())
+            })?;
+            proc.stdin.write_all(cmd_json.as_bytes())
+                .and_then(|_| proc.stdin.write_all(b"\n"))
+                .and_then(|_| proc.stdin.flush())
+                .map_err(|e| AppError::Transcription(format!("write stdin: {e}")))?;
+        }
+
+        // Spawn a thread that reads responses and sends them through a channel
+        let (tx, rx) = std::sync::mpsc::channel();
+        let process = self.process.clone();
+        std::thread::spawn(move || {
+            loop {
+                let resp = {
+                    let mut guard = match process.lock() {
+                        Ok(g) => g,
+                        Err(_) => break,
+                    };
+                    let proc = match guard.as_mut() {
+                        Some(p) => p,
+                        None => break,
+                    };
+                    match proc.read_one_response(timeout) {
+                        Ok(r) => r,
+                        Err(_) => break,
+                    }
+                };
+                let is_terminal = resp.status != "downloading";
+                if tx.send(resp).is_err() {
+                    break;
+                }
+                if is_terminal {
+                    break;
+                }
+            }
+        });
+
+        Ok(rx)
+    }
+
     /// Async version of send_command — runs blocking IO on a dedicated thread
     /// with a configurable timeout. Does not block the tokio runtime.
     pub async fn send_command_async(
@@ -257,6 +373,9 @@ impl DaemonManager {
         cmd: &Value,
         timeout: std::time::Duration,
     ) -> AppResult<DaemonResponse> {
+        let action = cmd.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
+        log::info!("[daemon] send_command_async: {}", action);
+
         // Serialize command before moving into the blocking closure
         let cmd_json = serde_json::to_string(cmd)
             .map_err(|e| AppError::Transcription(format!("serialize cmd: {e}")))?;
@@ -359,6 +478,7 @@ fn wait_for_ready(reader: &mut BufReader<ChildStdout>) -> AppResult<()> {
         // Try to parse as JSON; if it's the ready signal we're done.
         if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
             if v.get("status").and_then(|s| s.as_str()) == Some("ready") {
+                log::info!("[daemon] ready signal received");
                 return Ok(());
             }
         }
@@ -426,21 +546,41 @@ fn python_candidates() -> Vec<String> {
     candidates.push("/usr/local/bin/python3".into());
     candidates.push("/usr/bin/python3".into());
 
+    log::info!("[daemon] python candidates found: {}", candidates.len());
     candidates
 }
 
 /// Locate a Python 3 interpreter that has mlx_audio installed.
+/// If none found, auto-bootstrap a venv under ~/.voiceink/venv and install deps.
 fn find_python() -> AppResult<String> {
+    // 1. Check app-managed venv first (fastest path on repeat launches)
+    let venv_python = venv_python_path();
+    if std::path::Path::new(&venv_python).exists() && python_has_mlx(&venv_python) {
+        log::info!("[daemon] using app venv python: {}", venv_python);
+        return Ok(venv_python);
+    }
+
+    // 2. Check system pythons
     for candidate in python_candidates() {
-        if std::path::Path::new(&candidate).exists() && python_has_mlx(&candidate) {
-            return Ok(candidate);
+        if std::path::Path::new(&candidate).exists() {
+            let has_mlx = python_has_mlx(&candidate);
+            log::info!("[daemon] python candidate: {} (mlx_audio={})", candidate, has_mlx);
+            if has_mlx {
+                return Ok(candidate);
+            }
         }
     }
 
-    // Fallback: any working python3 (even without mlx_audio — will fail later
-    // with a clearer error from the daemon itself).
+    // 3. No python with mlx_audio found — auto-bootstrap venv
+    log::info!("[daemon] no python with mlx_audio found, bootstrapping venv...");
+    if let Ok(python) = bootstrap_venv() {
+        return Ok(python);
+    }
+
+    // 4. Fallback: any working python3 (will fail later with clearer error)
     for candidate in python_candidates() {
         if std::path::Path::new(&candidate).exists() {
+            log::warn!("[daemon] falling back to python without mlx_audio: {}", candidate);
             return Ok(candidate);
         }
     }
@@ -448,4 +588,69 @@ fn find_python() -> AppResult<String> {
     Err(AppError::NotFound(
         "python3 not found; install Python 3 via Homebrew or python.org".into(),
     ))
+}
+
+/// Path to the app-managed venv python binary.
+fn venv_python_path() -> String {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".voiceink/venv/bin/python3")
+        .to_string_lossy()
+        .to_string()
+}
+
+/// Find any system python3 (doesn't need mlx_audio).
+fn find_any_python() -> Option<String> {
+    for candidate in python_candidates() {
+        if std::path::Path::new(&candidate).exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Create a venv at ~/.voiceink/venv and install mlx-audio-plus.
+/// Returns the venv python path on success.
+fn bootstrap_venv() -> AppResult<String> {
+    let base_python = find_any_python()
+        .ok_or_else(|| AppError::NotFound("python3 not found for venv creation".into()))?;
+
+    let venv_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".voiceink/venv");
+    let venv_dir_str = venv_dir.to_string_lossy().to_string();
+
+    log::info!("[daemon] creating venv at {} with {}", venv_dir_str, base_python);
+
+    // Create venv
+    let status = Command::new(&base_python)
+        .args(["-m", "venv", &venv_dir_str])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .status()
+        .map_err(|e| AppError::Transcription(format!("venv creation failed: {e}")))?;
+
+    if !status.success() {
+        return Err(AppError::Transcription("python -m venv failed".into()));
+    }
+
+    let venv_python = venv_python_path();
+    log::info!("[daemon] installing mlx-audio-plus in venv...");
+
+    // Install dependencies
+    let output = Command::new(&venv_python)
+        .args(["-m", "pip", "install", "--upgrade", "pip", "mlx-audio-plus", "soundfile"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| AppError::Transcription(format!("pip install failed: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::error!("[daemon] pip install failed: {}", stderr);
+        return Err(AppError::Transcription(format!("pip install failed: {}", stderr)));
+    }
+
+    log::info!("[daemon] venv bootstrap complete");
+    Ok(venv_python)
 }

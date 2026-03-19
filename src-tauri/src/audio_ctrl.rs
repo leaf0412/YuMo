@@ -1,4 +1,5 @@
 use coreaudio_sys::*;
+use log::{error, info};
 use std::mem;
 
 pub fn default_output_device_id() -> AudioDeviceID {
@@ -19,14 +20,17 @@ pub fn default_output_device_id() -> AudioDeviceID {
             &mut device_id as *mut _ as *mut _,
         );
         if status == 0 {
+            info!("[audio_ctrl] default output device_id={}", device_id);
             device_id
         } else {
+            error!("[audio_ctrl] failed to get default output device, status={}", status);
             kAudioObjectUnknown
         }
     }
 }
 
 pub fn is_system_muted() -> bool {
+    info!("[audio_ctrl] checking system mute state");
     let device_id = default_output_device_id();
     if device_id == kAudioObjectUnknown {
         return false;
@@ -48,13 +52,17 @@ pub fn is_system_muted() -> bool {
             &mut size,
             &mut muted as *mut _ as *mut _,
         );
-        status == 0 && muted != 0
+        let result = status == 0 && muted != 0;
+        info!("[audio_ctrl] system muted={}", result);
+        result
     }
 }
 
 pub fn set_system_muted(mute: bool) -> bool {
+    info!("[audio_ctrl] set_system_muted mute={}", mute);
     let device_id = default_output_device_id();
     if device_id == kAudioObjectUnknown {
+        error!("[audio_ctrl] cannot set mute, unknown device");
         return false;
     }
 
@@ -74,6 +82,12 @@ pub fn set_system_muted(mute: bool) -> bool {
             size,
             &muted as *const _ as *const _,
         );
-        status == 0
+        let ok = status == 0;
+        if ok {
+            info!("[audio_ctrl] mute set successfully");
+        } else {
+            error!("[audio_ctrl] failed to set mute, status={}", status);
+        }
+        ok
     }
 }

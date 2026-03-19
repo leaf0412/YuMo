@@ -8,6 +8,7 @@ pub mod downloader;
 pub mod enhancer;
 pub mod error;
 pub mod hotkey;
+pub mod mask;
 pub mod keychain;
 pub mod paster;
 pub mod permissions;

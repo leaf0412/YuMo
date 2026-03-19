@@ -1,5 +1,6 @@
 use crate::error::AppError;
 use coreaudio_sys::*;
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::mem;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -50,6 +51,7 @@ struct InputCallbackData {
 // ---------------------------------------------------------------------------
 
 pub fn list_input_devices() -> Vec<AudioInputDevice> {
+    info!("[recorder] list_input_devices");
     let default_id = default_input_device_id();
     let device_ids = all_device_ids();
     let mut result = Vec::new();
@@ -65,6 +67,17 @@ pub fn list_input_devices() -> Vec<AudioInputDevice> {
                 is_default: did == default_id,
             });
         }
+    }
+    info!(
+        "[recorder] list_input_devices found {} devices, default_id={}",
+        result.len(),
+        default_id
+    );
+    for dev in &result {
+        info!(
+            "[recorder]   device id={} name={:?} is_default={}",
+            dev.id, dev.name, dev.is_default
+        );
     }
     result
 }
@@ -246,6 +259,7 @@ unsafe fn cfstring_to_string(cf: CFStringRef) -> Option<String> {
 pub fn start_recording(
     device_id: u32,
 ) -> Result<(RecordingHandle, Receiver<AudioLevel>), AppError> {
+    info!("[recorder] start_recording device_id={}", device_id);
     let (level_tx, level_rx) = mpsc::channel();
     let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -260,6 +274,7 @@ pub fn start_recording(
         };
         let component = AudioComponentFindNext(std::ptr::null_mut(), &mut comp_desc);
         if component.is_null() {
+            error!("[recorder] cannot find HALOutput AudioComponent");
             return Err(AppError::Recording(
                 "Cannot find HALOutput AudioComponent".into(),
             ));
@@ -268,6 +283,7 @@ pub fn start_recording(
         let mut audio_unit: AudioUnit = std::ptr::null_mut();
         let status = AudioComponentInstanceNew(component, &mut audio_unit);
         if status != 0 {
+            error!("[recorder] AudioComponentInstanceNew failed: {}", status);
             return Err(AppError::Recording(format!(
                 "AudioComponentInstanceNew failed: {status}"
             )));
@@ -304,6 +320,7 @@ pub fn start_recording(
             mem::size_of::<AudioDeviceID>() as u32,
         );
         if status != 0 {
+            error!("[recorder] cannot set input device {}: {}", device_id, status);
             AudioComponentInstanceDispose(audio_unit);
             return Err(AppError::Recording(format!(
                 "Cannot set input device: {status}"
@@ -322,6 +339,7 @@ pub fn start_recording(
             mBitsPerChannel: 32,
             mReserved: 0,
         };
+        info!("[recorder] setting stream format: sample_rate=16000 channels=1 bits=32 (f32)");
         let status = AudioUnitSetProperty(
             audio_unit,
             kAudioUnitProperty_StreamFormat,
@@ -331,6 +349,7 @@ pub fn start_recording(
             mem::size_of::<AudioStreamBasicDescription>() as u32,
         );
         if status != 0 {
+            error!("[recorder] cannot set stream format: {}", status);
             AudioComponentInstanceDispose(audio_unit);
             return Err(AppError::Recording(format!(
                 "Cannot set stream format: {status}"
@@ -359,6 +378,7 @@ pub fn start_recording(
             mem::size_of::<AURenderCallbackStruct>() as u32,
         );
         if status != 0 {
+            error!("[recorder] cannot set input callback: {}", status);
             let _ = Box::from_raw(cb_ptr);
             AudioComponentInstanceDispose(audio_unit);
             return Err(AppError::Recording(format!(
@@ -369,6 +389,7 @@ pub fn start_recording(
         // 7. Initialize and start
         let status = AudioUnitInitialize(audio_unit);
         if status != 0 {
+            error!("[recorder] AudioUnitInitialize failed: {}", status);
             let _ = Box::from_raw(cb_ptr);
             AudioComponentInstanceDispose(audio_unit);
             return Err(AppError::Recording(format!(
@@ -378,6 +399,7 @@ pub fn start_recording(
 
         let status = AudioOutputUnitStart(audio_unit);
         if status != 0 {
+            error!("[recorder] AudioOutputUnitStart failed: {}", status);
             AudioUnitUninitialize(audio_unit);
             let _ = Box::from_raw(cb_ptr);
             AudioComponentInstanceDispose(audio_unit);
@@ -386,6 +408,7 @@ pub fn start_recording(
             )));
         }
 
+        info!("[recorder] recording started on device_id={}", device_id);
         Ok((
             RecordingHandle {
                 audio_unit,
@@ -399,6 +422,7 @@ pub fn start_recording(
 
 /// Stop recording and return the captured audio data.
 pub fn stop_recording(handle: RecordingHandle) -> Result<AudioData, AppError> {
+    info!("[recorder] stop_recording");
     unsafe {
         AudioOutputUnitStop(handle.audio_unit);
         AudioUnitUninitialize(handle.audio_unit);
@@ -408,8 +432,17 @@ pub fn stop_recording(handle: RecordingHandle) -> Result<AudioData, AppError> {
     let samples = handle
         .buffer
         .lock()
-        .map_err(|e| AppError::Recording(e.to_string()))?
+        .map_err(|e| {
+            error!("[recorder] failed to lock buffer: {}", e);
+            AppError::Recording(e.to_string())
+        })?
         .clone();
+    let duration_secs = samples.len() as f64 / 16000.0;
+    info!(
+        "[recorder] stop_recording samples={} duration={:.2}s",
+        samples.len(),
+        duration_secs
+    );
     Ok(AudioData {
         pcm_samples: samples,
         sample_rate: 16000,
@@ -419,6 +452,7 @@ pub fn stop_recording(handle: RecordingHandle) -> Result<AudioData, AppError> {
 
 /// Cancel recording, discarding all data.
 pub fn cancel_recording(handle: RecordingHandle) -> Result<(), AppError> {
+    warn!("[recorder] cancel_recording (discarding data)");
     let _ = stop_recording(handle)?;
     Ok(())
 }
@@ -489,15 +523,23 @@ unsafe extern "C" fn input_callback(
 /// Save a recording to the given directory as a timestamped WAV file.
 /// Returns the full path of the saved file.
 pub fn save_recording(data: &AudioData, dir: &std::path::Path) -> Result<std::path::PathBuf, AppError> {
+    info!(
+        "[recorder] save_recording dir={:?} samples={} sample_rate={}",
+        dir,
+        data.pcm_samples.len(),
+        data.sample_rate
+    );
     std::fs::create_dir_all(dir)?;
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S_%3f");
     let filename = format!("recording_{}.wav", timestamp);
     let path = dir.join(filename);
     save_wav(data, &path)?;
+    info!("[recorder] save_recording saved to {:?}", path);
     Ok(path)
 }
 
 pub fn save_wav(data: &AudioData, path: &std::path::Path) -> Result<(), AppError> {
+    info!("[recorder] save_wav path={:?} samples={}", path, data.pcm_samples.len());
     let spec = hound::WavSpec {
         channels: data.channels,
         sample_rate: data.sample_rate,
@@ -505,7 +547,10 @@ pub fn save_wav(data: &AudioData, path: &std::path::Path) -> Result<(), AppError
         sample_format: hound::SampleFormat::Int,
     };
     let mut writer =
-        hound::WavWriter::create(path, spec).map_err(|e| AppError::Io(e.to_string()))?;
+        hound::WavWriter::create(path, spec).map_err(|e| {
+            error!("[recorder] failed to create WAV writer at {:?}: {}", path, e);
+            AppError::Io(e.to_string())
+        })?;
     for &sample in &data.pcm_samples {
         let s = (sample * 32767.0).clamp(-32768.0, 32767.0) as i16;
         writer
@@ -520,10 +565,13 @@ pub fn save_wav(data: &AudioData, path: &std::path::Path) -> Result<(), AppError
 
 /// Read a WAV file and return it as a base64 data URI for frontend playback.
 pub fn read_recording_as_data_uri(path: &std::path::Path) -> Result<String, AppError> {
+    info!("[recorder] read_recording_as_data_uri path={:?}", path);
     if !path.exists() {
+        error!("[recorder] recording not found: {}", path.display());
         return Err(AppError::NotFound(format!("Recording not found: {}", path.display())));
     }
     let data = std::fs::read(path)?;
+    info!("[recorder] read_recording_as_data_uri size={} bytes", data.len());
     let b64 = crate::commands::base64_encode(&data);
     Ok(format!("data:audio/wav;base64,{}", b64))
 }

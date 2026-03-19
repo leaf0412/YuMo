@@ -1,6 +1,8 @@
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
+use crate::mask;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CloudProvider {
@@ -32,6 +34,7 @@ pub struct RequestInfo {
 }
 
 pub fn available_providers() -> Vec<ProviderInfo> {
+    info!("[cloud] listing available providers");
     vec![
         ProviderInfo {
             id: "openai".into(),
@@ -62,6 +65,7 @@ pub fn available_providers() -> Vec<ProviderInfo> {
 }
 
 pub fn build_request_info(config: &CloudConfig, language: &str) -> RequestInfo {
+    info!("[cloud] building request info provider={:?} model={} language={} api_key={}", config.provider, config.model, language, mask::mask(&config.api_key));
     match config.provider {
         CloudProvider::OpenAI => {
             let base = config
@@ -99,10 +103,14 @@ pub fn build_request_info(config: &CloudConfig, language: &str) -> RequestInfo {
 }
 
 pub fn parse_response(provider: CloudProvider, body: &str) -> Result<String, AppError> {
+    info!("[cloud] parsing response for provider={:?}", provider);
     let v: serde_json::Value =
-        serde_json::from_str(body).map_err(|e| AppError::Network(e.to_string()))?;
+        serde_json::from_str(body).map_err(|e| {
+            error!("[cloud] failed to parse response JSON: {}", e);
+            AppError::Network(e.to_string())
+        })?;
 
-    match provider {
+    let result = match provider {
         CloudProvider::OpenAI | CloudProvider::Groq | CloudProvider::ElevenLabs => v["text"]
             .as_str()
             .map(|s| s.to_string())
@@ -115,7 +123,13 @@ pub fn parse_response(provider: CloudProvider, body: &str) -> Result<String, App
             .as_str()
             .map(|s| s.to_string())
             .ok_or_else(|| AppError::Network("Missing text in Gemini response".into())),
+    };
+
+    match &result {
+        Ok(text) => info!("[cloud] parsed response ok, text={}", mask::mask_text(text)),
+        Err(e) => error!("[cloud] failed to extract text from response: {}", e),
     }
+    result
 }
 
 /// Transcribe audio file using cloud provider.
@@ -124,6 +138,7 @@ pub async fn transcribe(
     audio_data: &[u8],
     language: &str,
 ) -> Result<String, AppError> {
+    info!("[cloud] transcribe start provider={:?} model={} audio_size={} language={}", config.provider, config.model, audio_data.len(), language);
     let req_info = build_request_info(config, language);
     let client = reqwest::Client::new();
 
@@ -143,8 +158,15 @@ pub async fn transcribe(
         request = request.header("Authorization", &req_info.auth_header);
     }
 
+    info!("[cloud] sending request to {}", req_info.url);
     let response = request.multipart(form).send().await?;
+    let status = response.status();
+    info!("[cloud] response status={}", status);
     let body = response.text().await?;
 
-    parse_response(config.provider.clone(), &body)
+    let result = parse_response(config.provider.clone(), &body);
+    if let Err(ref e) = result {
+        error!("[cloud] transcribe failed: {}", e);
+    }
+    result
 }

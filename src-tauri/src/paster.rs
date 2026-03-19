@@ -2,6 +2,8 @@ use cocoa::base::{id, nil};
 use cocoa::foundation::NSString;
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use crate::mask;
+use log::{error, info};
 use objc::runtime::Class;
 use objc::{msg_send, sel, sel_impl};
 
@@ -19,27 +21,31 @@ unsafe fn pasteboard_type_string() -> id {
 
 /// Read the current string contents of the system clipboard.
 pub fn read_clipboard() -> Option<String> {
+    info!("[paster] reading clipboard");
     unsafe {
         let pasteboard = general_pasteboard();
         let pb_type = pasteboard_type_string();
         let string: id = msg_send![pasteboard, stringForType: pb_type];
         if string == nil {
+            info!("[paster] clipboard is empty");
             return None;
         }
         let c_str: *const std::os::raw::c_char = msg_send![string, UTF8String];
         if c_str.is_null() {
+            error!("[paster] clipboard UTF8String returned null");
             return None;
         }
-        Some(
-            std::ffi::CStr::from_ptr(c_str)
-                .to_string_lossy()
-                .into_owned(),
-        )
+        let result = std::ffi::CStr::from_ptr(c_str)
+            .to_string_lossy()
+            .into_owned();
+        info!("[paster] clipboard read ok, length={}", result.len());
+        Some(result)
     }
 }
 
 /// Write a string to the system clipboard, replacing any existing content.
 pub fn write_clipboard(text: &str) {
+    info!("[paster] writing to clipboard, text={}", mask::mask_text(text));
     unsafe {
         let pasteboard = general_pasteboard();
         let pb_type = pasteboard_type_string();
@@ -58,12 +64,14 @@ pub fn write_clipboard(text: &str) {
 
 /// Snapshot the current clipboard contents for later restoration.
 pub fn save_clipboard() -> Option<String> {
+    info!("[paster] saving clipboard snapshot");
     read_clipboard()
 }
 
 /// Restore previously saved clipboard contents. If `saved` is None, the
 /// clipboard is left unchanged.
 pub fn restore_clipboard(saved: Option<String>) {
+    info!("[paster] restoring clipboard, has_saved={}", saved.is_some());
     if let Some(text) = saved {
         write_clipboard(&text);
     }
@@ -74,6 +82,7 @@ pub fn restore_clipboard(saved: Option<String>) {
 /// This requires the application to have Accessibility permission
 /// (System Settings > Privacy & Security > Accessibility).
 pub fn simulate_paste() {
+    info!("[paster] simulating Cmd+V paste");
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .expect("Failed to create CGEventSource");
 
@@ -93,6 +102,7 @@ pub fn simulate_paste() {
 /// Full paste flow: save clipboard, write text, simulate Cmd+V, then
 /// asynchronously restore the original clipboard after `restore_delay_ms`.
 pub fn paste_text(text: &str, restore_delay_ms: u64) {
+    info!("[paster] paste_text start, text={} restore_delay_ms={}", mask::mask_text(text), restore_delay_ms);
     let saved = save_clipboard();
     write_clipboard(text);
     simulate_paste();

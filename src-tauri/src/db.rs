@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use log::{error, info};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::mask;
 
 // ---------------------------------------------------------------------------
 // Data structures
@@ -59,7 +61,11 @@ pub struct Prompt {
 // ---------------------------------------------------------------------------
 
 pub fn init_database(path: &Path) -> Result<Connection, AppError> {
-    let conn = Connection::open(path)?;
+    info!("[db] init_database path={}", path.display());
+    let conn = Connection::open(path).map_err(|e| {
+        error!("[db] init_database open failed: {}", e);
+        e
+    })?;
 
     conn.execute_batch("PRAGMA journal_mode = WAL;")?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
@@ -125,6 +131,7 @@ pub fn init_database(path: &Path) -> Result<Connection, AppError> {
 
     seed_predefined_prompts(&conn)?;
 
+    info!("[db] init_database complete");
     Ok(conn)
 }
 
@@ -178,13 +185,18 @@ pub fn insert_transcription(
     word_count: i32,
     recording_path: Option<&str>,
 ) -> Result<String, AppError> {
+    info!("[db] insert_transcription model={} duration={:.1} word_count={} text={}", model_name, duration, word_count, mask::mask_text(text));
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.6f").to_string();
     conn.execute(
         "INSERT INTO transcriptions (id, text, enhanced_text, timestamp, duration, model_name, word_count, recording_path)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![id, text, enhanced_text, now, duration, model_name, word_count, recording_path],
-    )?;
+    )
+    .map_err(|e| {
+        error!("[db] insert_transcription failed: {}", e);
+        e
+    })?;
     Ok(id)
 }
 
@@ -194,6 +206,7 @@ pub fn get_transcriptions(
     query: Option<&str>,
     limit: usize,
 ) -> Result<PaginatedResult, AppError> {
+    info!("[db] get_transcriptions limit={} cursor={:?} query={:?}", limit, cursor, query);
     let items: Vec<TranscriptionRecord> = match (cursor, query) {
         (None, None) => {
             let mut stmt = conn.prepare(
@@ -241,6 +254,7 @@ pub fn get_transcriptions(
         None
     };
 
+    info!("[db] get_transcriptions returned {} items", items.len());
     Ok(PaginatedResult { items, next_cursor })
 }
 
@@ -258,20 +272,35 @@ fn row_to_transcription(row: &rusqlite::Row) -> rusqlite::Result<TranscriptionRe
 }
 
 pub fn delete_transcription(conn: &Connection, id: &str) -> Result<(), AppError> {
-    conn.execute("DELETE FROM transcriptions WHERE id = ?1", params![id])?;
+    info!("[db] delete_transcription id={}", id);
+    conn.execute("DELETE FROM transcriptions WHERE id = ?1", params![id])
+        .map_err(|e| {
+            error!("[db] delete_transcription failed: {}", e);
+            e
+        })?;
     Ok(())
 }
 
 pub fn delete_all_transcriptions(conn: &Connection) -> Result<(), AppError> {
-    conn.execute("DELETE FROM transcriptions", [])?;
+    info!("[db] delete_all_transcriptions");
+    conn.execute("DELETE FROM transcriptions", []).map_err(|e| {
+        error!("[db] delete_all_transcriptions failed: {}", e);
+        e
+    })?;
     Ok(())
 }
 
 pub fn cleanup_old_transcriptions(conn: &Connection, days: i32) -> Result<usize, AppError> {
+    info!("[db] cleanup_old_transcriptions days={}", days);
     let deleted = conn.execute(
         "DELETE FROM transcriptions WHERE timestamp < datetime('now', ?1)",
         params![format!("-{} days", days)],
-    )?;
+    )
+    .map_err(|e| {
+        error!("[db] cleanup_old_transcriptions failed: {}", e);
+        e
+    })?;
+    info!("[db] cleanup_old_transcriptions deleted={}", deleted);
     Ok(deleted)
 }
 
@@ -280,15 +309,21 @@ pub fn cleanup_old_transcriptions(conn: &Connection, days: i32) -> Result<usize,
 // ---------------------------------------------------------------------------
 
 pub fn add_vocabulary(conn: &Connection, word: &str) -> Result<String, AppError> {
+    info!("[db] add_vocabulary word={}", word);
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO vocabulary (id, word) VALUES (?1, ?2)",
         params![id, word],
-    )?;
+    )
+    .map_err(|e| {
+        error!("[db] add_vocabulary failed: {}", e);
+        e
+    })?;
     Ok(id)
 }
 
 pub fn get_vocabulary(conn: &Connection) -> Result<Vec<VocabularyWord>, AppError> {
+    info!("[db] get_vocabulary");
     let mut stmt =
         conn.prepare("SELECT id, word, created_at FROM vocabulary ORDER BY created_at DESC")?;
     let rows = stmt
@@ -300,11 +335,17 @@ pub fn get_vocabulary(conn: &Connection) -> Result<Vec<VocabularyWord>, AppError
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    info!("[db] get_vocabulary returned {} items", rows.len());
     Ok(rows)
 }
 
 pub fn delete_vocabulary(conn: &Connection, id: &str) -> Result<(), AppError> {
-    conn.execute("DELETE FROM vocabulary WHERE id = ?1", params![id])?;
+    info!("[db] delete_vocabulary id={}", id);
+    conn.execute("DELETE FROM vocabulary WHERE id = ?1", params![id])
+        .map_err(|e| {
+            error!("[db] delete_vocabulary failed: {}", e);
+            e
+        })?;
     Ok(())
 }
 
@@ -317,15 +358,21 @@ pub fn set_replacement(
     original: &str,
     replacement: &str,
 ) -> Result<String, AppError> {
+    info!("[db] set_replacement original={} replacement={}", original, replacement);
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO replacements (id, original, replacement) VALUES (?1, ?2, ?3)",
         params![id, original, replacement],
-    )?;
+    )
+    .map_err(|e| {
+        error!("[db] set_replacement failed: {}", e);
+        e
+    })?;
     Ok(id)
 }
 
 pub fn get_replacements(conn: &Connection) -> Result<Vec<Replacement>, AppError> {
+    info!("[db] get_replacements");
     let mut stmt = conn.prepare(
         "SELECT id, original, replacement, created_at FROM replacements ORDER BY created_at DESC",
     )?;
@@ -339,11 +386,17 @@ pub fn get_replacements(conn: &Connection) -> Result<Vec<Replacement>, AppError>
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    info!("[db] get_replacements returned {} items", rows.len());
     Ok(rows)
 }
 
 pub fn delete_replacement(conn: &Connection, id: &str) -> Result<(), AppError> {
-    conn.execute("DELETE FROM replacements WHERE id = ?1", params![id])?;
+    info!("[db] delete_replacement id={}", id);
+    conn.execute("DELETE FROM replacements WHERE id = ?1", params![id])
+        .map_err(|e| {
+            error!("[db] delete_replacement failed: {}", e);
+            e
+        })?;
     Ok(())
 }
 
@@ -356,13 +409,26 @@ pub fn update_setting(
     key: &str,
     value: &serde_json::Value,
 ) -> Result<(), AppError> {
+    let is_sensitive = key.contains("api_key") || key.contains("secret");
+    if is_sensitive {
+        info!("[db] update_setting key={} value={}", key, mask::mask(&serde_json::to_string(value).unwrap_or_default()));
+    } else {
+        info!("[db] update_setting key={} value={:?}", key, value);
+    }
     let json_str = serde_json::to_string(value)
-        .map_err(|e| AppError::InvalidInput(e.to_string()))?;
+        .map_err(|e| {
+            error!("[db] update_setting serialize failed key={}: {}", key, e);
+            AppError::InvalidInput(e.to_string())
+        })?;
     conn.execute(
         "INSERT INTO settings (key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         params![key, json_str],
-    )?;
+    )
+    .map_err(|e| {
+        error!("[db] update_setting failed key={}: {}", key, e);
+        e
+    })?;
     Ok(())
 }
 
@@ -370,6 +436,7 @@ pub fn get_setting(
     conn: &Connection,
     key: &str,
 ) -> Result<Option<serde_json::Value>, AppError> {
+    info!("[db] get_setting key={}", key);
     let result: Option<String> = conn
         .query_row(
             "SELECT value FROM settings WHERE key = ?1",
@@ -381,7 +448,10 @@ pub fn get_setting(
     match result {
         Some(s) => {
             let val: serde_json::Value =
-                serde_json::from_str(&s).map_err(|e| AppError::Database(e.to_string()))?;
+                serde_json::from_str(&s).map_err(|e| {
+                    error!("[db] get_setting deserialize failed key={}: {}", key, e);
+                    AppError::Database(e.to_string())
+                })?;
             Ok(Some(val))
         }
         None => Ok(None),
@@ -391,6 +461,7 @@ pub fn get_setting(
 pub fn get_all_settings(
     conn: &Connection,
 ) -> Result<HashMap<String, serde_json::Value>, AppError> {
+    info!("[db] get_all_settings");
     let mut stmt = conn.prepare("SELECT key, value FROM settings")?;
     let rows = stmt.query_map([], |row| {
         let key: String = row.get(0)?;
@@ -402,9 +473,13 @@ pub fn get_all_settings(
     for r in rows {
         let (k, v) = r?;
         let parsed: serde_json::Value =
-            serde_json::from_str(&v).map_err(|e| AppError::Database(e.to_string()))?;
+            serde_json::from_str(&v).map_err(|e| {
+                error!("[db] get_all_settings deserialize failed key={}: {}", k, e);
+                AppError::Database(e.to_string())
+            })?;
         map.insert(k, parsed);
     }
+    info!("[db] get_all_settings returned {} keys", map.len());
     Ok(map)
 }
 
@@ -419,16 +494,22 @@ pub fn add_prompt(
     user_message_template: &str,
     is_predefined: bool,
 ) -> Result<String, AppError> {
+    info!("[db] add_prompt name={} is_predefined={}", name, is_predefined);
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO prompts (id, name, system_message, user_message_template, is_predefined)
          VALUES (?1, ?2, ?3, ?4, ?5)",
         params![id, name, system_message, user_message_template, is_predefined as i32],
-    )?;
+    )
+    .map_err(|e| {
+        error!("[db] add_prompt failed: {}", e);
+        e
+    })?;
     Ok(id)
 }
 
 pub fn list_prompts(conn: &Connection) -> Result<Vec<Prompt>, AppError> {
+    info!("[db] list_prompts");
     let mut stmt = conn.prepare(
         "SELECT id, name, system_message, user_message_template, is_predefined, created_at
          FROM prompts ORDER BY created_at ASC",
@@ -446,6 +527,7 @@ pub fn list_prompts(conn: &Connection) -> Result<Vec<Prompt>, AppError> {
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    info!("[db] list_prompts returned {} items", rows.len());
     Ok(rows)
 }
 
@@ -456,15 +538,25 @@ pub fn update_prompt(
     system_message: &str,
     user_message_template: &str,
 ) -> Result<(), AppError> {
+    info!("[db] update_prompt id={} name={}", id, name);
     conn.execute(
         "UPDATE prompts SET name = ?1, system_message = ?2, user_message_template = ?3 WHERE id = ?4",
         params![name, system_message, user_message_template, id],
-    )?;
+    )
+    .map_err(|e| {
+        error!("[db] update_prompt failed: {}", e);
+        e
+    })?;
     Ok(())
 }
 
 pub fn delete_prompt(conn: &Connection, id: &str) -> Result<(), AppError> {
-    conn.execute("DELETE FROM prompts WHERE id = ?1", params![id])?;
+    info!("[db] delete_prompt id={}", id);
+    conn.execute("DELETE FROM prompts WHERE id = ?1", params![id])
+        .map_err(|e| {
+            error!("[db] delete_prompt failed: {}", e);
+            e
+        })?;
     Ok(())
 }
 
@@ -473,49 +565,73 @@ pub fn delete_prompt(conn: &Connection, id: &str) -> Result<(), AppError> {
 // ---------------------------------------------------------------------------
 
 pub fn export_vocabulary_csv(conn: &Connection, path: &std::path::Path) -> Result<(), AppError> {
+    info!("[db] export_vocabulary_csv path={}", path.display());
     let words = get_vocabulary(conn)?;
     let mut wtr = csv::Writer::from_path(path)
-        .map_err(|e| AppError::Io(e.to_string()))?;
+        .map_err(|e| {
+            error!("[db] export_vocabulary_csv open failed: {}", e);
+            AppError::Io(e.to_string())
+        })?;
     wtr.write_record(&["word"]).map_err(|e| AppError::Io(e.to_string()))?;
     for w in words {
         wtr.write_record(&[&w.word]).map_err(|e| AppError::Io(e.to_string()))?;
     }
     wtr.flush().map_err(|e| AppError::Io(e.to_string()))?;
+    info!("[db] export_vocabulary_csv complete");
     Ok(())
 }
 
 pub fn import_vocabulary_csv(conn: &Connection, path: &std::path::Path) -> Result<(), AppError> {
+    info!("[db] import_vocabulary_csv path={}", path.display());
     let mut rdr = csv::Reader::from_path(path)
-        .map_err(|e| AppError::Io(e.to_string()))?;
+        .map_err(|e| {
+            error!("[db] import_vocabulary_csv open failed: {}", e);
+            AppError::Io(e.to_string())
+        })?;
+    let mut count = 0usize;
     for result in rdr.records() {
         let record = result.map_err(|e| AppError::Io(e.to_string()))?;
         if let Some(word) = record.get(0) {
             add_vocabulary(conn, word)?;
+            count += 1;
         }
     }
+    info!("[db] import_vocabulary_csv imported {} words", count);
     Ok(())
 }
 
 pub fn export_replacements_csv(conn: &Connection, path: &std::path::Path) -> Result<(), AppError> {
+    info!("[db] export_replacements_csv path={}", path.display());
     let reps = get_replacements(conn)?;
     let mut wtr = csv::Writer::from_path(path)
-        .map_err(|e| AppError::Io(e.to_string()))?;
+        .map_err(|e| {
+            error!("[db] export_replacements_csv open failed: {}", e);
+            AppError::Io(e.to_string())
+        })?;
     wtr.write_record(&["original", "replacement"]).map_err(|e| AppError::Io(e.to_string()))?;
     for r in reps {
         wtr.write_record(&[&r.original, &r.replacement]).map_err(|e| AppError::Io(e.to_string()))?;
     }
     wtr.flush().map_err(|e| AppError::Io(e.to_string()))?;
+    info!("[db] export_replacements_csv complete");
     Ok(())
 }
 
 pub fn import_replacements_csv(conn: &Connection, path: &std::path::Path) -> Result<(), AppError> {
+    info!("[db] import_replacements_csv path={}", path.display());
     let mut rdr = csv::Reader::from_path(path)
-        .map_err(|e| AppError::Io(e.to_string()))?;
+        .map_err(|e| {
+            error!("[db] import_replacements_csv open failed: {}", e);
+            AppError::Io(e.to_string())
+        })?;
+    let mut count = 0usize;
     for result in rdr.records() {
         let record = result.map_err(|e| AppError::Io(e.to_string()))?;
         if let (Some(orig), Some(repl)) = (record.get(0), record.get(1)) {
             set_replacement(conn, orig, repl)?;
+            count += 1;
         }
     }
+    info!("[db] import_replacements_csv imported {} replacements", count);
     Ok(())
 }
