@@ -10,7 +10,9 @@
     "tauri": "tauri",
     "package": "CMAKE_OSX_DEPLOYMENT_TARGET=11.0 MACOSX_DEPLOYMENT_TARGET=11.0 tauri build",
     "deploy": "./scripts/deploy.sh",
-    "package:deploy": "npm run package && npm run deploy"
+    "deploy:full": "./scripts/deploy.sh --full",
+    "package:deploy": "npm run package && npm run deploy",
+    "package:deploy:full": "npm run package && npm run deploy:full"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
