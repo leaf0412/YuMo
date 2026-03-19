@@ -486,6 +486,17 @@ unsafe extern "C" fn input_callback(
 // WAV writing
 // ---------------------------------------------------------------------------
 
+/// Save a recording to the given directory as a timestamped WAV file.
+/// Returns the full path of the saved file.
+pub fn save_recording(data: &AudioData, dir: &std::path::Path) -> Result<std::path::PathBuf, AppError> {
+    std::fs::create_dir_all(dir)?;
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S_%3f");
+    let filename = format!("recording_{}.wav", timestamp);
+    let path = dir.join(filename);
+    save_wav(data, &path)?;
+    Ok(path)
+}
+
 pub fn save_wav(data: &AudioData, path: &std::path::Path) -> Result<(), AppError> {
     let spec = hound::WavSpec {
         channels: data.channels,

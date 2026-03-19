@@ -163,6 +163,12 @@ pub async fn stop_recording(
         rms
     );
 
+    // 2.5 Save recording WAV file
+    match recorder::save_recording(&audio_data, &state.paths.recordings_dir) {
+        Ok(path) => info!("[pipeline] recording saved: {}", path.display()),
+        Err(e) => error!("[pipeline] failed to save recording: {}", e),
+    }
+
     // 3. Update state -> Transcribing
     {
         let mut pipeline = state

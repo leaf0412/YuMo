@@ -14,6 +14,8 @@ pub struct AppPaths {
     pub models_dir: PathBuf,
     /// Sprite sheet assets
     pub sprites_dir: PathBuf,
+    /// Saved recording WAV files
+    pub recordings_dir: PathBuf,
 }
 
 impl AppPaths {
@@ -41,7 +43,13 @@ impl AppPaths {
                 home.join("Library/Application Support/VoiceInk/SpriteSheets")
             });
 
-        Self { data_dir, models_dir, sprites_dir }
+        let recordings_dir = settings
+            .get("path_recordings")
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| data_dir.join("recordings"));
+
+        Self { data_dir, models_dir, sprites_dir, recordings_dir }
     }
 
     /// Defaults (no DB needed, for bootstrap before DB exists).
@@ -51,6 +59,7 @@ impl AppPaths {
         Self {
             models_dir: data_dir.join("models"),
             sprites_dir: home.join("Library/Application Support/VoiceInk/SpriteSheets"),
+            recordings_dir: data_dir.join("recordings"),
             data_dir,
         }
     }
