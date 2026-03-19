@@ -1,5 +1,11 @@
 import { render, screen, act } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
+import {
+  EVENT_RECORDING_STATE,
+  PIPELINE_RECORDING,
+  PIPELINE_TRANSCRIBING,
+  PIPELINE_LABELS,
+} from '../lib/pipeline';
 
 // Store listener callbacks so we can fire events in tests
 const eventListeners: Record<string, (e: unknown) => void> = {};
@@ -22,28 +28,26 @@ describe('RecorderFloat', () => {
   test('renders null when idle (default state)', async () => {
     const RecorderFloat = (await import('../windows/RecorderFloat')).default;
     const { container } = render(<RecorderFloat />);
-    // Component returns null when state is idle
     expect(container.firstChild).toBeNull();
   });
 
   test('renders recording state after event', async () => {
     const RecorderFloat = (await import('../windows/RecorderFloat')).default;
-    render(<RecorderFloat />);
+    await act(async () => { render(<RecorderFloat />); });
 
-    // Simulate recording-state event
     await act(async () => {
-      eventListeners['recording-state']?.({ payload: { state: 'recording' } });
+      eventListeners[EVENT_RECORDING_STATE]?.({ payload: { state: PIPELINE_RECORDING } });
     });
 
-    expect(screen.getByText('录音中')).toBeInTheDocument();
+    expect(screen.getByText(PIPELINE_LABELS[PIPELINE_RECORDING])).toBeInTheDocument();
   });
 
   test('renders timer when recording', async () => {
     const RecorderFloat = (await import('../windows/RecorderFloat')).default;
-    render(<RecorderFloat />);
+    await act(async () => { render(<RecorderFloat />); });
 
     await act(async () => {
-      eventListeners['recording-state']?.({ payload: { state: 'recording' } });
+      eventListeners[EVENT_RECORDING_STATE]?.({ payload: { state: PIPELINE_RECORDING } });
     });
 
     expect(screen.getByText('0:00')).toBeInTheDocument();
@@ -51,12 +55,12 @@ describe('RecorderFloat', () => {
 
   test('renders transcribing state', async () => {
     const RecorderFloat = (await import('../windows/RecorderFloat')).default;
-    render(<RecorderFloat />);
+    await act(async () => { render(<RecorderFloat />); });
 
     await act(async () => {
-      eventListeners['recording-state']?.({ payload: { state: 'transcribing' } });
+      eventListeners[EVENT_RECORDING_STATE]?.({ payload: { state: PIPELINE_TRANSCRIBING } });
     });
 
-    expect(screen.getByText('转录中...')).toBeInTheDocument();
+    expect(screen.getByText(PIPELINE_LABELS[PIPELINE_TRANSCRIBING])).toBeInTheDocument();
   });
 });
