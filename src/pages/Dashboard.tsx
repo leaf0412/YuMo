@@ -227,7 +227,12 @@ export default function Dashboard() {
             {selectedModel ? (
               <Space><Text strong>{selectedModel.name}</Text></Space>
             ) : (
-              <Alert message="未选择模型" type="warning" showIcon />
+              <Alert
+                message="未选择模型"
+                description="请先前往「模型管理」下载并选择一个转录模型"
+                type="warning"
+                showIcon
+              />
             )}
           </Card>
         </Col>
