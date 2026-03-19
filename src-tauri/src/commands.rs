@@ -164,10 +164,16 @@ pub async fn stop_recording(
     );
 
     // 2.5 Save recording WAV file
-    match recorder::save_recording(&audio_data, &state.paths.recordings_dir) {
-        Ok(path) => info!("[pipeline] recording saved: {}", path.display()),
-        Err(e) => error!("[pipeline] failed to save recording: {}", e),
-    }
+    let recording_path = match recorder::save_recording(&audio_data, &state.paths.recordings_dir) {
+        Ok(path) => {
+            info!("[pipeline] recording saved: {}", path.display());
+            Some(path.to_string_lossy().to_string())
+        }
+        Err(e) => {
+            error!("[pipeline] failed to save recording: {}", e);
+            None
+        }
+    };
 
     // 3. Update state -> Transcribing
     {
@@ -418,6 +424,7 @@ pub async fn stop_recording(
             0.0, // TODO: actual audio duration
             &model_id,
             word_count,
+            recording_path.as_deref(),
         )?;
     }
     info!("[pipeline] saved to DB");
@@ -632,6 +639,12 @@ pub fn get_transcriptions(
 ) -> Result<PaginatedResult, AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::get_transcriptions(&conn, cursor.as_deref(), query.as_deref(), limit.unwrap_or(20))
+}
+
+#[tauri::command]
+pub fn get_recording(recording_path: String) -> Result<String, AppError> {
+    let path = std::path::Path::new(&recording_path);
+    recorder::read_recording_as_data_uri(path)
 }
 
 #[tauri::command]
@@ -964,7 +977,7 @@ pub fn get_sprite_image(state: State<AppState>, dir_id: String, file_name: Strin
     Ok(format!("data:{};base64,{}", mime, b64))
 }
 
-fn base64_encode(data: &[u8]) -> String {
+pub fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
     for chunk in data.chunks(3) {

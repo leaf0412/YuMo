@@ -184,6 +184,7 @@ pub fn run() {
             commands::import_model,
             // Transcriptions
             commands::get_transcriptions,
+            commands::get_recording,
             commands::delete_transcription,
             commands::delete_all_transcriptions,
             // Vocabulary

@@ -517,3 +517,13 @@ pub fn save_wav(data: &AudioData, path: &std::path::Path) -> Result<(), AppError
         .map_err(|e| AppError::Io(e.to_string()))?;
     Ok(())
 }
+
+/// Read a WAV file and return it as a base64 data URI for frontend playback.
+pub fn read_recording_as_data_uri(path: &std::path::Path) -> Result<String, AppError> {
+    if !path.exists() {
+        return Err(AppError::NotFound(format!("Recording not found: {}", path.display())));
+    }
+    let data = std::fs::read(path)?;
+    let b64 = crate::commands::base64_encode(&data);
+    Ok(format!("data:audio/wav;base64,{}", b64))
+}

@@ -20,6 +20,7 @@ pub struct TranscriptionRecord {
     pub duration: f64,
     pub model_name: String,
     pub word_count: i32,
+    pub recording_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,7 +73,8 @@ pub fn init_database(path: &Path) -> Result<Connection, AppError> {
             timestamp TEXT NOT NULL DEFAULT (datetime('now')),
             duration REAL NOT NULL,
             model_name TEXT NOT NULL,
-            word_count INTEGER NOT NULL
+            word_count INTEGER NOT NULL,
+            recording_path TEXT
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS transcriptions_fts
@@ -115,6 +117,11 @@ pub fn init_database(path: &Path) -> Result<Connection, AppError> {
         );
         ",
     )?;
+
+    // Migrations for existing databases
+    let _ = conn.execute_batch(
+        "ALTER TABLE transcriptions ADD COLUMN recording_path TEXT;",
+    ); // Silently ignore if column already exists
 
     seed_predefined_prompts(&conn)?;
 
@@ -169,13 +176,14 @@ pub fn insert_transcription(
     duration: f64,
     model_name: &str,
     word_count: i32,
+    recording_path: Option<&str>,
 ) -> Result<String, AppError> {
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.6f").to_string();
     conn.execute(
-        "INSERT INTO transcriptions (id, text, enhanced_text, timestamp, duration, model_name, word_count)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![id, text, enhanced_text, now, duration, model_name, word_count],
+        "INSERT INTO transcriptions (id, text, enhanced_text, timestamp, duration, model_name, word_count, recording_path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![id, text, enhanced_text, now, duration, model_name, word_count, recording_path],
     )?;
     Ok(id)
 }
@@ -189,7 +197,7 @@ pub fn get_transcriptions(
     let items: Vec<TranscriptionRecord> = match (cursor, query) {
         (None, None) => {
             let mut stmt = conn.prepare(
-                "SELECT id, text, enhanced_text, timestamp, duration, model_name, word_count
+                "SELECT id, text, enhanced_text, timestamp, duration, model_name, word_count, recording_path
                  FROM transcriptions ORDER BY timestamp DESC LIMIT ?1",
             )?;
             let rows = stmt.query_map(params![limit as i64], row_to_transcription)?;
@@ -197,7 +205,7 @@ pub fn get_transcriptions(
         }
         (Some(cur), None) => {
             let mut stmt = conn.prepare(
-                "SELECT id, text, enhanced_text, timestamp, duration, model_name, word_count
+                "SELECT id, text, enhanced_text, timestamp, duration, model_name, word_count, recording_path
                  FROM transcriptions WHERE timestamp < ?1 ORDER BY timestamp DESC LIMIT ?2",
             )?;
             let rows = stmt.query_map(params![cur, limit as i64], row_to_transcription)?;
@@ -205,7 +213,7 @@ pub fn get_transcriptions(
         }
         (None, Some(q)) => {
             let mut stmt = conn.prepare(
-                "SELECT t.id, t.text, t.enhanced_text, t.timestamp, t.duration, t.model_name, t.word_count
+                "SELECT t.id, t.text, t.enhanced_text, t.timestamp, t.duration, t.model_name, t.word_count, t.recording_path
                  FROM transcriptions t
                  JOIN transcriptions_fts fts ON t.rowid = fts.rowid
                  WHERE transcriptions_fts MATCH ?1
@@ -216,7 +224,7 @@ pub fn get_transcriptions(
         }
         (Some(cur), Some(q)) => {
             let mut stmt = conn.prepare(
-                "SELECT t.id, t.text, t.enhanced_text, t.timestamp, t.duration, t.model_name, t.word_count
+                "SELECT t.id, t.text, t.enhanced_text, t.timestamp, t.duration, t.model_name, t.word_count, t.recording_path
                  FROM transcriptions t
                  JOIN transcriptions_fts fts ON t.rowid = fts.rowid
                  WHERE transcriptions_fts MATCH ?1 AND t.timestamp < ?2
@@ -245,6 +253,7 @@ fn row_to_transcription(row: &rusqlite::Row) -> rusqlite::Result<TranscriptionRe
         duration: row.get(4)?,
         model_name: row.get(5)?,
         word_count: row.get(6)?,
+        recording_path: row.get(7)?,
     })
 }
 
