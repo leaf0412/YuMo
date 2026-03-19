@@ -11,19 +11,13 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke, formatError } from '../lib/logger';
 import SpriteAnimation, { type SpriteManifest } from '../components/SpriteAnimation';
+import useAppStore from '../stores/useAppStore';
 
 const { Title, Text, Paragraph } = Typography;
 
 interface Permissions {
   microphone: boolean;
   accessibility: boolean;
-}
-
-interface ModelInfo {
-  id: string;
-  name: string;
-  size_mb: number;
-  provider: string;
 }
 
 interface Transcription {
@@ -35,8 +29,6 @@ interface Transcription {
 
 export default function Dashboard() {
   const [permissions, setPermissions] = useState<Permissions>({ microphone: false, accessibility: false });
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [transcriptions, setTranscriptions] = useState<Transcription[]>([]);
   const [recording, setRecording] = useState(false);
   const [pipelineState, setPipelineState] = useState<string>('idle');
@@ -49,6 +41,11 @@ export default function Dashboard() {
   const permPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [refreshingPerm, setRefreshingPerm] = useState(false);
 
+  // Global store
+  const { models, settings, daemonStatus, fetchSettings, fetchModels, fetchDaemonStatus, setActiveKey } = useAppStore();
+  const selectedModelId = typeof settings.selected_model_id === 'string' ? settings.selected_model_id : null;
+  const selectedModel = selectedModelId ? models.find((m) => m.id === selectedModelId) : null;
+
   const loadPermissions = useCallback(async () => {
     try {
       const perms = await invoke<Permissions>('check_permissions');
@@ -58,27 +55,16 @@ export default function Dashboard() {
   }, []);
 
   const loadData = useCallback(async () => {
-    try {
-      const perms = await invoke<Permissions>('check_permissions');
-      setPermissions(perms);
-    } catch { /* logged automatically */ }
-
-    try {
-      const m = await invoke<ModelInfo[]>('list_available_models');
-      setModels(m);
-    } catch { /* logged */ }
-
-    try {
-      const settings = await invoke<Record<string, unknown>>('get_settings');
-      const mid = settings?.selected_model_id;
-      setSelectedModelId(typeof mid === 'string' ? mid : null);
-    } catch { /* logged */ }
+    loadPermissions();
+    fetchModels();
+    fetchSettings();
+    fetchDaemonStatus();
 
     try {
       const result = await invoke<{ items: Transcription[], next_cursor: string | null }>('get_transcriptions', { limit: 5 });
       setTranscriptions(result.items || []);
     } catch { /* logged */ }
-  }, []);
+  }, [loadPermissions, fetchModels, fetchSettings, fetchDaemonStatus]);
 
   // Load first available sprite
   const loadSprite = useCallback(async () => {
@@ -132,8 +118,6 @@ export default function Dashboard() {
     });
     return () => { unlisten.then((fn) => fn()); };
   }, [loadData]);
-
-  const selectedModel = selectedModelId ? models.find((m) => m.id === selectedModelId) : null;
 
   const handleRecord = async () => {
     if (recording) {
@@ -223,13 +207,27 @@ export default function Dashboard() {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={8}>
-          <Card title="当前模型" size="small">
+          <Card title="当前模型" size="small" extra={
+            <Button type="link" size="small" onClick={() => setActiveKey('/models')}>模型管理</Button>
+          }>
             {selectedModel ? (
-              <Space><Text strong>{selectedModel.name}</Text></Space>
+              <Flex vertical gap={4}>
+                <Text strong>{selectedModel.name}</Text>
+                {!selectedModel.is_downloaded && ['mlxWhisper', 'mlxFunASR', 'local'].includes(selectedModel.provider) && (
+                  <Tag color="orange">模型未下载</Tag>
+                )}
+                {['mlxWhisper', 'mlxFunASR'].includes(selectedModel.provider) && (
+                  <Tag color={daemonStatus.running ? 'green' : 'default'}>
+                    {daemonStatus.running
+                      ? daemonStatus.loaded_model ? `已加载: ${daemonStatus.loaded_model.split('/').pop()}` : 'Daemon 运行中'
+                      : 'Daemon 未启动'}
+                  </Tag>
+                )}
+              </Flex>
             ) : (
               <Alert
                 message="未选择模型"
-                description="请先前往「模型管理」下载并选择一个转录模型"
+                description={<>请先前往<Button type="link" size="small" style={{ padding: 0 }} onClick={() => setActiveKey('/models')}>模型管理</Button>下载并选择一个转录模型</>}
                 type="warning"
                 showIcon
               />

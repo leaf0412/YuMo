@@ -1,0 +1,101 @@
+import { create } from 'zustand';
+import { invoke } from '../lib/logger';
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  size_mb: number;
+  languages: string[];
+  download_url: string;
+  is_downloaded: boolean;
+  provider: string;
+  model_repo?: string;
+  description?: string;
+  speed?: number;
+  accuracy?: number;
+  is_recommended?: boolean;
+  supported_languages?: Record<string, string>;
+}
+
+export interface DaemonStatus {
+  running: boolean;
+  loaded_model: string | null;
+}
+
+export interface AppSettings {
+  [key: string]: unknown;
+  language?: string;
+  selected_model_id?: string;
+  cloud_provider?: string;
+  cloud_api_key?: string;
+}
+
+interface AppState {
+  // Data
+  settings: AppSettings;
+  models: ModelInfo[];
+  daemonStatus: DaemonStatus;
+  downloadingModelId: string | null;
+
+  // Navigation
+  activeKey: string;
+  setActiveKey: (key: string) => void;
+
+  // Actions
+  fetchSettings: () => Promise<void>;
+  fetchModels: () => Promise<void>;
+  fetchDaemonStatus: () => Promise<void>;
+  updateSetting: (key: string, value: string) => Promise<void>;
+  setSettings: (partial: Partial<AppSettings>) => void;
+  setDaemonStatus: (status: DaemonStatus) => void;
+  setDownloadingModelId: (id: string | null) => void;
+}
+
+const useAppStore = create<AppState>((set, get) => ({
+  settings: {},
+  models: [],
+  daemonStatus: { running: false, loaded_model: null },
+  downloadingModelId: null,
+  activeKey: '/',
+  setActiveKey: (key) => set({ activeKey: key }),
+
+  fetchSettings: async () => {
+    try {
+      const result = await invoke<AppSettings>('get_settings');
+      set({ settings: result });
+    } catch { /* logged */ }
+  },
+
+  fetchModels: async () => {
+    try {
+      const result = await invoke<ModelInfo[]>('list_available_models');
+      set({ models: result });
+    } catch { /* logged */ }
+  },
+
+  fetchDaemonStatus: async () => {
+    try {
+      const status = await invoke<DaemonStatus>('daemon_status');
+      set({ daemonStatus: status });
+    } catch { /* logged */ }
+  },
+
+  updateSetting: async (key: string, value: string) => {
+    await invoke('update_setting', { key, value });
+    set({ settings: { ...get().settings, [key]: value } });
+  },
+
+  setSettings: (partial) => {
+    set({ settings: { ...get().settings, ...partial } });
+  },
+
+  setDaemonStatus: (status) => {
+    set({ daemonStatus: status });
+  },
+
+  setDownloadingModelId: (id) => {
+    set({ downloadingModelId: id });
+  },
+}));
+
+export default useAppStore;

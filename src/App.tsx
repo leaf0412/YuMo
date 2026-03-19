@@ -17,6 +17,7 @@ import Models from './pages/Models';
 import Dictionary from './pages/Dictionary';
 import Enhancement from './pages/Enhancement';
 import Settings from './pages/Settings';
+import useAppStore from './stores/useAppStore';
 
 const { Sider, Content } = Layout;
 const { Title } = Typography;
@@ -40,14 +41,19 @@ const pageEntries: { key: string; render: () => ReactNode }[] = [
 ];
 
 function AppLayout() {
-  const [activeKey, setActiveKey] = useState('/');
+  const { activeKey, setActiveKey } = useAppStore();
   // Track which pages have been visited — only render after first visit
   const [mounted, setMounted] = useState<Set<string>>(() => new Set(['/']));
 
   const handleMenuClick = useCallback(({ key }: { key: string }) => {
     setActiveKey(key);
     setMounted((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
-  }, []);
+  }, [setActiveKey]);
+
+  // Sync mounted set when activeKey changes from store (e.g. from Dashboard link)
+  useEffect(() => {
+    setMounted((prev) => (prev.has(activeKey) ? prev : new Set(prev).add(activeKey)));
+  }, [activeKey]);
 
   return (
     <Layout style={{ height: '100vh' }}>
