@@ -50,26 +50,32 @@ pub async fn start_recording(
         }
     }
 
-    // 2. Get device
-    let devices = recorder::list_input_devices();
-    info!("[pipeline] found {} input devices", devices.len());
-    for d in &devices {
-        info!("[pipeline]   device: id={} name={:?} default={}", d.id, d.name, d.is_default);
-    }
-    if devices.is_empty() {
-        error!("[pipeline] no input devices found");
-        return Err(AppError::Recording("No input devices found".into()));
-    }
-    let dev_id = device_id.unwrap_or_else(|| {
-        devices
-            .iter()
-            .find(|d| d.is_default)
-            .map(|d| d.id)
-            .unwrap_or(devices[0].id)
-    });
+    // 2. Start recording FIRST to minimize latency — resolve device quickly
+    let dev_id = if let Some(id) = device_id {
+        id
+    } else {
+        // Read saved device from settings (fast path: just the one key)
+        let saved_device = {
+            let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
+            db::get_all_settings(&conn)
+                .ok()
+                .and_then(|s| s.get("audio_device").and_then(|v| v.as_u64()).map(|v| v as u32))
+        };
+        saved_device.unwrap_or_else(|| {
+            let devices = recorder::list_input_devices();
+            devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(0)
+        })
+    };
     info!("[pipeline] using device_id={}", dev_id);
 
-    // 3. Mute system audio if enabled
+    info!("[pipeline] calling recorder::start_recording...");
+    let (handle, _level_rx) = recorder::start_recording(dev_id).map_err(|e| {
+        error!("[pipeline] recorder::start_recording failed: {}", e);
+        AppError::Recording(e.to_string())
+    })?;
+    info!("[pipeline] recording started successfully");
+
+    // 3. Mute system audio if enabled (after recording started to avoid delay)
     let settings = {
         let conn = state
             .db
@@ -81,20 +87,12 @@ pub async fn start_recording(
         .get("system_mute_enabled")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    info!("[pipeline] system_mute_enabled={}", mute);
     if mute {
+        info!("[pipeline] muting system audio");
         audio_ctrl::set_system_muted(true);
     }
 
-    // 4. Start recording
-    info!("[pipeline] calling recorder::start_recording...");
-    let (handle, _level_rx) = recorder::start_recording(dev_id).map_err(|e| {
-        error!("[pipeline] recorder::start_recording failed: {}", e);
-        AppError::Recording(e.to_string())
-    })?;
-    info!("[pipeline] recording started successfully");
-
-    // 5. Store handle and update state
+    // 4. Store handle and update state
     {
         let mut rec = state
             .recording_handle
