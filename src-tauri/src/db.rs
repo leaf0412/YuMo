@@ -26,6 +26,32 @@ pub struct TranscriptionRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyWpm {
+    pub date: String,
+    pub wpm: f64,
+    pub session_count: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WpmStats {
+    pub avg: f64,
+    pub max: f64,
+    pub min: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Statistics {
+    pub total_sessions: i64,
+    pub total_words: i64,
+    pub total_duration_seconds: f64,
+    pub total_keystrokes_saved: i64,
+    pub time_saved_minutes: f64,
+    pub avg_wpm: f64,
+    pub daily_wpm: Vec<DailyWpm>,
+    pub wpm_stats: WpmStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaginatedResult {
     pub items: Vec<TranscriptionRecord>,
     pub next_cursor: Option<String>,
@@ -302,6 +328,189 @@ pub fn cleanup_old_transcriptions(conn: &Connection, days: i32) -> Result<usize,
     })?;
     info!("[db] cleanup_old_transcriptions deleted={}", deleted);
     Ok(deleted)
+}
+
+// ---------------------------------------------------------------------------
+// Statistics
+// ---------------------------------------------------------------------------
+
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{4E00}'..='\u{9FFF}' |
+        '\u{3400}'..='\u{4DBF}' |
+        '\u{F900}'..='\u{FAFF}' |
+        '\u{2F800}'..='\u{2FA1F}'
+    )
+}
+
+fn calc_keystrokes(text: &str) -> i64 {
+    let mut cjk_count: i64 = 0;
+    let mut non_cjk_word_count: i64 = 0;
+    let mut in_word = false;
+    for c in text.chars() {
+        if is_cjk(c) {
+            cjk_count += 1;
+            in_word = false;
+        } else if c.is_whitespace() {
+            in_word = false;
+        } else if !in_word {
+            non_cjk_word_count += 1;
+            in_word = true;
+        }
+    }
+    cjk_count * 6 + non_cjk_word_count * 5
+}
+
+fn count_words(text: &str) -> i64 {
+    let mut count: i64 = 0;
+    let mut in_word = false;
+    for c in text.chars() {
+        if is_cjk(c) {
+            count += 1;
+            in_word = false;
+        } else if c.is_whitespace() {
+            in_word = false;
+        } else if !in_word {
+            count += 1;
+            in_word = true;
+        }
+    }
+    count
+}
+
+fn calc_typing_time_minutes(text: &str) -> f64 {
+    let mut cjk_count = 0i64;
+    let mut other_word_count = 0i64;
+    let mut in_word = false;
+    for c in text.chars() {
+        if is_cjk(c) {
+            cjk_count += 1;
+            in_word = false;
+        } else if c.is_whitespace() {
+            in_word = false;
+        } else if !in_word {
+            other_word_count += 1;
+            in_word = true;
+        }
+    }
+    (cjk_count as f64 / 100.0) + (other_word_count as f64 / 40.0)
+}
+
+pub fn get_statistics(conn: &Connection, days: Option<i64>) -> Result<Statistics, AppError> {
+    info!("[db] get_statistics days={:?}", days);
+
+    let date_filter = days.map(|d| format!("-{} days", d));
+
+    let (total_sessions, total_duration): (i64, f64) = if let Some(ref df) = date_filter {
+        conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(duration), 0.0)
+             FROM transcriptions WHERE timestamp >= datetime('now', ?1) AND duration > 1.0",
+            params![df],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?
+    } else {
+        conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(duration), 0.0)
+             FROM transcriptions WHERE duration > 1.0",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?
+    };
+
+    let total_sessions_all: i64 = if let Some(ref df) = date_filter {
+        conn.query_row(
+            "SELECT COUNT(*) FROM transcriptions WHERE timestamp >= datetime('now', ?1)",
+            params![df],
+            |row| row.get(0),
+        )?
+    } else {
+        conn.query_row("SELECT COUNT(*) FROM transcriptions", [], |row| row.get(0))?
+    };
+
+    let texts: Vec<String> = if let Some(ref df) = date_filter {
+        let mut s = conn.prepare(
+            "SELECT text FROM transcriptions WHERE timestamp >= datetime('now', ?1)"
+        )?;
+        let rows = s.query_map(params![df], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    } else {
+        let mut s = conn.prepare("SELECT text FROM transcriptions")?;
+        let rows = s.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
+    let mut total_words: i64 = 0;
+    let mut total_keystrokes: i64 = 0;
+    let mut total_typing_minutes: f64 = 0.0;
+    for text in &texts {
+        total_words += count_words(text);
+        total_keystrokes += calc_keystrokes(text);
+        total_typing_minutes += calc_typing_time_minutes(text);
+    }
+
+    let total_recording_minutes = total_duration / 60.0;
+    let time_saved = (total_typing_minutes - total_recording_minutes).max(0.0);
+
+    let avg_wpm = if total_duration > 1.0 {
+        total_words as f64 / (total_duration / 60.0)
+    } else {
+        0.0
+    };
+
+    let daily_wpm: Vec<DailyWpm> = if let Some(ref df) = date_filter {
+        let mut s = conn.prepare(
+            "SELECT DATE(timestamp) as day, SUM(word_count) as words, SUM(duration) as dur, COUNT(*) as cnt
+             FROM transcriptions
+             WHERE timestamp >= datetime('now', ?1) AND duration > 1.0
+             GROUP BY day ORDER BY day ASC"
+        )?;
+        let rows = s.query_map(params![df], |row| {
+            let words: f64 = row.get(1)?;
+            let dur: f64 = row.get(2)?;
+            let wpm = if dur > 0.0 { words / (dur / 60.0) } else { 0.0 };
+            Ok(DailyWpm { date: row.get(0)?, wpm, session_count: row.get(3)? })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    } else {
+        let mut s = conn.prepare(
+            "SELECT DATE(timestamp) as day, SUM(word_count) as words, SUM(duration) as dur, COUNT(*) as cnt
+             FROM transcriptions WHERE duration > 1.0
+             GROUP BY day ORDER BY day ASC"
+        )?;
+        let rows = s.query_map([], |row| {
+            let words: f64 = row.get(1)?;
+            let dur: f64 = row.get(2)?;
+            let wpm = if dur > 0.0 { words / (dur / 60.0) } else { 0.0 };
+            Ok(DailyWpm { date: row.get(0)?, wpm, session_count: row.get(3)? })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
+    let wpm_stats = if daily_wpm.is_empty() {
+        WpmStats { avg: 0.0, max: 0.0, min: 0.0 }
+    } else {
+        let sum: f64 = daily_wpm.iter().map(|d| d.wpm).sum();
+        let max = daily_wpm.iter().map(|d| d.wpm).fold(0.0f64, f64::max);
+        let min = daily_wpm.iter().map(|d| d.wpm).fold(f64::INFINITY, f64::min);
+        WpmStats {
+            avg: sum / daily_wpm.len() as f64,
+            max,
+            min: if min.is_infinite() { 0.0 } else { min },
+        }
+    };
+
+    info!("[db] get_statistics: sessions={} words={} duration={:.1}s keystrokes={} time_saved={:.1}min",
+        total_sessions_all, total_words, total_duration, total_keystrokes, time_saved);
+    Ok(Statistics {
+        total_sessions: total_sessions_all,
+        total_words,
+        total_duration_seconds: total_duration,
+        total_keystrokes_saved: total_keystrokes,
+        time_saved_minutes: time_saved,
+        avg_wpm,
+        daily_wpm,
+        wpm_stats,
+    })
 }
 
 // ---------------------------------------------------------------------------
