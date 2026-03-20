@@ -353,19 +353,6 @@ pub fn delete_all_transcriptions(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
-pub fn cleanup_old_transcriptions(conn: &Connection, days: i32) -> Result<usize, AppError> {
-    info!("[db] cleanup_old_transcriptions days={}", days);
-    let deleted = conn.execute(
-        "DELETE FROM transcriptions WHERE timestamp < datetime('now', ?1)",
-        params![format!("-{} days", days)],
-    )
-    .map_err(|e| {
-        error!("[db] cleanup_old_transcriptions failed: {}", e);
-        e
-    })?;
-    info!("[db] cleanup_old_transcriptions deleted={}", deleted);
-    Ok(deleted)
-}
 
 // ---------------------------------------------------------------------------
 // Import from VoiceInk (Swift/macOS)

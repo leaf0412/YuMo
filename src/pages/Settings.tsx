@@ -8,6 +8,7 @@ import {
   FontSizeOutlined, DesktopOutlined, KeyOutlined, AppstoreOutlined,
   HistoryOutlined, SettingOutlined, ClearOutlined, ImportOutlined,
 } from '@ant-design/icons';
+import { emit } from '@tauri-apps/api/event';
 import { invoke, formatError, logEvent } from '../lib/logger';
 
 const { Text } = Typography;
@@ -33,8 +34,6 @@ interface AppSettings {
   system_mute?: boolean;
   hotkey?: string;
   menu_bar_mode?: boolean;
-  auto_cleanup?: boolean;
-  auto_cleanup_days?: number;
   autostart?: boolean;
   data_path?: string;
 }
@@ -144,6 +143,7 @@ export default function Settings() {
             recordings_copied: number;
           }>('import_voiceink_legacy', { storePath: legacyPath });
           logEvent('Settings', 'import_voiceink', result);
+          emit('stats-updated');
           message.success(
             `导入完成：${result.transcriptions_imported} 条转录，` +
             `${result.vocabulary_imported} 个词汇，` +
@@ -175,6 +175,7 @@ export default function Settings() {
     try {
       await invoke('delete_all_transcriptions');
       logEvent('Settings', 'history_cleared');
+      emit('stats-updated');
       message.success('已清空所有历史记录');
     } catch (e) {
       message.error(formatError(e, '清空失败'));
@@ -297,8 +298,6 @@ export default function Settings() {
       label: <Space><HistoryOutlined />历史管理</Space>,
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
-          {settingRow('自动清理', <Switch checked={settings.auto_cleanup} onChange={(v) => updateSetting('auto_cleanup', v)} />)}
-          {settingRow('保留天数', <InputNumber min={1} max={365} value={settings.auto_cleanup_days ?? 30} onChange={(v) => v && updateSetting('auto_cleanup_days', v)} style={{ width: 120 }} />)}
           <Popconfirm title="确认清空所有历史记录？" onConfirm={handleClearAllHistory} okText="确认" cancelText="取消">
             <Button danger icon={<ClearOutlined />}>清空所有记录</Button>
           </Popconfirm>
