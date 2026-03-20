@@ -8,7 +8,7 @@ import {
   FontSizeOutlined, DesktopOutlined, KeyOutlined, AppstoreOutlined,
   HistoryOutlined, SettingOutlined, ClearOutlined,
 } from '@ant-design/icons';
-import { invoke, formatError } from '../lib/logger';
+import { invoke, formatError, logEvent } from '../lib/logger';
 
 const { Text } = Typography;
 
@@ -68,6 +68,7 @@ export default function Settings() {
     try {
       await invoke('update_setting', { key, value });
       setSettings((prev) => ({ ...prev, [key]: value }));
+      logEvent('Settings', 'setting_changed', { key, value });
     } catch (e) {
       message.error(formatError(e, '设置更新失败'));
     }
@@ -103,10 +104,12 @@ export default function Settings() {
     if (shortcut) {
       setHotkeyInput(shortcut);
       setRecordingHotkey(false);
+      logEvent('Settings', 'hotkey_captured', { shortcut });
       (async () => {
         try {
           await invoke('register_hotkey', { shortcut });
           updateSetting('hotkey', shortcut);
+          logEvent('Settings', 'hotkey_registered', { shortcut });
           message.success(`快捷键已设置: ${shortcut}`);
         } catch (e: unknown) {
           message.error(formatError(e, '注册失败'));
@@ -121,6 +124,7 @@ export default function Settings() {
       setHotkeyInput('');
       setRecordingHotkey(false);
       updateSetting('hotkey', '');
+      logEvent('Settings', 'hotkey_cleared');
       message.success('快捷键已清除');
     } catch (e) {
       message.error(formatError(e, '清除失败'));
@@ -130,6 +134,7 @@ export default function Settings() {
   const handleClearAllHistory = async () => {
     try {
       await invoke('delete_all_transcriptions');
+      logEvent('Settings', 'history_cleared');
       message.success('已清空所有历史记录');
     } catch (e) {
       message.error(formatError(e, '清空失败'));
