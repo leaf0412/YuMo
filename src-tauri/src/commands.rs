@@ -936,9 +936,29 @@ pub fn daemon_stop(state: State<AppState>) -> Result<(), AppError> {
 
 #[tauri::command]
 pub fn daemon_status(state: State<AppState>) -> Result<serde_json::Value, AppError> {
+    use std::sync::LazyLock;
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    static LAST_LOG: LazyLock<Mutex<(Instant, bool, Option<String>)>> =
+        LazyLock::new(|| Mutex::new((Instant::now(), false, None)));
+
+    let running = state.daemon.is_running();
+    let loaded = state.daemon.loaded_model();
+
+    // Only log on state change or every 30 seconds
+    if let Ok(mut last) = LAST_LOG.lock() {
+        let changed = last.1 != running || last.2 != loaded;
+        let elapsed = last.0.elapsed().as_secs() >= 30;
+        if changed || elapsed {
+            info!("[daemon] [status] running={} loaded_model={:?}", running, loaded);
+            *last = (Instant::now(), running, loaded.clone());
+        }
+    }
+
     Ok(serde_json::json!({
-        "running": state.daemon.is_running(),
-        "loaded_model": state.daemon.loaded_model(),
+        "running": running,
+        "loaded_model": loaded,
     }))
 }
 
