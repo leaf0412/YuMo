@@ -144,6 +144,8 @@ pub async fn stop_recording(
             })?
     };
 
+    let pipeline_start = std::time::Instant::now();
+
     // 2. Stop recording
     info!("[pipeline] stopping recorder...");
     let audio_data = recorder::stop_recording(handle).map_err(|e| {
@@ -229,6 +231,7 @@ pub async fn stop_recording(
     );
 
     // 5. Transcribe — route by model provider
+    let transcribe_start = std::time::Instant::now();
     let all = transcriber::all_models(&state.paths.models_dir);
     let model_info = all.iter().find(|m| m.id == model_id);
     info!(
@@ -354,6 +357,7 @@ pub async fn stop_recording(
         result.duration_ms,
         mask::mask_text(&text)
     );
+    info!("[pipeline] [transcribe_complete] elapsed_ms={} text_len={}", transcribe_start.elapsed().as_millis(), text.len());
 
     // 6. Apply text processing
     let replacements: Vec<(String, String)> = {
@@ -389,8 +393,13 @@ pub async fn stop_recording(
         );
 
         // TODO: integrate with keychain and enhancer module
+        let enhance_start = std::time::Instant::now();
         info!("[pipeline] enhancement not implemented yet, skipping");
-        None
+        let enhanced_text_inner: Option<String> = None;
+        if let Some(ref et) = enhanced_text_inner {
+            info!("[pipeline] [enhance_complete] elapsed_ms={} text_len={}", enhance_start.elapsed().as_millis(), et.len());
+        }
+        enhanced_text_inner
     } else {
         info!("[pipeline] enhancement disabled, skipping");
         None
@@ -474,6 +483,7 @@ pub async fn stop_recording(
     // Hide floating recorder window
     crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
 
+    info!("[pipeline] [complete] total_ms={}", pipeline_start.elapsed().as_millis());
     Ok(())
 }
 
