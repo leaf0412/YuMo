@@ -566,8 +566,12 @@ fn wait_for_ready(reader: &mut BufReader<ChildStdout>) -> AppResult<()> {
                 log::info!("[daemon] ready signal received");
                 return Ok(());
             }
+            // Valid JSON but not ready — log it
+            log::info!("[daemon] [stdout-preready] {}", trimmed);
+        } else {
+            // Not valid JSON — log it (import warnings, etc.)
+            log::info!("[daemon] [stdout-preready] {}", trimmed);
         }
-        // Any other output before ready is silently ignored.
     }
 }
 
