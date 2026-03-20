@@ -50,37 +50,9 @@ pub async fn start_recording(
         }
     }
 
-    // 2. Start recording FIRST to minimize latency — resolve device quickly
-    let dev_id = if let Some(id) = device_id {
-        id
-    } else {
-        // Read saved device from settings (fast path: just the one key)
-        let saved_device = {
-            let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
-            db::get_all_settings(&conn)
-                .ok()
-                .and_then(|s| s.get("audio_device").and_then(|v| v.as_u64()).map(|v| v as u32))
-        };
-        saved_device.unwrap_or_else(|| {
-            let devices = recorder::list_input_devices();
-            devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(0)
-        })
-    };
-    info!("[pipeline] using device_id={}", dev_id);
-
-    info!("[pipeline] calling recorder::start_recording...");
-    let (handle, _level_rx) = recorder::start_recording(dev_id).map_err(|e| {
-        error!("[pipeline] recorder::start_recording failed: {}", e);
-        AppError::Recording(e.to_string())
-    })?;
-    info!("[pipeline] recording started successfully");
-
-    // 3. Mute system audio if enabled (after recording started to avoid delay)
+    // 2. Read settings + mute BEFORE recording to avoid capturing system sound
     let settings = {
-        let conn = state
-            .db
-            .lock()
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
         db::get_all_settings(&conn)?
     };
     let mute = settings
@@ -91,6 +63,27 @@ pub async fn start_recording(
         info!("[pipeline] muting system audio");
         audio_ctrl::set_system_muted(true);
     }
+
+    // 3. Resolve device and start recording immediately (skip full enumeration)
+    let dev_id = if let Some(id) = device_id {
+        id
+    } else {
+        settings.get("audio_device")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+            .unwrap_or_else(|| {
+                let devices = recorder::list_input_devices();
+                devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(0)
+            })
+    };
+    info!("[pipeline] using device_id={}", dev_id);
+
+    info!("[pipeline] calling recorder::start_recording...");
+    let (handle, _level_rx) = recorder::start_recording(dev_id).map_err(|e| {
+        error!("[pipeline] recorder::start_recording failed: {}", e);
+        AppError::Recording(e.to_string())
+    })?;
+    info!("[pipeline] recording started successfully");
 
     // 4. Store handle and update state
     {
