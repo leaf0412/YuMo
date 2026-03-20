@@ -18,7 +18,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .on_menu_event(|app, event| {
-            info!("[tray] [menu_event] action={}", event.id);
+            info!("[tray] [menu_event] action={}", event.id.as_ref());
             let wm = WindowManager::new(app.clone());
             match event.id.as_ref() {
                 "show" => wm.show("main"),
