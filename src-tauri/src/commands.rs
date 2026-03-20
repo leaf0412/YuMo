@@ -617,6 +617,55 @@ pub fn detect_voiceink_legacy_path() -> Option<String> {
     }
 }
 
+/// Let user pick a .store file via file dialog, then import it.
+#[tauri::command]
+pub async fn import_voiceink_from_dialog(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<db::ImportResult, AppError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let file = app
+        .dialog()
+        .file()
+        .add_filter("VoiceInk Database", &["store"])
+        .set_title("选择 VoiceInk 数据库文件")
+        .blocking_pick_file();
+
+    let file = match file {
+        Some(f) => f,
+        None => return Err(AppError::InvalidInput("用户取消选择".into())),
+    };
+
+    let store = file
+        .as_path()
+        .ok_or_else(|| AppError::Io("无法获取文件路径".into()))?;
+
+    if !store.exists() {
+        return Err(AppError::InvalidInput("所选文件不存在".into()));
+    }
+
+    // Validate file extension
+    let ext = store.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if ext != "store" {
+        return Err(AppError::InvalidInput(
+            "请选择 .store 格式的 VoiceInk 数据库文件".into(),
+        ));
+    }
+
+    info!("[cmd] import_voiceink_from_dialog store={}", store.display());
+
+    let dict_store = store.parent().map(|p| p.join("dictionary.store"));
+    let dict_ref = dict_store.as_deref().filter(|p| p.exists());
+
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+    db::import_voiceink_legacy(&conn, store, dict_ref, &state.paths.recordings_dir)
+}
+
 #[tauri::command]
 pub fn list_audio_devices() -> Vec<recorder::AudioInputDevice> {
     info!("[cmd] list_audio_devices");

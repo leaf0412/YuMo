@@ -241,6 +241,7 @@ pub fn run() {
             // Import
             commands::import_voiceink_legacy,
             commands::detect_voiceink_legacy_path,
+            commands::import_voiceink_from_dialog,
             // Vocabulary
             commands::get_vocabulary,
             commands::add_vocabulary,

@@ -131,6 +131,23 @@ export default function Settings() {
     invoke<string | null>('detect_voiceink_legacy_path').then(setLegacyPath).catch(() => {});
   }, []);
 
+  const showImportResult = (result: {
+    transcriptions_imported: number;
+    transcriptions_skipped: number;
+    vocabulary_imported: number;
+    replacements_imported: number;
+    recordings_copied: number;
+  }) => {
+    logEvent('Settings', 'import_voiceink', result);
+    emit('stats-updated');
+    message.success(
+      `导入完成：${result.transcriptions_imported} 条转录，` +
+      `${result.vocabulary_imported} 个词汇，` +
+      `${result.recordings_copied} 个录音文件` +
+      (result.transcriptions_skipped > 0 ? `（跳过 ${result.transcriptions_skipped} 条重复）` : '')
+    );
+  };
+
   const handleImportVoiceInk = async () => {
     if (!legacyPath) return;
     Modal.confirm({
@@ -148,20 +165,44 @@ export default function Settings() {
             replacements_imported: number;
             recordings_copied: number;
           }>('import_voiceink_legacy', { storePath: legacyPath });
-          logEvent('Settings', 'import_voiceink', result);
-          emit('stats-updated');
-          message.success(
-            `导入完成：${result.transcriptions_imported} 条转录，` +
-            `${result.vocabulary_imported} 个词汇，` +
-            `${result.recordings_copied} 个录音文件` +
-            (result.transcriptions_skipped > 0 ? `（跳过 ${result.transcriptions_skipped} 条重复）` : '')
-          );
+          showImportResult(result);
         } catch (e) {
           message.error(formatError(e, '导入失败'));
         }
         setImporting(false);
       },
     });
+  };
+
+  const handleImportFromDialog = async () => {
+    setImporting(true);
+    try {
+      const result = await invoke<{
+        transcriptions_imported: number;
+        transcriptions_skipped: number;
+        vocabulary_imported: number;
+        replacements_imported: number;
+        recordings_copied: number;
+      }>('import_voiceink_from_dialog');
+      showImportResult(result);
+    } catch (e) {
+      const errMsg = String(e);
+      if (!errMsg.includes('用户取消')) {
+        Modal.error({
+          title: '导入失败',
+          content: (
+            <>
+              <p>{formatError(e, '未知错误')}</p>
+              <p style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
+                请确认选择的是 VoiceInk macOS 版数据目录下的 default.store 文件，
+                默认路径为 ~/Library/Application Support/com.prakashjoshipax.VoiceInk/default.store
+              </p>
+            </>
+          ),
+        });
+      }
+    }
+    setImporting(false);
   };
 
   const handleClearHotkey = async () => {
@@ -327,7 +368,7 @@ export default function Settings() {
       label: <Space><ImportOutlined />数据导入</Space>,
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
-          {legacyPath ? (
+          {legacyPath && (
             <>
               <Alert
                 type="info"
@@ -346,21 +387,20 @@ export default function Settings() {
                 loading={importing}
                 onClick={handleImportVoiceInk}
               >
-                从 VoiceInk macOS 版导入
+                一键导入检测到的数据
               </Button>
             </>
-          ) : (
-            <Alert
-              type="warning"
-              showIcon
-              message="未检测到 VoiceInk macOS 版"
-              description={
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  未在默认路径找到数据：~/Library/Application Support/com.prakashjoshipax.VoiceInk/default.store
-                </Text>
-              }
-            />
           )}
+          <Button
+            icon={<ImportOutlined />}
+            loading={importing}
+            onClick={handleImportFromDialog}
+          >
+            选择 .store 文件导入
+          </Button>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            手动选择 VoiceInk macOS 版的 default.store 文件，支持导入转录历史、词典、替换规则和录音文件。
+          </Text>
         </Flex>
       ),
     },
