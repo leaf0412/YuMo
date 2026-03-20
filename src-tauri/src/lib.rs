@@ -68,24 +68,8 @@ pub fn run() {
 
     std::fs::create_dir_all(&paths.models_dir).expect("Cannot create models dir");
 
-    // Sync daemon script + uv binary from app resources
+    // Daemon script path (will be synced from resources in setup())
     let daemon_script = paths.data_dir.join("mlx_funasr_daemon.py");
-    let res_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
-    let dev_script = res_dir.join("mlx_funasr_daemon.py");
-    if dev_script.exists() {
-        let _ = std::fs::copy(&dev_script, &daemon_script);
-    }
-    let uv_src = res_dir.join("uv");
-    let uv_dest = paths.data_dir.join("uv");
-    if uv_src.exists() && (!uv_dest.exists() || std::fs::metadata(&uv_src).map(|m| m.len()).unwrap_or(0) != std::fs::metadata(&uv_dest).map(|m| m.len()).unwrap_or(0)) {
-        let _ = std::fs::copy(&uv_src, &uv_dest);
-        // Ensure executable permission
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&uv_dest, std::fs::Permissions::from_mode(0o755));
-        }
-    }
     let daemon = daemon::DaemonManager::new(daemon_script, paths.data_dir.clone());
     info!("[app] [startup_complete] elapsed_ms={}", startup_start.elapsed().as_millis());
 
@@ -96,6 +80,55 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .manage(state::AppState::new(conn, paths, daemon))
         .setup(move |app| {
+            // Sync bundled resources (daemon script + uv) to ~/.voiceink/
+            // Uses Tauri's resource_dir() which works in both dev and production builds.
+            {
+                use tauri::Manager;
+                let app_state = app.handle().state::<state::AppState>();
+                let data_dir = &app_state.paths.data_dir;
+
+                // Try Tauri resource resolver first (production), fall back to CARGO_MANIFEST_DIR (dev)
+                let res_dir = app.path().resource_dir()
+                    .ok()
+                    .map(|d| d.join("resources"));
+                let dev_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
+
+                let sync_file = |name: &str, executable: bool| {
+                    let dest = data_dir.join(name);
+                    // Try production path first, then dev path
+                    let src = res_dir.as_ref()
+                        .map(|d| d.join(name))
+                        .filter(|p| p.exists())
+                        .unwrap_or_else(|| dev_dir.join(name));
+
+                    if !src.exists() {
+                        info!("[app] [sync_resource] {} not found at {:?}", name, src);
+                        return;
+                    }
+
+                    let src_size = std::fs::metadata(&src).map(|m| m.len()).unwrap_or(0);
+                    let dest_size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
+                    if !dest.exists() || src_size != dest_size {
+                        match std::fs::copy(&src, &dest) {
+                            Ok(_) => {
+                                info!("[app] [sync_resource] {} synced ({} bytes)", name, src_size);
+                                #[cfg(unix)]
+                                if executable {
+                                    use std::os::unix::fs::PermissionsExt;
+                                    let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
+                                }
+                            }
+                            Err(e) => log::error!("[app] [sync_resource] {} copy failed: {}", name, e),
+                        }
+                    } else {
+                        info!("[app] [sync_resource] {} up to date", name);
+                    }
+                };
+
+                sync_file("mlx_funasr_daemon.py", false);
+                sync_file("uv", true);
+            }
+
             tray::setup_tray(app.handle())?;
 
             // Configure recorder window for transparent dragging on macOS
