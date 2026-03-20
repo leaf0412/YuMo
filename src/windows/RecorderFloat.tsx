@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { invoke } from '../lib/logger';
 import { onBroadcast } from '../lib/broadcast';
 import {
@@ -7,7 +9,7 @@ import {
   PIPELINE_IDLE,
   PIPELINE_RECORDING,
   CMD_GET_PIPELINE_STATE,
-  PIPELINE_LABELS,
+  PIPELINE_LABEL_KEYS,
   PIPELINE_COLORS,
   PIPELINE_ANIMATIONS,
   parsePipelineState,
@@ -22,8 +24,11 @@ export default function RecorderFloat() {
   const timerRef = useRef<number | null>(null);
   const prevStateRef = useRef<PipelineState>(PIPELINE_IDLE);
 
+  const { t } = useTranslation();
+
   // ESC hint
-  const [escHint, setEscHint] = useState<string | null>(null);
+  type EscHintType = 'cancelled' | 'pressAgain' | null;
+  const [escHintType, setEscHintType] = useState<EscHintType>(null);
   const escHintTimer = useRef<number | null>(null);
 
   // Sprite
@@ -78,19 +83,27 @@ export default function RecorderFloat() {
     const unlisten = listen('escape-pressed', () => {
       const now = Date.now();
       if (now - lastEsc < 500) {
-        setEscHint('录音已取消');
+        setEscHintType('cancelled');
         lastEsc = 0;
       } else {
         lastEsc = now;
-        setEscHint('再按一次 ESC 取消');
+        setEscHintType('pressAgain');
         if (escHintTimer.current) clearTimeout(escHintTimer.current);
-        escHintTimer.current = window.setTimeout(() => setEscHint(null), 2000);
+        escHintTimer.current = window.setTimeout(() => setEscHintType(null), 2000);
       }
     });
     return () => {
       unlisten.then(fn => fn());
       if (escHintTimer.current) clearTimeout(escHintTimer.current);
     };
+  }, []);
+
+  // Sync language when changed from main window
+  useEffect(() => {
+    const unlisten = listen<string>('language-changed', (event) => {
+      i18n.changeLanguage(event.payload);
+    });
+    return () => { unlisten.then(fn => fn()); };
   }, []);
 
   // Shared state-transition handler
@@ -208,7 +221,7 @@ export default function RecorderFloat() {
           background: color,
           animation,
         }} />
-        <span>{PIPELINE_LABELS[state]}</span>
+        <span>{PIPELINE_LABEL_KEYS[state] ? t(PIPELINE_LABEL_KEYS[state]) : ''}</span>
         {isRecording && (
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(duration)}</span>
         )}
@@ -227,25 +240,25 @@ export default function RecorderFloat() {
             fontSize: 14,
             lineHeight: 1,
           }}
-          title="取消"
+          title={t('recorder.cancel')}
         >
           ✕
         </span>
       </div>
 
-      {escHint && (
+      {escHintType && (
         <div style={{
           marginTop: 4,
           padding: '2px 10px',
           borderRadius: 10,
-          background: escHint === '录音已取消' ? 'rgba(255,77,79,0.85)' : 'rgba(0,0,0,0.6)',
+          background: escHintType === 'cancelled' ? 'rgba(255,77,79,0.85)' : 'rgba(0,0,0,0.6)',
           color: '#fff',
           fontSize: 11,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
           pointerEvents: 'none',
           transition: 'opacity 0.2s',
         }}>
-          {escHint}
+          {escHintType === 'cancelled' ? t('recorder.cancelledHint') : t('recorder.escHint')}
         </div>
       )}
 

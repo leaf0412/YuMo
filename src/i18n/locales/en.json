@@ -32,5 +32,13 @@
   "app.selectModelFirstDesc": "A downloaded speech recognition model is required for recording.",
   "app.goToModels": "Go to Models",
   "app.modelNotDownloaded": "Model not downloaded",
-  "app.modelNotDownloadedDesc": "Model \"{{name}}\" is not downloaded yet."
+  "app.modelNotDownloadedDesc": "Model \"{{name}}\" is not downloaded yet.",
+
+  "pipeline.recording": "Recording",
+  "pipeline.transcribing": "Transcribing...",
+  "pipeline.enhancing": "Enhancing...",
+  "pipeline.pasting": "Pasting...",
+  "recorder.cancel": "Cancel",
+  "recorder.cancelledHint": "Recording cancelled",
+  "recorder.escHint": "Press ESC again to cancel"
 }

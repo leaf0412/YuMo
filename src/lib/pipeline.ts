@@ -32,6 +32,15 @@ export const PIPELINE_LABELS: Record<PipelineState, string> = {
   [PIPELINE_IDLE]: '',
 };
 
+/** i18n keys for pipeline state labels — use with t() */
+export const PIPELINE_LABEL_KEYS: Record<PipelineState, string> = {
+  [PIPELINE_RECORDING]: 'pipeline.recording',
+  [PIPELINE_TRANSCRIBING]: 'pipeline.transcribing',
+  [PIPELINE_ENHANCING]: 'pipeline.enhancing',
+  [PIPELINE_PASTING]: 'pipeline.pasting',
+  [PIPELINE_IDLE]: '',
+};
+
 // --- UI style tokens (strategy map) -----------------------------------------
 
 export const COLOR_ACTIVE = '#ff4d4f';

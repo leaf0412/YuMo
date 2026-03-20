@@ -32,5 +32,13 @@
   "app.selectModelFirstDesc": "录音需要一个已下载的语音识别模型。",
   "app.goToModels": "前往模型页",
   "app.modelNotDownloaded": "模型未下载",
-  "app.modelNotDownloadedDesc": "模型 \"{{name}}\" 尚未下载，请先下载。"
+  "app.modelNotDownloadedDesc": "模型 \"{{name}}\" 尚未下载，请先下载。",
+
+  "pipeline.recording": "录音中",
+  "pipeline.transcribing": "转录中...",
+  "pipeline.enhancing": "增强中...",
+  "pipeline.pasting": "粘贴中...",
+  "recorder.cancel": "取消",
+  "recorder.cancelledHint": "录音已取消",
+  "recorder.escHint": "再按一次 ESC 取消"
 }
