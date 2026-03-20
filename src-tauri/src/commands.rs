@@ -1229,6 +1229,160 @@ pub fn base64_encode(data: &[u8]) -> String {
     result
 }
 
+/// Import a sprite from a folder selected via file dialog.
+/// The folder must contain a manifest.json and the sprite image referenced within.
+#[tauri::command]
+pub async fn import_sprite_folder(app: AppHandle, state: State<'_, AppState>) -> Result<Value, AppError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let dir = app
+        .dialog()
+        .file()
+        .blocking_pick_folder();
+
+    let dir = match dir {
+        Some(d) => d,
+        None => return Ok(Value::Null), // user cancelled
+    };
+
+    let dir_path = dir
+        .as_path()
+        .ok_or_else(|| AppError::Io("无法获取文件夹路径".into()))?;
+
+    let manifest_path = dir_path.join("manifest.json");
+    if !manifest_path.exists() {
+        return Err(AppError::Io("文件夹中未找到 manifest.json".into()));
+    }
+
+    let manifest_data = std::fs::read_to_string(&manifest_path)?;
+    let manifest: Value = serde_json::from_str(&manifest_data)
+        .map_err(|e| AppError::Io(format!("manifest.json 解析失败: {}", e)))?;
+
+    let sprite_file = manifest
+        .get("spriteFile")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::Io("manifest.json 缺少 spriteFile 字段".into()))?;
+
+    let sprite_path = dir_path.join(sprite_file);
+    if !sprite_path.exists() {
+        return Err(AppError::Io(format!("精灵图文件不存在: {}", sprite_file)));
+    }
+
+    // Create destination subdirectory
+    let dest_id = uuid::Uuid::new_v4().to_string().to_uppercase();
+    let dest_dir = state.paths.sprites_dir.join(&dest_id);
+    std::fs::create_dir_all(&dest_dir)?;
+
+    // Copy manifest.json
+    std::fs::copy(&manifest_path, dest_dir.join("manifest.json"))?;
+    // Copy sprite image
+    std::fs::copy(&sprite_path, dest_dir.join(sprite_file))?;
+    // Copy sprite_processed.png if it exists
+    let processed = dir_path.join("sprite_processed.png");
+    if processed.exists() {
+        std::fs::copy(&processed, dest_dir.join("sprite_processed.png"))?;
+    }
+
+    info!("[sprite] imported folder {:?} -> {}", dir_path, dest_id);
+
+    let mut result = manifest.clone();
+    result.as_object_mut().map(|m| m.insert("dirId".into(), Value::String(dest_id)));
+    Ok(result)
+}
+
+/// Import a sprite from a .zip archive selected via file dialog.
+#[tauri::command]
+pub async fn import_sprite_zip(app: AppHandle, state: State<'_, AppState>) -> Result<Value, AppError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let file = app
+        .dialog()
+        .file()
+        .add_filter("Sprite Archive", &["zip"])
+        .blocking_pick_file();
+
+    let file = match file {
+        Some(f) => f,
+        None => return Ok(Value::Null),
+    };
+
+    let file_path = file
+        .as_path()
+        .ok_or_else(|| AppError::Io("无法获取文件路径".into()))?;
+
+    // Extract to temp directory
+    let tmp_dir = std::env::temp_dir().join(format!("sprite-import-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&tmp_dir)?;
+
+    let zip_file = std::fs::File::open(file_path)?;
+    let mut archive = zip::ZipArchive::new(zip_file)
+        .map_err(|e| AppError::Io(format!("无法打开 zip 文件: {}", e)))?;
+    archive.extract(&tmp_dir)
+        .map_err(|e| AppError::Io(format!("解压失败: {}", e)))?;
+
+    // Find manifest.json (may be in root or a subdirectory)
+    let manifest_path = find_manifest_in_dir(&tmp_dir)
+        .ok_or_else(|| AppError::Io("zip 中未找到 manifest.json".into()))?;
+
+    let manifest_data = std::fs::read_to_string(&manifest_path)?;
+    let manifest: Value = serde_json::from_str(&manifest_data)
+        .map_err(|e| AppError::Io(format!("manifest.json 解析失败: {}", e)))?;
+
+    let sprite_file = manifest
+        .get("spriteFile")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::Io("manifest.json 缺少 spriteFile 字段".into()))?;
+
+    let manifest_dir = manifest_path.parent().unwrap_or(&tmp_dir);
+    let sprite_path = manifest_dir.join(sprite_file);
+    if !sprite_path.exists() {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err(AppError::Io(format!("精灵图文件不存在: {}", sprite_file)));
+    }
+
+    // Create destination
+    let dest_id = uuid::Uuid::new_v4().to_string().to_uppercase();
+    let dest_dir = state.paths.sprites_dir.join(&dest_id);
+    std::fs::create_dir_all(&dest_dir)?;
+
+    std::fs::copy(&manifest_path, dest_dir.join("manifest.json"))?;
+    std::fs::copy(&sprite_path, dest_dir.join(sprite_file))?;
+
+    // Copy processed file if present
+    let processed = manifest_dir.join("sprite_processed.png");
+    if processed.exists() {
+        std::fs::copy(&processed, dest_dir.join("sprite_processed.png"))?;
+    }
+
+    // Cleanup temp
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+
+    info!("[sprite] imported zip {:?} -> {}", file_path, dest_id);
+
+    let mut result = manifest.clone();
+    result.as_object_mut().map(|m| m.insert("dirId".into(), Value::String(dest_id)));
+    Ok(result)
+}
+
+/// Recursively find manifest.json in a directory.
+fn find_manifest_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let direct = dir.join("manifest.json");
+    if direct.exists() {
+        return Some(direct);
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = find_manifest_in_dir(&path) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

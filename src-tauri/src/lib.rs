@@ -279,6 +279,8 @@ pub fn run() {
             // Sprite sheets
             commands::list_sprites,
             commands::get_sprite_image,
+            commands::import_sprite_folder,
+            commands::import_sprite_zip,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
