@@ -368,6 +368,221 @@ pub fn cleanup_old_transcriptions(conn: &Connection, days: i32) -> Result<usize,
 }
 
 // ---------------------------------------------------------------------------
+// Import from VoiceInk (Swift/macOS)
+// ---------------------------------------------------------------------------
+
+/// CoreData epoch offset: 2001-01-01 00:00:00 UTC in Unix time
+const COREDATA_EPOCH_OFFSET: f64 = 978307200.0;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportResult {
+    pub transcriptions_imported: usize,
+    pub transcriptions_skipped: usize,
+    pub vocabulary_imported: usize,
+    pub replacements_imported: usize,
+    pub recordings_copied: usize,
+}
+
+/// Import data from VoiceInk macOS (SwiftData) database.
+/// `store_path` is the path to the `default.store` file.
+/// `recordings_dest` is where to copy audio files.
+pub fn import_voiceink_legacy(
+    conn: &Connection,
+    store_path: &Path,
+    dict_store_path: Option<&Path>,
+    recordings_dest: &Path,
+) -> Result<ImportResult, AppError> {
+    info!("[db] import_voiceink_legacy store={}", store_path.display());
+
+    let src = Connection::open(store_path).map_err(|e| {
+        error!("[db] import_voiceink_legacy open failed: {}", e);
+        AppError::Database(format!("Cannot open VoiceInk database: {}", e))
+    })?;
+
+    // Import transcriptions
+    let mut stmt = src.prepare(
+        "SELECT ZTEXT, ZENHANCEDTEXT, ZTIMESTAMP, ZDURATION,
+                ZTRANSCRIPTIONMODELNAME, ZWORDCOUNT, ZAUDIOFILEURL
+         FROM ZTRANSCRIPTION ORDER BY ZTIMESTAMP ASC"
+    ).map_err(|e| AppError::Database(format!("Invalid VoiceInk database: {}", e)))?;
+
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+    let mut recordings_copied = 0usize;
+
+    let rows: Vec<(
+        Option<String>, Option<String>, Option<f64>, Option<f64>,
+        Option<String>, Option<i32>, Option<String>,
+    )> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
+                row.get(4)?, row.get(5)?, row.get(6)?,
+            ))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    info!("[db] import_voiceink_legacy: {} source records", rows.len());
+
+    for (text, enhanced_text, timestamp, duration, model_name, word_count, audio_url) in &rows {
+        let text = match text {
+            Some(t) if !t.is_empty() => t,
+            _ => { skipped += 1; continue; }
+        };
+
+        // Convert CoreData timestamp to ISO format
+        let ts = timestamp.unwrap_or(0.0);
+        let unix_ts = ts + COREDATA_EPOCH_OFFSET;
+        let dt = chrono::DateTime::from_timestamp(unix_ts as i64, 0)
+            .unwrap_or_else(|| chrono::Utc::now());
+        let iso_ts = dt.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
+
+        // Check for duplicate (same text + same timestamp within 1 second)
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM transcriptions WHERE text = ?1 AND timestamp BETWEEN datetime(?2, '-1 seconds') AND datetime(?2, '+1 seconds')",
+            params![text, iso_ts],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if exists { skipped += 1; continue; }
+
+        // Copy recording file if it exists
+        let recording_path = if let Some(url) = audio_url {
+            let src_path = url
+                .strip_prefix("file://")
+                .map(|p| percent_decode(p))
+                .unwrap_or_default();
+            let src_file = std::path::Path::new(&src_path);
+            if src_file.exists() {
+                let dest_name = src_file.file_name().unwrap_or_default();
+                let dest_path = recordings_dest.join(dest_name);
+                if !dest_path.exists() {
+                    let _ = std::fs::create_dir_all(recordings_dest);
+                    if std::fs::copy(src_file, &dest_path).is_ok() {
+                        recordings_copied += 1;
+                    }
+                }
+                Some(dest_path.to_string_lossy().to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let id = Uuid::new_v4().to_string();
+        let dur = duration.unwrap_or(0.0);
+        let model = model_name.as_deref().unwrap_or("unknown");
+        let wc = word_count.unwrap_or(0);
+
+        conn.execute(
+            "INSERT INTO transcriptions (id, text, enhanced_text, timestamp, duration, model_name, word_count, recording_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![id, text, enhanced_text, iso_ts, dur, model, wc, recording_path],
+        ).map_err(|e| {
+            error!("[db] import transcription failed: {}", e);
+            e
+        })?;
+        imported += 1;
+    }
+
+    // Import vocabulary and replacements from dictionary store
+    let mut vocab_imported = 0usize;
+    let mut repl_imported = 0usize;
+
+    if let Some(dict_path) = dict_store_path {
+        if dict_path.exists() {
+            if let Ok(dict_conn) = Connection::open(dict_path) {
+                // Vocabulary
+                if let Ok(mut vstmt) = dict_conn.prepare("SELECT ZWORD FROM ZVOCABULARYWORD") {
+                    let words: Vec<String> = vstmt
+                        .query_map([], |row| row.get::<_, String>(0))
+                        .ok()
+                        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                        .unwrap_or_default();
+                    for word in &words {
+                        // Skip duplicates
+                        let exists: bool = conn.query_row(
+                            "SELECT COUNT(*) > 0 FROM vocabulary WHERE word = ?1",
+                            params![word],
+                            |row| row.get(0),
+                        ).unwrap_or(false);
+                        if exists { continue; }
+                        let id = Uuid::new_v4().to_string();
+                        let _ = conn.execute(
+                            "INSERT INTO vocabulary (id, word) VALUES (?1, ?2)",
+                            params![id, word],
+                        );
+                        vocab_imported += 1;
+                    }
+                }
+
+                // Replacements
+                if let Ok(mut rstmt) = dict_conn.prepare(
+                    "SELECT ZORIGINALTEXT, ZREPLACEMENTTEXT FROM ZWORDREPLACEMENT WHERE ZISENABLED = 1"
+                ) {
+                    let repls: Vec<(String, String)> = rstmt
+                        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                        .ok()
+                        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                        .unwrap_or_default();
+                    for (orig, repl) in &repls {
+                        let exists: bool = conn.query_row(
+                            "SELECT COUNT(*) > 0 FROM replacements WHERE original = ?1",
+                            params![orig],
+                            |row| row.get(0),
+                        ).unwrap_or(false);
+                        if exists { continue; }
+                        let id = Uuid::new_v4().to_string();
+                        let _ = conn.execute(
+                            "INSERT INTO replacements (id, original, replacement) VALUES (?1, ?2, ?3)",
+                            params![id, orig, repl],
+                        );
+                        repl_imported += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    info!("[db] import_voiceink_legacy: imported={} skipped={} vocab={} repl={} recordings={}",
+        imported, skipped, vocab_imported, repl_imported, recordings_copied);
+    Ok(ImportResult {
+        transcriptions_imported: imported,
+        transcriptions_skipped: skipped,
+        vocabulary_imported: vocab_imported,
+        replacements_imported: repl_imported,
+        recordings_copied,
+    })
+}
+
+/// Decode percent-encoded URL path
+fn percent_decode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            let hi = chars.next().unwrap_or(0);
+            let lo = chars.next().unwrap_or(0);
+            let hex = [hi, lo];
+            if let Ok(s) = std::str::from_utf8(&hex) {
+                if let Ok(val) = u8::from_str_radix(s, 16) {
+                    result.push(val as char);
+                    continue;
+                }
+            }
+            result.push('%');
+            result.push(hi as char);
+            result.push(lo as char);
+        } else {
+            result.push(b as char);
+        }
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
 // Statistics
 // ---------------------------------------------------------------------------
 
@@ -398,7 +613,7 @@ fn calc_keystrokes(text: &str) -> i64 {
     cjk_count * 6 + non_cjk_word_count * 5
 }
 
-fn count_words(text: &str) -> i64 {
+pub fn count_words(text: &str) -> i64 {
     let mut count: i64 = 0;
     let mut in_word = false;
     for c in text.chars() {

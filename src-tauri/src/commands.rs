@@ -448,7 +448,7 @@ pub async fn stop_recording(
     }
 
     // 9. Save to DB
-    let word_count = final_text.split_whitespace().count() as i32;
+    let word_count = db::count_words(final_text) as i32;
     info!("[pipeline] saving to DB, word_count={}", word_count);
     {
         let conn = state
@@ -576,6 +576,45 @@ pub fn get_statistics(
         .lock()
         .map_err(|e| AppError::Database(e.to_string()))?;
     db::get_statistics(&conn, days)
+}
+
+#[tauri::command]
+pub fn import_voiceink_legacy(
+    state: State<AppState>,
+    store_path: String,
+) -> Result<db::ImportResult, AppError> {
+    info!("[cmd] import_voiceink_legacy store_path={}", store_path);
+
+    let store = std::path::Path::new(&store_path);
+    if !store.exists() {
+        return Err(AppError::InvalidInput("VoiceInk database file not found".into()));
+    }
+
+    // Dictionary store is alongside the main store
+    let dict_store = store.parent()
+        .map(|p| p.join("dictionary.store"));
+    let dict_ref = dict_store.as_deref()
+        .filter(|p| p.exists());
+
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+    db::import_voiceink_legacy(&conn, store, dict_ref, &state.paths.recordings_dir)
+}
+
+/// Auto-detect VoiceInk macOS data directory
+#[tauri::command]
+pub fn detect_voiceink_legacy_path() -> Option<String> {
+    let home = dirs::home_dir()?;
+    let store = home
+        .join("Library/Application Support/com.prakashjoshipax.VoiceInk/default.store");
+    if store.exists() {
+        Some(store.to_string_lossy().to_string())
+    } else {
+        None
+    }
 }
 
 #[tauri::command]

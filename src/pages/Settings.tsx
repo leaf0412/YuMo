@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Collapse, Switch, Slider, Select, Input, Button, Flex, Space, Typography,
-  message, Popconfirm, InputNumber,
+  message, Popconfirm, InputNumber, Alert, Modal,
 } from 'antd';
 import {
   AudioOutlined, FilterOutlined, ThunderboltOutlined, CopyOutlined,
   FontSizeOutlined, DesktopOutlined, KeyOutlined, AppstoreOutlined,
-  HistoryOutlined, SettingOutlined, ClearOutlined,
+  HistoryOutlined, SettingOutlined, ClearOutlined, ImportOutlined,
 } from '@ant-design/icons';
 import { invoke, formatError, logEvent } from '../lib/logger';
 
@@ -116,6 +116,46 @@ export default function Settings() {
         }
       })();
     }
+  };
+
+  const [importing, setImporting] = useState(false);
+  const [legacyPath, setLegacyPath] = useState<string | null>(null);
+
+  // Auto-detect VoiceInk legacy path on mount
+  useEffect(() => {
+    invoke<string | null>('detect_voiceink_legacy_path').then(setLegacyPath).catch(() => {});
+  }, []);
+
+  const handleImportVoiceInk = async () => {
+    if (!legacyPath) return;
+    Modal.confirm({
+      title: '导入 VoiceInk 数据',
+      content: '将从 VoiceInk macOS 版导入转录历史、词典和替换规则。已存在的记录会自动跳过。',
+      okText: '开始导入',
+      cancelText: '取消',
+      onOk: async () => {
+        setImporting(true);
+        try {
+          const result = await invoke<{
+            transcriptions_imported: number;
+            transcriptions_skipped: number;
+            vocabulary_imported: number;
+            replacements_imported: number;
+            recordings_copied: number;
+          }>('import_voiceink_legacy', { storePath: legacyPath });
+          logEvent('Settings', 'import_voiceink', result);
+          message.success(
+            `导入完成：${result.transcriptions_imported} 条转录，` +
+            `${result.vocabulary_imported} 个词汇，` +
+            `${result.recordings_copied} 个录音文件` +
+            (result.transcriptions_skipped > 0 ? `（跳过 ${result.transcriptions_skipped} 条重复）` : '')
+          );
+        } catch (e) {
+          message.error(formatError(e, '导入失败'));
+        }
+        setImporting(false);
+      },
+    });
   };
 
   const handleClearHotkey = async () => {
@@ -262,6 +302,48 @@ export default function Settings() {
           <Popconfirm title="确认清空所有历史记录？" onConfirm={handleClearAllHistory} okText="确认" cancelText="取消">
             <Button danger icon={<ClearOutlined />}>清空所有记录</Button>
           </Popconfirm>
+        </Flex>
+      ),
+    },
+    {
+      key: 'import',
+      label: <Space><ImportOutlined />数据导入</Space>,
+      children: (
+        <Flex vertical gap={8} style={{ width: '100%' }}>
+          {legacyPath ? (
+            <>
+              <Alert
+                type="info"
+                showIcon
+                message="检测到 VoiceInk macOS 版数据"
+                description={
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    路径: {legacyPath}<br />
+                    可导入转录历史、词典、替换规则和录音文件。已存在的记录会自动跳过。
+                  </Text>
+                }
+              />
+              <Button
+                type="primary"
+                icon={<ImportOutlined />}
+                loading={importing}
+                onClick={handleImportVoiceInk}
+              >
+                从 VoiceInk macOS 版导入
+              </Button>
+            </>
+          ) : (
+            <Alert
+              type="warning"
+              showIcon
+              message="未检测到 VoiceInk macOS 版"
+              description={
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  未在默认路径找到数据：~/Library/Application Support/com.prakashjoshipax.VoiceInk/default.store
+                </Text>
+              }
+            />
+          )}
         </Flex>
       ),
     },

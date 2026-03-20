@@ -238,6 +238,9 @@ pub fn run() {
             commands::delete_transcription,
             commands::delete_all_transcriptions,
             commands::get_statistics,
+            // Import
+            commands::import_voiceink_legacy,
+            commands::detect_voiceink_legacy_path,
             // Vocabulary
             commands::get_vocabulary,
             commands::add_vocabulary,
