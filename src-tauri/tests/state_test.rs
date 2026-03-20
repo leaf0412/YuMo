@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use serde_json::Value;
-use voiceink_tauri_lib::state::AppPaths;
+use yumo_lib::state::AppPaths;
 
 #[test]
 fn test_app_paths_defaults() {

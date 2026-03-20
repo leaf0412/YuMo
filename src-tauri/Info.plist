@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>VoiceInk needs microphone access for voice recording and transcription.</string>
+    <string>语墨需要麦克风权限来录音和语音转写。</string>
     <key>NSAccessibilityUsageDescription</key>
-    <string>VoiceInk needs accessibility access to paste transcribed text.</string>
+    <string>语墨需要辅助功能权限来粘贴转写文字。</string>
 </dict>
 </plist>

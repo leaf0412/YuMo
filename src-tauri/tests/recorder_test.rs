@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::recorder;
+use yumo_lib::recorder;
 
 #[test]
 fn test_list_audio_devices() {

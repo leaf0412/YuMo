@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::window_manager::{WindowPosition, WindowLayout};
+use yumo_lib::window_manager::{WindowPosition, WindowLayout};
 
 // ---------------------------------------------------------------------------
 // WindowPosition

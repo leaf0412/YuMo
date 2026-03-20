@@ -1,7 +1,7 @@
 use tempfile::TempDir;
 
-// The lib is named voiceink_tauri_lib in Cargo.toml
-use voiceink_tauri_lib::db;
+// The lib is named yumo_lib in Cargo.toml
+use yumo_lib::db;
 
 #[test]
 fn test_init_creates_all_tables() {

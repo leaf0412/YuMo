@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::keychain;
+use yumo_lib::keychain;
 
 #[test]
 fn test_store_and_retrieve_api_key() {

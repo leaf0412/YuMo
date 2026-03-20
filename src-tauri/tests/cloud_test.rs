@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::cloud;
+use yumo_lib::cloud;
 
 #[test]
 fn test_build_openai_multipart_request() {

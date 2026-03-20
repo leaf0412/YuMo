@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "voiceink-tauri",
+  "productName": "YuMo",
   "version": "0.1.0",
-  "identifier": "com.voiceink.app",
+  "identifier": "com.yumo.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "voiceink-tauri",
+        "title": "语墨 YuMo",
         "width": 1024,
         "height": 768,
         "minWidth": 1024,
@@ -21,7 +21,7 @@
       },
       {
         "label": "recorder",
-        "title": "VoiceInk Recorder",
+        "title": "YuMo Recorder",
         "url": "recorder.html",
         "width": 200,
         "height": 220,

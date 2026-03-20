@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::{db, text_processor, enhancer, pipeline, transcriber, recorder, audio_ctrl};
+use yumo_lib::{db, text_processor, enhancer, pipeline, transcriber, recorder, audio_ctrl};
 use tempfile::TempDir;
 
 #[test]

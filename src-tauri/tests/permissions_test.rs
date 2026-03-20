@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::permissions;
+use yumo_lib::permissions;
 
 #[test]
 fn test_check_permissions_returns_status() {

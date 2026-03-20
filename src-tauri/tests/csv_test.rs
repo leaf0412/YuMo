@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::db;
+use yumo_lib::db;
 use tempfile::TempDir;
 
 #[test]

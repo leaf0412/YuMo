@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::text_processor;
+use yumo_lib::text_processor;
 
 #[test]
 fn test_apply_replacements() {

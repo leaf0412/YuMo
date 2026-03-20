@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::vad;
+use yumo_lib::vad;
 
 #[test]
 fn test_chunk_manager_accumulates_speech() {

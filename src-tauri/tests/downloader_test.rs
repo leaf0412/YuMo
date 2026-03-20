@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::downloader;
+use yumo_lib::downloader;
 
 #[tokio::test]
 async fn test_download_small_file() {

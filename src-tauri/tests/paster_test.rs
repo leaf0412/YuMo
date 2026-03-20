@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use voiceink_tauri_lib::paster;
+use yumo_lib::paster;
 
 // Clipboard is shared mutable state — serialize all tests.
 static CLIPBOARD_LOCK: Mutex<()> = Mutex::new(());

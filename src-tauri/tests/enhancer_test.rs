@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::enhancer;
+use yumo_lib::enhancer;
 
 #[test]
 fn test_build_prompt_with_template() {

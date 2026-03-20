@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::transcriber;
+use yumo_lib::transcriber;
 
 #[test]
 fn test_predefined_models_list() {

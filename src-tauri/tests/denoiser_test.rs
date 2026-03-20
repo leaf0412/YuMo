@@ -1,5 +1,5 @@
-use voiceink_tauri_lib::denoiser;
-use voiceink_tauri_lib::denoiser::Denoiser;
+use yumo_lib::denoiser;
+use yumo_lib::denoiser::Denoiser;
 
 #[test]
 fn test_passthrough_denoiser() {

@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::pipeline;
+use yumo_lib::pipeline;
 
 #[test]
 fn test_pipeline_state_transitions() {

@@ -1,4 +1,4 @@
-use voiceink_tauri_lib::audio_ctrl;
+use yumo_lib::audio_ctrl;
 
 #[test]
 fn test_get_default_output_device() {
