@@ -5376,41 +5376,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "voiceink-tauri"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "cocoa",
- "core-graphics 0.24.0",
- "coreaudio-sys",
- "csv",
- "dirs 5.0.1",
- "futures-util",
- "hound",
- "log",
- "objc",
- "ort",
- "regex",
- "reqwest 0.12.28",
- "rusqlite",
- "security-framework 2.11.1",
- "serde",
- "serde_json",
- "simplelog",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-opener",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "uuid",
- "whisper-rs",
-]
-
-[[package]]
 name = "vswhom"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6491,6 +6456,41 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "synstructure",
+]
+
+[[package]]
+name = "yumo"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "cocoa",
+ "core-graphics 0.24.0",
+ "coreaudio-sys",
+ "csv",
+ "dirs 5.0.1",
+ "futures-util",
+ "hound",
+ "log",
+ "objc",
+ "ort",
+ "regex",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "security-framework 2.11.1",
+ "serde",
+ "serde_json",
+ "simplelog",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-opener",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+ "whisper-rs",
 ]
 
 [[package]]
