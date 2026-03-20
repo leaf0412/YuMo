@@ -993,9 +993,10 @@ pub async fn daemon_load_model(
         let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "checking_python"}));
 
         if !state.daemon.has_python() {
-            let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "installing_deps", "message": "正在安装 Python 依赖，首次需要几分钟..."}));
             // Run bootstrap in a blocking thread so we don't freeze the async runtime
-            tokio::task::spawn_blocking(|| crate::daemon::DaemonManager::ensure_python_static())
+            // bootstrap_venv internally emits "creating_venv" and "installing_deps" stages
+            let app_for_setup = app.clone();
+            tokio::task::spawn_blocking(move || crate::daemon::DaemonManager::ensure_python_static(Some(app_for_setup)))
                 .await
                 .map_err(|e| AppError::Transcription(format!("setup failed: {e}")))?
                 .map_err(|e| {
