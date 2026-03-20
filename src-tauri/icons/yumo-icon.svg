@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0%" stop-color="#16103a"/>
+      <stop offset="60%" stop-color="#251d5e"/>
+      <stop offset="100%" stop-color="#2f2272"/>
+    </linearGradient>
+    <linearGradient id="brushGrad" x1="0" y1="0" x2="1" y2="0.4">
+      <stop offset="0%" stop-color="#c7d2fe"/>
+      <stop offset="45%" stop-color="#e8ecff"/>
+      <stop offset="70%" stop-color="#4a4570"/>
+      <stop offset="85%" stop-color="#1a1632"/>
+      <stop offset="100%" stop-color="#0f0d1a"/>
+    </linearGradient>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="brushShadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#0a0820" flood-opacity="0.4"/>
+    </filter>
+    <clipPath id="circleClip">
+      <circle cx="512" cy="512" r="420"/>
+    </clipPath>
+  </defs>
+
+  <!-- White square background -->
+  <rect width="1024" height="1024" fill="white"/>
+
+  <!-- Circular indigo background -->
+  <circle cx="512" cy="512" r="420" fill="url(#bg)"/>
+
+  <!-- Subtle radial highlight -->
+  <circle cx="480" cy="450" r="320" fill="#3730a3" opacity="0.08" clip-path="url(#circleClip)"/>
+
+  <!-- Content inside circle -->
+  <g clip-path="url(#circleClip)">
+    <g filter="url(#softGlow)">
+      <!-- Sound wave 1 -->
+      <path d="M290 280 Q410 235 512 280 Q614 325 734 280"
+            stroke="white" stroke-width="10" fill="none" stroke-linecap="round" opacity="0.2"/>
+      <!-- Sound wave 2 -->
+      <path d="M265 375 Q405 315 512 375 Q619 435 759 375"
+            stroke="white" stroke-width="18" fill="none" stroke-linecap="round" opacity="0.4"/>
+      <!-- Sound wave 3 -->
+      <path d="M245 475 Q400 405 512 475 Q624 545 779 475"
+            stroke="white" stroke-width="28" fill="none" stroke-linecap="round" opacity="0.65"/>
+    </g>
+  </g>
+
+  <!-- Brush stroke — white inside, transitions to ink black outside -->
+  <g filter="url(#brushShadow)">
+    <path d="
+      M 185 610
+      Q 210 600 270 596
+      C 370 586 460 580 530 586
+      C 620 594 720 610 800 632
+      C 860 648 920 670 950 690
+      Q 960 696 955 704
+      Q 950 712 940 712
+      C 900 710 840 700 800 692
+      C 720 676 620 682 530 672
+      C 460 664 360 664 270 662
+      Q 210 660 188 652
+      Q 178 647 180 638
+      Q 182 624 185 610
+      Z
+    " fill="url(#brushGrad)"/>
+  </g>
+
+  <!-- Ink splatter — dark ink drops on white background -->
+  <circle cx="920" cy="740" r="22" fill="#1a1632" opacity="0.85"/>
+  <circle cx="955" cy="775" r="14" fill="#1a1632" opacity="0.7"/>
+  <circle cx="935" cy="805" r="9" fill="#0f0d1a" opacity="0.55"/>
+  <circle cx="970" cy="815" r="6" fill="#1a1632" opacity="0.45"/>
+  <circle cx="905" cy="785" r="5" fill="#0f0d1a" opacity="0.35"/>
+</svg>
