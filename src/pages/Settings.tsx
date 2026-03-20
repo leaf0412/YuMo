@@ -7,9 +7,12 @@ import {
   AudioOutlined, FilterOutlined, ThunderboltOutlined, CopyOutlined,
   FontSizeOutlined, DesktopOutlined, KeyOutlined, AppstoreOutlined,
   HistoryOutlined, SettingOutlined, ClearOutlined, ImportOutlined,
+  PictureOutlined,
 } from '@ant-design/icons';
 import { emit } from '@tauri-apps/api/event';
 import { invoke, formatError, logEvent } from '../lib/logger';
+import SpriteManager from '../components/SpriteManager';
+import { broadcast } from '../lib/broadcast';
 
 const { Text } = Typography;
 
@@ -36,6 +39,7 @@ interface AppSettings {
   menu_bar_mode?: boolean;
   autostart?: boolean;
   data_path?: string;
+  selected_sprite_id?: string;
 }
 
 export default function Settings() {
@@ -68,6 +72,7 @@ export default function Settings() {
       await invoke('update_setting', { key, value });
       setSettings((prev) => ({ ...prev, [key]: value }));
       logEvent('Settings', 'setting_changed', { key, value });
+      broadcast('settings-changed', key);
     } catch (e) {
       message.error(formatError(e, '设置更新失败'));
     }
@@ -292,6 +297,16 @@ export default function Settings() {
       key: 'tray',
       label: <Space><AppstoreOutlined />系统托盘</Space>,
       children: settingRow('菜单栏模式', <Switch checked={settings.menu_bar_mode} onChange={(v) => updateSetting('menu_bar_mode', v)} />),
+    },
+    {
+      key: 'sprite',
+      label: <Space><PictureOutlined />精灵图</Space>,
+      children: (
+        <SpriteManager
+          selectedSpriteId={settings.selected_sprite_id || ''}
+          onSelectedChange={(v) => updateSetting('selected_sprite_id', v)}
+        />
+      ),
     },
     {
       key: 'history',

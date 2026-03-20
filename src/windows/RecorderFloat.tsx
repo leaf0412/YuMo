@@ -36,20 +36,39 @@ export default function RecorderFloat() {
       const sprites = await invoke<(SpriteManifest & { dirId: string })[]>('list_sprites');
       invoke('frontend_log', { level: 'info', message: `[recorder] sprites found: ${sprites.length}` });
       if (sprites.length === 0) return;
-      const first = sprites[0];
-      setSpriteManifest(first);
+
+      // Use selected sprite from settings, fallback to first
+      let settings: { selected_sprite_id?: string } = {};
       try {
-        const uri = await invoke<string>('get_sprite_image', { dirId: first.dirId, fileName: 'sprite_processed.png' });
+        settings = await invoke<{ selected_sprite_id?: string }>('get_settings');
+      } catch { /* use default */ }
+
+      const selectedId = settings.selected_sprite_id;
+      const target = (selectedId && sprites.find(s => s.dirId === selectedId)) || sprites[0];
+
+      setSpriteManifest(target);
+      try {
+        const uri = await invoke<string>('get_sprite_image', { dirId: target.dirId, fileName: 'sprite_processed.png' });
         invoke('frontend_log', { level: 'info', message: `[recorder] sprite image loaded, len=${uri.length}` });
         setSpriteImageSrc(uri);
       } catch {
-        const uri = await invoke<string>('get_sprite_image', { dirId: first.dirId, fileName: first.spriteFile });
+        const uri = await invoke<string>('get_sprite_image', { dirId: target.dirId, fileName: target.spriteFile });
         setSpriteImageSrc(uri);
       }
     } catch (e) { invoke('frontend_log', { level: 'error', message: `[recorder] loadSprite failed: ${e}` }); }
   }, []);
 
   useEffect(() => { loadSprite(); }, [loadSprite]);
+
+  // Reload sprite when settings change
+  useEffect(() => {
+    const cleanup = onBroadcast('settings-changed', (key) => {
+      if (key === 'selected_sprite_id') {
+        loadSprite();
+      }
+    });
+    return cleanup;
+  }, [loadSprite]);
 
   // Listen for ESC events to show hint in recorder window
   useEffect(() => {
