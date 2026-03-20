@@ -64,18 +64,26 @@ pub async fn start_recording(
         audio_ctrl::set_system_muted(true);
     }
 
-    // 3. Resolve device and start recording immediately (skip full enumeration)
-    let dev_id = if let Some(id) = device_id {
-        id
-    } else {
-        settings.get("audio_device")
+    // 3. Enumerate devices and resolve target device
+    let devices = recorder::list_input_devices();
+    info!("[pipeline] found {} input devices", devices.len());
+    if devices.is_empty() {
+        error!("[pipeline] no input devices found");
+        return Err(AppError::Recording("No input devices found".into()));
+    }
+    let dev_id = device_id.unwrap_or_else(|| {
+        // Prefer saved device if still available
+        let saved = settings.get("audio_device")
             .and_then(|v| v.as_u64())
-            .map(|v| v as u32)
-            .unwrap_or_else(|| {
-                let devices = recorder::list_input_devices();
-                devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(0)
-            })
-    };
+            .map(|v| v as u32);
+        if let Some(id) = saved {
+            if devices.iter().any(|d| d.id == id) {
+                return id;
+            }
+            info!("[pipeline] saved device_id={} not found, using default", id);
+        }
+        devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(devices[0].id)
+    });
     info!("[pipeline] using device_id={}", dev_id);
 
     info!("[pipeline] calling recorder::start_recording...");
