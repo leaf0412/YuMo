@@ -32,3 +32,30 @@ pub fn unregister_all(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>>
     info!("[hotkey] all shortcuts unregistered");
     Ok(())
 }
+
+/// Register the Escape key as a global shortcut for cancelling recording.
+pub fn register_escape(
+    app: &AppHandle,
+    callback: impl Fn() + Send + Sync + 'static,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("[hotkey] registering Escape shortcut");
+    app.global_shortcut().on_shortcut("Escape", move |_app, _shortcut, event| {
+        if event.state == ShortcutState::Pressed {
+            callback();
+        }
+    }).map_err(|e| {
+        error!("[hotkey] failed to register Escape: {}", e);
+        e
+    })?;
+    Ok(())
+}
+
+/// Unregister only the Escape shortcut.
+pub fn unregister_escape(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    info!("[hotkey] unregistering Escape shortcut");
+    app.global_shortcut().unregister("Escape").map_err(|e| {
+        error!("[hotkey] failed to unregister Escape: {}", e);
+        e
+    })?;
+    Ok(())
+}

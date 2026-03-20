@@ -118,7 +118,17 @@ pub async fn start_recording(
     );
     info!("[pipeline] emitted recording-state=recording");
 
-    // 7. Show floating recorder window
+    // 7. Register Escape as global shortcut for cancel during recording
+    {
+        let app_esc = app.clone();
+        let _ = hotkey::register_escape(&app, move || {
+            use tauri::Emitter;
+            info!("[hotkey] Escape pressed during recording");
+            let _ = app_esc.emit("escape-pressed", ());
+        });
+    }
+
+    // 8. Show floating recorder window
     crate::window_manager::WindowManager::new(app.clone()).show("recorder");
 
     Ok(())
@@ -480,6 +490,9 @@ pub async fn stop_recording(
     );
     info!("[pipeline] stop_recording complete, state -> Idle");
 
+    // Unregister Escape shortcut
+    let _ = hotkey::unregister_escape(&app);
+
     // Hide floating recorder window
     crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
 
@@ -522,6 +535,9 @@ pub fn cancel_recording(
             }
         }
     }
+
+    // Unregister Escape shortcut
+    let _ = hotkey::unregister_escape(&app);
 
     let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
     crate::window_manager::WindowManager::new(app.clone()).hide("recorder");

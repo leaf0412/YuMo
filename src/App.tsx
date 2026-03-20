@@ -150,17 +150,34 @@ export default function App() {
       broadcast('pipeline-state', state);
     });
 
-    // Double ESC to cancel recording
+    // Global ESC double-press to cancel recording (works even without window focus)
     let lastEsc = 0;
+    const unlistenEscape = listen('escape-pressed', () => {
+      if (pipelineRef.current === 'idle') return;
+      const now = Date.now();
+      if (now - lastEsc < 500) {
+        logEvent('App', 'hotkey_cancel', { current_state: pipelineRef.current });
+        invoke('cancel_recording').catch(() => {});
+        import('antd').then(({ message }) => message.info('录音已取消'));
+        lastEsc = 0;
+      } else {
+        lastEsc = now;
+        import('antd').then(({ message }) => message.info('再按一次 ESC 取消录音'));
+      }
+    });
+
+    // Fallback: in-window ESC for when global shortcut isn't registered
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && pipelineRef.current !== 'idle') {
         const now = Date.now();
         if (now - lastEsc < 500) {
           logEvent('App', 'hotkey_cancel', { current_state: pipelineRef.current });
           invoke('cancel_recording').catch(() => {});
+          import('antd').then(({ message }) => message.info('录音已取消'));
           lastEsc = 0;
         } else {
           lastEsc = now;
+          import('antd').then(({ message }) => message.info('再按一次 ESC 取消录音'));
         }
       }
     };
@@ -169,6 +186,7 @@ export default function App() {
     return () => {
       unlistenToggle.then((fn) => fn());
       unlistenState.then((fn) => fn());
+      unlistenEscape.then((fn) => fn());
       window.removeEventListener('keydown', onKeyDown);
     };
   }, []);
