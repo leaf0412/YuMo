@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { Card, Flex, Typography, Row, Col, Segmented, Spin, Empty } from 'antd';
+import { Card, Flex, Typography, Row, Col, Segmented, Spin, Empty, Tooltip } from 'antd';
+import { InfoCircleOutlined } from '@ant-design/icons';
 import {
   AudioOutlined,
   EditOutlined,
@@ -13,7 +14,7 @@ import {
   Area,
   XAxis,
   YAxis,
-  Tooltip,
+  Tooltip as RechartsTooltip,
 } from 'recharts';
 import { invoke } from '../lib/logger';
 
@@ -84,12 +85,16 @@ export default function Dashboard() {
 
   useEffect(() => { loadStats(); }, [loadStats]);
 
-  // Auto-refresh stats when a recording completes
+  // Auto-refresh stats when a recording completes or data changes
   useEffect(() => {
-    const unlisten = listen<{ state: string }>('recording-state', (event) => {
+    const unlistenRecording = listen<{ state: string }>('recording-state', (event) => {
       if (event.payload.state === 'idle') loadStats();
     });
-    return () => { unlisten.then((fn) => fn()); };
+    const unlistenStats = listen('stats-updated', () => loadStats());
+    return () => {
+      unlistenRecording.then((fn) => fn());
+      unlistenStats.then((fn) => fn());
+    };
   }, [loadStats]);
 
   if (loading && !stats) {
@@ -117,7 +122,10 @@ export default function Dashboard() {
         textAlign: 'center',
       }}>
         <Title level={4} style={{ color: '#fff', margin: 0 }}>
-          你已节省 <span style={{ fontWeight: 800 }}>{formatTimeSaved(time_saved_minutes)}</span> 使用 VoiceInk
+          你已节省 <span style={{ fontWeight: 800 }}>{formatTimeSaved(time_saved_minutes)}</span> 使用 VoiceInk{' '}
+          <Tooltip title="节省时间 = 手动打字时间 − 录音时长。手动打字速度按中文 100 字/分钟、英文 40 词/分钟估算">
+            <InfoCircleOutlined style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', cursor: 'help' }} />
+          </Tooltip>
         </Title>
         <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 14 }}>
           共转录 {formatNumber(total_words)} 个字，完成 {formatNumber(total_sessions)} 次录音。
@@ -131,6 +139,9 @@ export default function Dashboard() {
             <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
               <AudioOutlined style={{ fontSize: 16, color: '#f5222d' }} />
               <Text type="secondary">录音次数</Text>
+              <Tooltip title="统计录音时长超过 1 秒的有效录音次数">
+                <InfoCircleOutlined style={{ fontSize: 12, color: 'rgba(128,128,128,0.45)', cursor: 'help' }} />
+              </Tooltip>
             </Flex>
             <Title level={2} style={{ margin: 0 }}>{formatNumber(total_sessions)}</Title>
             <Text type="secondary" style={{ fontSize: 12 }}>VoiceInk 录音完成</Text>
@@ -141,6 +152,9 @@ export default function Dashboard() {
             <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
               <EditOutlined style={{ fontSize: 16, color: '#1890ff' }} />
               <Text type="secondary">转录字数</Text>
+              <Tooltip title="中日韩字符每个计 1 字，英文等按空格分词计数">
+                <InfoCircleOutlined style={{ fontSize: 12, color: 'rgba(128,128,128,0.45)', cursor: 'help' }} />
+              </Tooltip>
             </Flex>
             <Title level={2} style={{ margin: 0 }}>{formatNumber(total_words)}</Title>
             <Text type="secondary" style={{ fontSize: 12 }}>已生成字数</Text>
@@ -151,6 +165,9 @@ export default function Dashboard() {
             <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
               <DashboardOutlined style={{ fontSize: 16, color: '#52c41a' }} />
               <Text type="secondary">每分钟字数</Text>
+              <Tooltip title="总字数 ÷ 总录音时长（分钟），衡量语音输入效率">
+                <InfoCircleOutlined style={{ fontSize: 12, color: 'rgba(128,128,128,0.45)', cursor: 'help' }} />
+              </Tooltip>
             </Flex>
             <Title level={2} style={{ margin: 0 }}>
               {avg_wpm > 0 ? avg_wpm.toFixed(1) : 'N/A'}
@@ -163,6 +180,9 @@ export default function Dashboard() {
             <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
               <FieldTimeOutlined style={{ fontSize: 16, color: '#fa8c16' }} />
               <Text type="secondary">节省按键</Text>
+              <Tooltip title="中日韩字符按拼音输入估算每字 6 次按键，英文单词按平均每词 5 次按键计算">
+                <InfoCircleOutlined style={{ fontSize: 12, color: 'rgba(128,128,128,0.45)', cursor: 'help' }} />
+              </Tooltip>
             </Flex>
             <Title level={2} style={{ margin: 0 }}>{formatNumber(total_keystrokes_saved)}</Title>
             <Text type="secondary" style={{ fontSize: 12 }}>减少的按键次数</Text>
@@ -214,7 +234,7 @@ export default function Dashboard() {
                 tickLine={false}
                 width={40}
               />
-              <Tooltip
+              <RechartsTooltip
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 formatter={(value: any) => [`${Number(value).toFixed(1)} WPM`, '每分钟字数'] as any}
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any

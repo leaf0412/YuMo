@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Input, Button, Flex, Space, Tag, Typography, Popconfirm, message, Card } from 'antd';
 import { CopyOutlined, DeleteOutlined, ClearOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
+import { emit } from '@tauri-apps/api/event';
 import { invoke, formatError, logEvent } from '../lib/logger';
 const { Text, Paragraph } = Typography;
 
@@ -102,6 +103,7 @@ export default function History() {
       await invoke('delete_transcription', { id });
       logEvent('History', 'delete');
       setTranscriptions((prev) => prev.filter((t) => t.id !== id));
+      emit('stats-updated');
       message.success('已删除');
     } catch (e) {
       message.error(formatError(e, '删除失败'));
@@ -113,6 +115,7 @@ export default function History() {
     try {
       await invoke('delete_all_transcriptions');
       setTranscriptions([]);
+      emit('stats-updated');
       message.success('已清空');
     } catch (e) {
       message.error(formatError(e, '清空失败'));
@@ -128,7 +131,28 @@ export default function History() {
     });
   };
 
-  const wordCount = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+  const wordCount = (text: string) => {
+    let count = 0;
+    let inWord = false;
+    for (const c of text) {
+      const code = c.codePointAt(0) ?? 0;
+      const isCjk =
+        (code >= 0x4e00 && code <= 0x9fff) ||
+        (code >= 0x3400 && code <= 0x4dbf) ||
+        (code >= 0xf900 && code <= 0xfaff) ||
+        (code >= 0x2f800 && code <= 0x2fa1f);
+      if (isCjk) {
+        count++;
+        inWord = false;
+      } else if (/\s/.test(c)) {
+        inWord = false;
+      } else if (!inWord) {
+        count++;
+        inWord = true;
+      }
+    }
+    return count;
+  };
 
   return (
     <Flex vertical gap="middle" style={{ width: '100%' }}>
