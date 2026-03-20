@@ -1006,21 +1006,44 @@ pub async fn daemon_load_model(
     let repo_clone = model_repo.clone();
     let final_resp = tokio::task::spawn_blocking(move || {
         let mut last_resp = None;
+        let mut last_logged_pct: i64 = -1;
+        let load_start = std::time::Instant::now();
+        log::info!("[daemon] [load_model] begin repo={}", repo_clone);
+
         while let Ok(resp) = rx.recv() {
             if resp.status == "downloading" {
                 let progress = resp.progress.as_ref()
                     .and_then(|p| p.as_f64())
                     .unwrap_or(0.0);
+                let pct = (progress * 100.0) as i64;
+                if pct >= last_logged_pct + 10 {
+                    log::info!("[daemon] [load_model] downloading progress={}%", pct);
+                    last_logged_pct = pct;
+                }
                 let _ = app.emit("model-download-progress", serde_json::json!({
                     "model_repo": repo_clone,
                     "progress": progress,
                 }));
+            } else if resp.status == "download_complete" {
+                log::info!("[daemon] [load_model] download_complete");
             }
             let is_terminal = resp.status != "downloading"
                 && resp.status != "download_complete";
             last_resp = Some(resp);
             if is_terminal { break; }
         }
+
+        if let Some(ref resp) = last_resp {
+            let elapsed = load_start.elapsed().as_millis();
+            let cached = resp.cached.unwrap_or(false);
+            if resp.status == "success" || resp.status == "loaded" {
+                log::info!("[daemon] [load_model] loaded cached={} elapsed_ms={}", cached, elapsed);
+            } else {
+                log::error!("[daemon] [load_model] FAILED status={} error={:?} elapsed_ms={}",
+                    resp.status, resp.error, elapsed);
+            }
+        }
+
         last_resp.ok_or_else(|| AppError::Transcription("no response from daemon".into()))
     })
     .await
