@@ -66,12 +66,23 @@ pub fn run() {
 
     std::fs::create_dir_all(&paths.models_dir).expect("Cannot create models dir");
 
-    // Sync daemon script
+    // Sync daemon script + uv binary from app resources
     let daemon_script = paths.data_dir.join("mlx_funasr_daemon.py");
-    let dev_script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("resources/mlx_funasr_daemon.py");
+    let res_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
+    let dev_script = res_dir.join("mlx_funasr_daemon.py");
     if dev_script.exists() {
         let _ = std::fs::copy(&dev_script, &daemon_script);
+    }
+    let uv_src = res_dir.join("uv");
+    let uv_dest = paths.data_dir.join("uv");
+    if uv_src.exists() && (!uv_dest.exists() || std::fs::metadata(&uv_src).map(|m| m.len()).unwrap_or(0) != std::fs::metadata(&uv_dest).map(|m| m.len()).unwrap_or(0)) {
+        let _ = std::fs::copy(&uv_src, &uv_dest);
+        // Ensure executable permission
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&uv_dest, std::fs::Permissions::from_mode(0o755));
+        }
     }
     let daemon = daemon::DaemonManager::new(daemon_script, paths.data_dir.clone());
 

@@ -163,6 +163,10 @@ pub struct DaemonManager {
     process: Arc<Mutex<Option<DaemonProcess>>>,
     script_path: PathBuf,
     data_dir: PathBuf,
+    /// Lock-free status: true when daemon process is alive.
+    running: Arc<std::sync::atomic::AtomicBool>,
+    /// Currently loaded model repo, separate from process lock.
+    model_repo: Arc<Mutex<Option<String>>>,
 }
 
 impl DaemonManager {
@@ -171,7 +175,24 @@ impl DaemonManager {
             process: Arc::new(Mutex::new(None)),
             script_path,
             data_dir,
+            running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            model_repo: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Check if a python with mlx_audio is available (venv or system).
+    pub fn has_python(&self) -> bool {
+        has_working_python()
+    }
+
+    /// Bootstrap venv if needed (blocking — call from spawn_blocking).
+    pub fn ensure_python_static() -> AppResult<()> {
+        if has_working_python() {
+            return Ok(());
+        }
+        log::info!("[daemon] ensure_python: bootstrapping venv");
+        bootstrap_venv()?;
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -246,6 +267,7 @@ impl DaemonManager {
             reader,
             model_repo: None,
         });
+        self.running.store(true, std::sync::atomic::Ordering::SeqCst);
 
         Ok(())
     }
@@ -260,6 +282,8 @@ impl DaemonManager {
         };
 
         if let Some(mut proc) = guard.take() {
+            self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+            if let Ok(mut m) = self.model_repo.lock() { *m = None; }
             // Send quit without reading response (avoids blocking on read_line)
             let _ = proc.stdin.write_all(b"{\"action\":\"quit\"}\n");
             let _ = proc.stdin.flush();
@@ -353,7 +377,10 @@ impl DaemonManager {
                         Err(_) => break,
                     }
                 };
-                let is_terminal = resp.status != "downloading";
+                // "downloading" and "download_complete" are intermediate;
+                // only "loaded", "success", "error" etc. are truly terminal.
+                let is_terminal = resp.status != "downloading"
+                    && resp.status != "download_complete";
                 if tx.send(resp).is_err() {
                     break;
                 }
@@ -423,24 +450,16 @@ impl DaemonManager {
     // -----------------------------------------------------------------------
 
     pub fn is_running(&self) -> bool {
-        self.process
-            .lock()
-            .map(|g| g.is_some())
-            .unwrap_or(false)
+        self.running.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub fn loaded_model(&self) -> Option<String> {
-        self.process
-            .lock()
-            .ok()
-            .and_then(|g| g.as_ref().and_then(|p| p.model_repo.clone()))
+        self.model_repo.lock().ok().and_then(|g| g.clone())
     }
 
     pub fn set_loaded_model(&self, model: Option<String>) {
-        if let Ok(mut guard) = self.process.lock() {
-            if let Some(proc) = guard.as_mut() {
-                proc.model_repo = model;
-            }
+        if let Ok(mut guard) = self.model_repo.lock() {
+            *guard = model;
         }
     }
 }
@@ -454,6 +473,20 @@ impl Drop for DaemonManager {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Quick check: is there any python (venv or system) that has mlx_audio?
+fn has_working_python() -> bool {
+    let venv = venv_python_path();
+    if std::path::Path::new(&venv).exists() && python_has_mlx(&venv) {
+        return true;
+    }
+    for candidate in python_candidates() {
+        if std::path::Path::new(&candidate).exists() && python_has_mlx(&candidate) {
+            return true;
+        }
+    }
+    false
+}
 
 /// Block on the reader until `{"status":"ready"}` arrives.
 fn wait_for_ready(reader: &mut BufReader<ChildStdout>) -> AppResult<()> {
@@ -609,48 +642,70 @@ fn find_any_python() -> Option<String> {
     None
 }
 
-/// Create a venv at ~/.voiceink/venv and install mlx-audio-plus.
+/// Find the bundled `uv` binary (shipped in app resources).
+fn find_uv() -> Option<PathBuf> {
+    // In release: next to the daemon script in data_dir
+    let data_uv = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".voiceink/uv");
+    if data_uv.exists() {
+        return Some(data_uv);
+    }
+    // System uv as fallback
+    if let Ok(output) = Command::new("which").arg("uv").output() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() && std::path::Path::new(&path).exists() {
+            return Some(PathBuf::from(path));
+        }
+    }
+    None
+}
+
+/// Create a venv at ~/.voiceink/venv and install mlx-audio-plus using `uv`.
+/// `uv` is bundled with the app — it auto-downloads Python if needed and
+/// installs packages 10-100x faster than pip.
 /// Returns the venv python path on success.
 fn bootstrap_venv() -> AppResult<String> {
-    let base_python = find_any_python()
-        .ok_or_else(|| AppError::NotFound("python3 not found for venv creation".into()))?;
+    let uv = find_uv().ok_or_else(|| {
+        AppError::NotFound("uv binary not found; app resources may be corrupted".into())
+    })?;
+    log::info!("[daemon] using uv: {:?}", uv);
 
     let venv_dir = dirs::home_dir()
         .unwrap_or_default()
         .join(".voiceink/venv");
     let venv_dir_str = venv_dir.to_string_lossy().to_string();
 
-    log::info!("[daemon] creating venv at {} with {}", venv_dir_str, base_python);
-
-    // Create venv
-    let status = Command::new(&base_python)
-        .args(["-m", "venv", &venv_dir_str])
-        .stdout(Stdio::null())
+    // Create venv (uv auto-downloads Python if not available)
+    log::info!("[daemon] creating venv at {} via uv", venv_dir_str);
+    let status = Command::new(&uv)
+        .args(["venv", &venv_dir_str, "--python", "3.12"])
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .status()
-        .map_err(|e| AppError::Transcription(format!("venv creation failed: {e}")))?;
+        .map_err(|e| AppError::Transcription(format!("uv venv failed: {e}")))?;
 
     if !status.success() {
-        return Err(AppError::Transcription("python -m venv failed".into()));
+        return Err(AppError::Transcription("uv venv creation failed".into()));
     }
 
-    let venv_python = venv_python_path();
-    log::info!("[daemon] installing mlx-audio-plus in venv...");
-
-    // Install dependencies
-    let output = Command::new(&venv_python)
-        .args(["-m", "pip", "install", "--upgrade", "pip", "mlx-audio-plus", "soundfile"])
+    // Install dependencies via uv (much faster than pip)
+    log::info!("[daemon] installing dependencies via uv...");
+    let output = Command::new(&uv)
+        .args(["pip", "install", "--python", &format!("{}/bin/python3", venv_dir_str),
+               "mlx-audio-plus", "soundfile"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .map_err(|e| AppError::Transcription(format!("pip install failed: {e}")))?;
+        .map_err(|e| AppError::Transcription(format!("uv pip install failed: {e}")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        log::error!("[daemon] pip install failed: {}", stderr);
-        return Err(AppError::Transcription(format!("pip install failed: {}", stderr)));
+        log::error!("[daemon] uv pip install failed: {}", stderr);
+        return Err(AppError::Transcription(format!("dependency install failed: {}", stderr)));
     }
 
-    log::info!("[daemon] venv bootstrap complete");
+    let venv_python = venv_python_path();
+    log::info!("[daemon] venv bootstrap complete via uv");
     Ok(venv_python)
 }

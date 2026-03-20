@@ -604,10 +604,49 @@ pub async fn download_model(
 
 #[tauri::command]
 pub fn delete_model(state: State<AppState>, model_id: String) -> Result<(), AppError> {
-    let path = transcriber::model_path(&state.paths.models_dir, &model_id);
-    if path.exists() {
-        std::fs::remove_file(&path)?;
+    info!("[cmd] delete_model id={}", model_id);
+    let all = transcriber::all_models(&state.paths.models_dir);
+    let model_info = all.iter().find(|m| m.id == model_id);
+
+    if let Some(model) = model_info {
+        match model.provider {
+            transcriber::ModelProvider::MlxWhisper | transcriber::ModelProvider::MlxFunASR => {
+                // Delete HuggingFace cache directory for MLX models
+                if let Some(repo) = &model.model_repo {
+                    let cache_name = repo.replace('/', "--");
+                    let cache_dir = state.paths.models_dir.join(format!("models--{}", cache_name));
+                    if cache_dir.exists() {
+                        info!("[cmd] deleting MLX cache: {:?}", cache_dir);
+                        std::fs::remove_dir_all(&cache_dir)?;
+                    }
+                }
+                // If this model is currently loaded, unload it
+                if state.daemon.loaded_model().as_deref() == model.model_repo.as_deref() {
+                    let cmd = serde_json::json!({"action": "unload"});
+                    let _ = state.daemon.send_command(&cmd);
+                    state.daemon.set_loaded_model(None);
+                }
+            }
+            _ => {
+                // Delete local whisper .bin file
+                let path = transcriber::model_path(&state.paths.models_dir, &model_id);
+                if path.exists() {
+                    info!("[cmd] deleting model file: {:?}", path);
+                    std::fs::remove_file(&path)?;
+                }
+            }
+        }
     }
+
+    // Clear selected_model_id if this was the selected model
+    {
+        let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
+        let selected = db::get_setting(&conn, "selected_model_id")?;
+        if selected.as_ref().and_then(|v| v.as_str()) == Some(&model_id) {
+            db::update_setting(&conn, "selected_model_id", &serde_json::json!(""))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -920,7 +959,24 @@ pub async fn daemon_load_model(
     model_repo: String,
 ) -> Result<(), AppError> {
     if !state.daemon.is_running() {
+        // Emit setup stages so frontend can show progress
+        let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "checking_python"}));
+
+        if !state.daemon.has_python() {
+            let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "installing_deps", "message": "正在安装 Python 依赖，首次需要几分钟..."}));
+            // Run bootstrap in a blocking thread so we don't freeze the async runtime
+            tokio::task::spawn_blocking(|| crate::daemon::DaemonManager::ensure_python_static())
+                .await
+                .map_err(|e| AppError::Transcription(format!("setup failed: {e}")))?
+                .map_err(|e| {
+                    log::error!("[cmd] python setup failed: {}", e);
+                    e
+                })?;
+        }
+
+        let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "starting_daemon"}));
         state.daemon.start()?;
+        let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "ready"}));
     }
     let cmd = serde_json::json!({"action": "load", "model": model_repo});
     let timeout = std::time::Duration::from_secs(600);
@@ -940,7 +996,8 @@ pub async fn daemon_load_model(
                     "progress": progress,
                 }));
             }
-            let is_terminal = resp.status != "downloading";
+            let is_terminal = resp.status != "downloading"
+                && resp.status != "download_complete";
             last_resp = Some(resp);
             if is_terminal { break; }
         }
@@ -949,7 +1006,7 @@ pub async fn daemon_load_model(
     .await
     .map_err(|e| AppError::Transcription(format!("spawn_blocking: {e}")))??;
 
-    if final_resp.status == "success" || final_resp.status == "loaded" || final_resp.status == "download_complete" {
+    if final_resp.status == "success" || final_resp.status == "loaded" {
         state.daemon.set_loaded_model(Some(model_repo));
         Ok(())
     } else {
