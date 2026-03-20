@@ -39,13 +39,18 @@ impl ChunkManager {
     }
 
     pub fn feed_samples(&mut self, samples: &[f32], is_speech: bool) {
-        info!("[vad] feed_samples count={} is_speech={}", samples.len(), is_speech);
         if is_speech {
+            if !self.in_speech {
+                info!("[vad] [speech_start]");
+            }
             self.in_speech = true;
             self.silence_start_ms = None;
             self.current_speech.extend_from_slice(samples);
         } else if self.in_speech {
-            // Transition from speech to silence
+            // Log speech_end only on the first silence frame (transition)
+            if self.silence_start_ms.is_none() && self.silence_timeout_ms.is_none() {
+                info!("[vad] [speech_end] pending_samples={}", self.current_speech.len());
+            }
             if self.silence_timeout_ms.is_none() {
                 // No timeout -- immediate split
                 self.flush_current_chunk();
@@ -60,8 +65,10 @@ impl ChunkManager {
         is_speech: bool,
         elapsed_ms: u64,
     ) {
-        info!("[vad] feed_samples_with_timestamp count={} is_speech={} elapsed_ms={}", samples.len(), is_speech, elapsed_ms);
         if is_speech {
+            if !self.in_speech {
+                info!("[vad] [speech_start]");
+            }
             self.in_speech = true;
             self.silence_start_ms = None;
             self.current_speech.extend_from_slice(samples);
@@ -71,6 +78,7 @@ impl ChunkManager {
             }
             if let Some(timeout) = self.silence_timeout_ms {
                 if elapsed_ms >= timeout {
+                    info!("[vad] [silence_timeout] elapsed_ms={} timeout_ms={}", elapsed_ms, timeout);
                     self.flush_current_chunk();
                 }
             }
@@ -78,6 +86,7 @@ impl ChunkManager {
     }
 
     fn flush_current_chunk(&mut self) {
+        let chunk_len = self.current_speech.len();
         if !self.current_speech.is_empty() {
             self.ready_chunks.push(AudioChunk {
                 samples: std::mem::take(&mut self.current_speech),
@@ -85,6 +94,7 @@ impl ChunkManager {
         }
         self.in_speech = false;
         self.silence_start_ms = None;
+        info!("[vad] [flush] samples={} ready_chunks={}", chunk_len, self.ready_chunks.len());
     }
 
     pub fn pending_chunks(&self) -> usize {
@@ -104,10 +114,12 @@ impl ChunkManager {
         if !self.current_speech.is_empty() {
             self.flush_current_chunk();
         }
+        let chunks_count = self.ready_chunks.len();
         let mut merged = Vec::new();
         for chunk in self.ready_chunks.drain(..) {
             merged.extend(chunk.samples);
         }
+        info!("[vad] [merge] total_samples={} chunks={}", merged.len(), chunks_count);
         merged
     }
 }
