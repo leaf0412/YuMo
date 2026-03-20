@@ -31,6 +31,7 @@ pub fn run() {
     std::fs::create_dir_all(&defaults.data_dir).expect("Cannot create data dir");
 
     // Init file logger
+    let startup_start = std::time::Instant::now();
     let log_path = defaults.data_dir.join("log.txt");
     let log_file = std::fs::File::create(&log_path).expect("Cannot create log file");
     simplelog::CombinedLogger::init(vec![
@@ -47,11 +48,12 @@ pub fn run() {
         ),
     ])
     .expect("Cannot init logger");
-    info!("VoiceInk starting, log file: {}", log_path.display());
+    info!("[app] [startup] version={} os={} arch={} log={}", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH, log_path.display());
 
     // Init DB
     let db_path = defaults.data_dir.join("data.db");
     let conn = db::init_database(&db_path).expect("Cannot init database");
+    info!("[db] [init] path={} elapsed_ms={}", db_path.display(), startup_start.elapsed().as_millis());
 
     // Read settings to build paths (overrides from DB)
     let saved_settings = db::get_all_settings(&conn).unwrap_or_default();
@@ -85,6 +87,7 @@ pub fn run() {
         }
     }
     let daemon = daemon::DaemonManager::new(daemon_script, paths.data_dir.clone());
+    info!("[app] [startup_complete] elapsed_ms={}", startup_start.elapsed().as_millis());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
