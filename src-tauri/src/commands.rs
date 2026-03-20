@@ -1515,3 +1515,12 @@ mod tests {
         assert_eq!(base64_encode(&[0x00, 0xFF, 0x80]), "AP+A");
     }
 }
+
+// ---------------------------------------------------------------------------
+// System locale
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn get_system_locale() -> String {
+    sys_locale::get_locale().unwrap_or_else(|| "en-US".to_string())
+}

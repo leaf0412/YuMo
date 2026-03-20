@@ -283,6 +283,8 @@ pub fn run() {
             commands::import_sprite_zip,
             commands::delete_sprite,
             commands::process_sprite_background,
+            // System locale
+            commands::get_system_locale,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
