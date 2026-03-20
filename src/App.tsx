@@ -24,7 +24,7 @@ const { Sider, Content } = Layout;
 const { Title } = Typography;
 
 const menuItems = [
-  { key: '/', icon: <DashboardOutlined />, label: '仪表盘' },
+  { key: '/', icon: <DashboardOutlined />, label: '统计' },
   { key: '/history', icon: <HistoryOutlined />, label: '转录历史' },
   { key: '/models', icon: <CloudDownloadOutlined />, label: '模型管理' },
   { key: '/dictionary', icon: <BookOutlined />, label: '词典' },

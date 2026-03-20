@@ -1,303 +1,244 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { Card, Alert, Button, Flex, Modal, Space, Tag, Typography, Row, Col, message } from 'antd';
+import { useEffect, useState, useCallback } from 'react';
+import { Card, Flex, Typography, Row, Col, Segmented, Spin, Empty } from 'antd';
 import {
   AudioOutlined,
-  CheckCircleOutlined,
-  SoundOutlined,
-  SettingOutlined,
-  ReloadOutlined,
+  EditOutlined,
+  DashboardOutlined,
+  FieldTimeOutlined,
 } from '@ant-design/icons';
-import { listen } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-import { invoke, formatError, logEvent } from '../lib/logger';
-import SpriteAnimation, { type SpriteManifest } from '../components/SpriteAnimation';
-import useAppStore from '../stores/useAppStore';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+} from 'recharts';
+import { invoke } from '../lib/logger';
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 
-interface Permissions {
-  microphone: boolean;
-  accessibility: boolean;
+interface DailyWpm {
+  date: string;
+  wpm: number;
+  session_count: number;
 }
 
-interface Transcription {
-  id: string;
-  text: string;
-  timestamp: string;
-  model_name: string;
+interface WpmStats {
+  avg: number;
+  max: number;
+  min: number;
+}
+
+interface Statistics {
+  total_sessions: number;
+  total_words: number;
+  total_duration_seconds: number;
+  total_keystrokes_saved: number;
+  time_saved_minutes: number;
+  avg_wpm: number;
+  daily_wpm: DailyWpm[];
+  wpm_stats: WpmStats;
+}
+
+const TIME_RANGES = [
+  { label: '7 天', value: 7 },
+  { label: '30 天', value: 30 },
+  { label: '90 天', value: 90 },
+  { label: '全部', value: 0 },
+];
+
+function formatTimeSaved(minutes: number): string {
+  if (minutes < 1) return '不到 1 分钟';
+  if (minutes < 60) return `${Math.round(minutes)} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  return mins > 0 ? `${hours} 小时 ${mins} 分钟` : `${hours} 小时`;
+}
+
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function formatNumber(n: number): string {
+  return n.toLocaleString();
 }
 
 export default function Dashboard() {
-  const [permissions, setPermissions] = useState<Permissions>({ microphone: false, accessibility: false });
-  const [transcriptions, setTranscriptions] = useState<Transcription[]>([]);
-  const [recording, setRecording] = useState(false);
-  const [pipelineState, setPipelineState] = useState<string>('idle');
+  const [stats, setStats] = useState<Statistics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState<number>(30);
 
-  // Sprite animation state
-  const [spriteManifest, setSpriteManifest] = useState<SpriteManifest | null>(null);
-  const [spriteImageSrc, setSpriteImageSrc] = useState<string | null>(null);
-
-  // Permission polling state: active after user clicks "go to settings"
-  const permPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [refreshingPerm, setRefreshingPerm] = useState(false);
-
-  // Global store
-  const { models, settings, daemonStatus, fetchSettings, fetchModels, fetchDaemonStatus, setActiveKey } = useAppStore();
-  const selectedModelId = typeof settings.selected_model_id === 'string' ? settings.selected_model_id : null;
-  const selectedModel = selectedModelId ? models.find((m) => m.id === selectedModelId) : null;
-
-  const loadPermissions = useCallback(async () => {
+  const loadStats = useCallback(async () => {
+    setLoading(true);
     try {
-      const perms = await invoke<Permissions>('check_permissions');
-      setPermissions(perms);
-      logEvent('Dashboard', 'permissions_loaded', { microphone: perms.microphone, accessibility: perms.accessibility });
-      return perms;
-    } catch { return null; }
-  }, []);
-
-  const loadData = useCallback(async () => {
-    loadPermissions();
-    fetchModels();
-    fetchSettings();
-    fetchDaemonStatus();
-
-    try {
-      const result = await invoke<{ items: Transcription[], next_cursor: string | null }>('get_transcriptions', { limit: 5 });
-      setTranscriptions(result.items || []);
+      const result = await invoke<Statistics>('get_statistics', {
+        days: days === 0 ? null : days,
+      });
+      setStats(result);
     } catch { /* logged */ }
-  }, [loadPermissions, fetchModels, fetchSettings, fetchDaemonStatus]);
+    setLoading(false);
+  }, [days]);
 
-  // Load first available sprite
-  const loadSprite = useCallback(async () => {
-    try {
-      const sprites = await invoke<(SpriteManifest & { dirId: string })[]>('list_sprites');
-      if (sprites.length === 0) return;
-      const first = sprites[0];
-      setSpriteManifest(first);
-      // Prefer processed image, fallback to original
-      const fileName = 'sprite_processed.png';
-      try {
-        const dataUri = await invoke<string>('get_sprite_image', { dirId: first.dirId, fileName });
-        setSpriteImageSrc(dataUri);
-      } catch {
-        const dataUri = await invoke<string>('get_sprite_image', { dirId: first.dirId, fileName: first.spriteFile });
-        setSpriteImageSrc(dataUri);
-      }
-    } catch { /* no sprites available */ }
-  }, []);
+  useEffect(() => { loadStats(); }, [loadStats]);
 
-  useEffect(() => { loadData(); loadSprite(); }, [loadData, loadSprite]);
+  if (loading && !stats) {
+    return <Flex justify="center" align="center" style={{ height: 300 }}><Spin size="large" /></Flex>;
+  }
 
-  // 1. Window focus: refresh permissions when app regains focus
-  useEffect(() => {
-    const unlisten = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-      if (focused) loadPermissions();
-    });
-    return () => { unlisten.then((fn) => fn()); };
-  }, [loadPermissions]);
+  if (!stats || stats.total_sessions === 0) {
+    return (
+      <Flex vertical align="center" justify="center" gap="middle" style={{ height: 400 }}>
+        <Empty description="暂无录音数据" />
+        <Text type="secondary">开始你的第一次语音录入吧</Text>
+      </Flex>
+    );
+  }
 
-  // 2. Short-term polling: cleanup on unmount or when all permissions granted
-  useEffect(() => {
-    if (permissions.microphone && permissions.accessibility && permPollRef.current) {
-      clearInterval(permPollRef.current);
-      permPollRef.current = null;
-    }
-    return () => {
-      if (permPollRef.current) {
-        clearInterval(permPollRef.current);
-        permPollRef.current = null;
-      }
-    };
-  }, [permissions.microphone, permissions.accessibility]);
-
-  useEffect(() => {
-    const unlisten = listen<{ state: string }>('recording-state', (event) => {
-      const s = event.payload.state;
-      setPipelineState(s);
-      setRecording(s === 'recording');
-      if (s === 'idle') loadData();
-    });
-    return () => { unlisten.then((fn) => fn()); };
-  }, [loadData]);
-
-  const handleRecord = async () => {
-    if (recording) {
-      try {
-        await invoke('stop_recording');
-        logEvent('Dashboard', 'recording_stopped');
-        message.success('转录完成');
-      } catch (e: unknown) {
-        const errorMessage = formatError(e, '停止录音失败');
-        logEvent('Dashboard', 'recording_error', { error: errorMessage });
-        message.error(errorMessage);
-      } finally {
-        setRecording(false);
-        loadData();
-      }
-    } else {
-      // Check model is selected and downloaded
-      const modelId = typeof settings.selected_model_id === 'string' ? settings.selected_model_id : '';
-      const model = modelId ? models.find(m => m.id === modelId) : null;
-      if (!modelId || (model && !model.is_downloaded && ['local', 'mlxWhisper', 'mlxFunASR'].includes(model.provider))) {
-        Modal.warning({
-          title: '请先选择模型',
-          content: '录音需要一个已下载的语音识别模型。',
-          okText: '前往模型页',
-          onOk: () => setActiveKey('/models'),
-        });
-        logEvent('Dashboard', 'recording_blocked', { reason: modelId ? 'model_not_downloaded' : 'no_model' });
-        return;
-      }
-      try {
-        await invoke('start_recording');
-        setRecording(true);
-        logEvent('Dashboard', 'recording_started');
-      } catch (e: unknown) {
-        const errorMessage = formatError(e, '开始录音失败');
-        logEvent('Dashboard', 'recording_error', { error: errorMessage });
-        message.error(errorMessage);
-      }
-    }
-  };
-
-  // 2. Start short-term polling after opening system settings
-  const openSettings = async (permissionType: string) => {
-    try {
-      await invoke('request_permission', { permissionType });
-      logEvent('Dashboard', 'open_system_settings', { type: permissionType });
-    } catch {
-      message.error('无法打开系统设置');
-      return;
-    }
-    // Start 1s polling until permission granted (auto-stops via effect above)
-    if (!permPollRef.current) {
-      permPollRef.current = setInterval(() => loadPermissions(), 1000);
-    }
-  };
-
-  // 3. Manual refresh button handler
-  const handleRefreshPermissions = async () => {
-    setRefreshingPerm(true);
-    await loadPermissions();
-    setTimeout(() => setRefreshingPerm(false), 500);
-  };
-
-  const hasSprite = spriteManifest && spriteImageSrc;
-
-  const statusText = () => {
-    switch (pipelineState) {
-      case 'recording': return '录音中...';
-      case 'transcribing': return '转录中...';
-      case 'enhancing': return 'AI 增强中...';
-      case 'pasting': return '粘贴中...';
-      default: return '点击开始录音';
-    }
-  };
+  const { total_sessions, total_words, avg_wpm, total_keystrokes_saved, time_saved_minutes, daily_wpm, wpm_stats } = stats;
 
   return (
     <Flex vertical gap="large" style={{ width: '100%' }}>
-      <Title level={3}>仪表盘</Title>
+      {/* Top Banner */}
+      <div style={{
+        background: 'linear-gradient(135deg, #1a3a8a 0%, #2563eb 50%, #3b82f6 100%)',
+        borderRadius: 12,
+        padding: '28px 32px',
+        textAlign: 'center',
+      }}>
+        <Title level={4} style={{ color: '#fff', margin: 0 }}>
+          你已节省 <span style={{ fontWeight: 800 }}>{formatTimeSaved(time_saved_minutes)}</span> 使用 VoiceInk
+        </Title>
+        <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 14 }}>
+          共转录 {formatNumber(total_words)} 个字，完成 {formatNumber(total_sessions)} 次录音。
+        </Text>
+      </div>
 
+      {/* Stat Cards */}
       <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} md={8}>
-          <Card title="麦克风权限" size="small" extra={
-            <ReloadOutlined spin={refreshingPerm} onClick={handleRefreshPermissions} style={{ cursor: 'pointer' }} />
-          }>
-            {permissions.microphone ? (
-              <Alert message="已授权" type="success" showIcon icon={<CheckCircleOutlined />} />
-            ) : (
-              <Flex vertical gap={8}>
-                <Alert message="待授权" description="首次录音时系统会弹出授权弹窗，或前往设置手动开启" type="warning" showIcon />
-                <Button size="small" icon={<SettingOutlined />} onClick={() => openSettings('microphone')}>前往系统设置</Button>
-              </Flex>
-            )}
+        <Col xs={24} sm={12}>
+          <Card size="small" style={{ borderRadius: 10 }}>
+            <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
+              <AudioOutlined style={{ fontSize: 16, color: '#f5222d' }} />
+              <Text type="secondary">录音次数</Text>
+            </Flex>
+            <Title level={2} style={{ margin: 0 }}>{formatNumber(total_sessions)}</Title>
+            <Text type="secondary" style={{ fontSize: 12 }}>VoiceInk 录音完成</Text>
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card title="辅助功能权限" size="small" extra={
-            <ReloadOutlined spin={refreshingPerm} onClick={handleRefreshPermissions} style={{ cursor: 'pointer' }} />
-          }>
-            {permissions.accessibility ? (
-              <Alert message="已授权" type="success" showIcon icon={<CheckCircleOutlined />} />
-            ) : (
-              <Flex vertical gap={8}>
-                <Alert message="待授权" description="需要辅助功能权限才能自动粘贴，前往设置添加本应用" type="warning" showIcon />
-                <Button size="small" icon={<SettingOutlined />} onClick={() => openSettings('accessibility')}>前往系统设置</Button>
-              </Flex>
-            )}
+        <Col xs={24} sm={12}>
+          <Card size="small" style={{ borderRadius: 10 }}>
+            <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
+              <EditOutlined style={{ fontSize: 16, color: '#1890ff' }} />
+              <Text type="secondary">转录字数</Text>
+            </Flex>
+            <Title level={2} style={{ margin: 0 }}>{formatNumber(total_words)}</Title>
+            <Text type="secondary" style={{ fontSize: 12 }}>已生成字数</Text>
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card title="当前模型" size="small" extra={
-            <Button type="link" size="small" onClick={() => setActiveKey('/models')}>模型管理</Button>
-          }>
-            {selectedModel ? (
-              <Flex vertical gap={4}>
-                <Text strong>{selectedModel.name}</Text>
-                {!selectedModel.is_downloaded && ['mlxWhisper', 'mlxFunASR', 'local'].includes(selectedModel.provider) && (
-                  <Tag color="red">模型需要下载</Tag>
-                )}
-                {['mlxWhisper', 'mlxFunASR'].includes(selectedModel.provider) && (
-                  <Tag color={daemonStatus.loaded_model ? 'green' : daemonStatus.running ? 'orange' : 'default'}>
-                    {daemonStatus.loaded_model
-                      ? `已加载: ${daemonStatus.loaded_model.split('/').pop()}`
-                      : daemonStatus.running ? 'Daemon 空闲' : 'Daemon 未启动'}
-                  </Tag>
-                )}
-              </Flex>
-            ) : (
-              <Alert
-                message="未选择模型"
-                description={<>请先前往<Button type="link" size="small" style={{ padding: 0 }} onClick={() => setActiveKey('/models')}>模型管理</Button>下载并选择一个转录模型</>}
-                type="warning"
-                showIcon
-              />
-            )}
+        <Col xs={24} sm={12}>
+          <Card size="small" style={{ borderRadius: 10 }}>
+            <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
+              <DashboardOutlined style={{ fontSize: 16, color: '#52c41a' }} />
+              <Text type="secondary">每分钟字数</Text>
+            </Flex>
+            <Title level={2} style={{ margin: 0 }}>
+              {avg_wpm > 0 ? avg_wpm.toFixed(1) : 'N/A'}
+            </Title>
+            <Text type="secondary" style={{ fontSize: 12 }}>语音输入 vs 手动打字</Text>
+          </Card>
+        </Col>
+        <Col xs={24} sm={12}>
+          <Card size="small" style={{ borderRadius: 10 }}>
+            <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
+              <FieldTimeOutlined style={{ fontSize: 16, color: '#fa8c16' }} />
+              <Text type="secondary">节省按键</Text>
+            </Flex>
+            <Title level={2} style={{ margin: 0 }}>{formatNumber(total_keystrokes_saved)}</Title>
+            <Text type="secondary" style={{ fontSize: 12 }}>减少的按键次数</Text>
           </Card>
         </Col>
       </Row>
 
-      {/* Recording area with sprite animation */}
-      <div style={{ textAlign: 'center', padding: '24px 0', position: 'relative' }}>
-        {hasSprite ? (
-          <div style={{ cursor: 'pointer', display: 'inline-block' }} onClick={handleRecord}>
-            <SpriteAnimation
-              manifest={spriteManifest}
-              imageSrc={spriteImageSrc}
-              isPlaying={recording}
-              width={160}
-              height={160}
+      {/* WPM History Chart */}
+      <Card
+        size="small"
+        style={{ borderRadius: 10 }}
+        title={
+          <Flex align="center" gap={8}>
+            <DashboardOutlined />
+            <span>WPM 历史</span>
+          </Flex>
+        }
+        extra={
+          <Flex align="center" gap={12}>
+            <Text type="secondary" style={{ fontSize: 12 }}>{daily_wpm.length} 条记录</Text>
+            <Segmented
+              size="small"
+              options={TIME_RANGES.map(r => ({ label: r.label, value: r.value }))}
+              value={days}
+              onChange={(v) => setDays(v as number)}
             />
-          </div>
-        ) : (
-          <Button type="primary" shape="circle" size="large" danger={recording}
-            icon={recording ? <SoundOutlined /> : <AudioOutlined />}
-            onClick={handleRecord} style={{ width: 80, height: 80, fontSize: 32 }}
-            aria-label={recording ? '停止录音' : '开始录音'}
-          />
-        )}
-        <Paragraph style={{ marginTop: 8 }}>
-          {statusText()}
-          {pipelineState === 'transcribing' && <span className="loading-dots"> ...</span>}
-        </Paragraph>
-      </div>
+          </Flex>
+        }
+      >
+        <div style={{ width: '100%', height: 240 }}>
+          <ResponsiveContainer>
+            <AreaChart data={daily_wpm} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="wpmGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#fa8c16" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#fa8c16" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis
+                dataKey="date"
+                tickFormatter={formatDate}
+                tick={{ fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                width={40}
+              />
+              <Tooltip
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                formatter={(value: any) => [`${Number(value).toFixed(1)} WPM`, '每分钟字数'] as any}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                labelFormatter={(label: any) => String(label ?? '') as any}
+              />
+              <Area
+                type="monotone"
+                dataKey="wpm"
+                stroke="#fa8c16"
+                strokeWidth={2}
+                fill="url(#wpmGradient)"
+                dot={false}
+                activeDot={{ r: 4 }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
 
-      <Card title="最近转录">
-        {transcriptions.length === 0 ? (
-          <Text type="secondary">暂无转录记录</Text>
-        ) : (
-          transcriptions.map((item) => (
-            <div key={item.id} style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
-              <Space>
-                <Text type="secondary">{item.timestamp}</Text>
-                <Tag>{item.model_name}</Tag>
-              </Space>
-              <Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
-                {item.text.length > 100 ? `${item.text.slice(0, 100)}...` : item.text}
-              </Paragraph>
-            </div>
-          ))
-        )}
+        {/* Footer stats */}
+        <Flex justify="flex-start" gap={40} style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid rgba(128,128,128,0.15)' }}>
+          <div>
+            <Text type="secondary" style={{ fontSize: 11 }}>平均</Text>
+            <Title level={4} style={{ margin: 0 }}>{wpm_stats.avg.toFixed(1)}</Title>
+          </div>
+          <div>
+            <Text type="secondary" style={{ fontSize: 11 }}>最高</Text>
+            <Title level={4} style={{ margin: 0 }}>{wpm_stats.max.toFixed(1)}</Title>
+          </div>
+          <div>
+            <Text type="secondary" style={{ fontSize: 11 }}>最低</Text>
+            <Title level={4} style={{ margin: 0 }}>{wpm_stats.min.toFixed(1)}</Title>
+          </div>
+        </Flex>
       </Card>
     </Flex>
   );
