@@ -1383,6 +1383,101 @@ fn find_manifest_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     None
 }
 
+/// Delete a sprite sheet by its directory ID.
+#[tauri::command]
+pub fn delete_sprite(state: State<AppState>, dir_id: String) -> Result<(), AppError> {
+    let dir = state.paths.sprites_dir.join(&dir_id);
+    if dir.exists() && dir.is_dir() {
+        std::fs::remove_dir_all(&dir)?;
+        info!("[sprite] deleted {}", dir_id);
+    }
+    // Clear selected_sprite_id if it was the deleted one
+    let db = state.db.lock().unwrap();
+    if let Ok(Some(current)) = db::get_setting(&db, "selected_sprite_id") {
+        if current.as_str() == Some(dir_id.as_str()) {
+            let _ = db::update_setting(&db, "selected_sprite_id", &serde_json::Value::String(String::new()));
+        }
+    }
+    Ok(())
+}
+
+/// Process a sprite sheet image: remove background color and save as sprite_processed.png.
+#[tauri::command]
+pub fn process_sprite_background(
+    state: State<AppState>,
+    dir_id: String,
+    threshold: f64,
+) -> Result<(), AppError> {
+    let dir = state.paths.sprites_dir.join(&dir_id);
+    let manifest_path = dir.join("manifest.json");
+    let manifest_data = std::fs::read_to_string(&manifest_path)?;
+    let manifest: Value = serde_json::from_str(&manifest_data)
+        .map_err(|e| AppError::Io(format!("manifest.json parse error: {}", e)))?;
+
+    let sprite_file = manifest
+        .get("spriteFile")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::Io("missing spriteFile".into()))?;
+
+    let src_path = dir.join(sprite_file);
+    let mut img = image::open(&src_path)
+        .map_err(|e| AppError::Io(format!("failed to open image: {}", e)))?
+        .to_rgba8();
+
+    let (width, height) = img.dimensions();
+
+    // Sample 4 corners (inset 14px)
+    let inset = 14u32.min(width.min(height) / 4);
+    let corners = [
+        (inset, inset),
+        (width - 1 - inset, inset),
+        (inset, height - 1 - inset),
+        (width - 1 - inset, height - 1 - inset),
+    ];
+
+    let samples: Vec<(f64, f64, f64)> = corners.iter().map(|&(cx, cy)| {
+        let p = img.get_pixel(cx, cy);
+        (p[0] as f64 / 255.0, p[1] as f64 / 255.0, p[2] as f64 / 255.0)
+    }).collect();
+
+    // Pick two most similar
+    let mut best_dist = f64::MAX;
+    let (mut bi, mut bj) = (0usize, 1usize);
+    for i in 0..4 {
+        for j in (i + 1)..4 {
+            let d = color_dist(&samples[i], &samples[j]);
+            if d < best_dist { best_dist = d; bi = i; bj = j; }
+        }
+    }
+
+    let bg = (
+        (samples[bi].0 + samples[bj].0) / 2.0,
+        (samples[bi].1 + samples[bj].1) / 2.0,
+        (samples[bi].2 + samples[bj].2) / 2.0,
+    );
+
+    info!("[sprite] process_background: {}x{} bg=({:.3},{:.3},{:.3}) threshold={}",
+          width, height, bg.0, bg.1, bg.2, threshold);
+
+    for pixel in img.pixels_mut() {
+        let c = (pixel[0] as f64 / 255.0, pixel[1] as f64 / 255.0, pixel[2] as f64 / 255.0);
+        if color_dist(&c, &bg) < threshold {
+            pixel[0] = 0; pixel[1] = 0; pixel[2] = 0; pixel[3] = 0;
+        }
+    }
+
+    let dest_path = dir.join("sprite_processed.png");
+    img.save(&dest_path)
+        .map_err(|e| AppError::Io(format!("failed to save processed image: {}", e)))?;
+
+    info!("[sprite] process_background: saved {}", dest_path.display());
+    Ok(())
+}
+
+fn color_dist(a: &(f64, f64, f64), b: &(f64, f64, f64)) -> f64 {
+    ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2) + (a.2 - b.2).powi(2)).sqrt()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

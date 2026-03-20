@@ -281,6 +281,8 @@ pub fn run() {
             commands::get_sprite_image,
             commands::import_sprite_folder,
             commands::import_sprite_zip,
+            commands::delete_sprite,
+            commands::process_sprite_background,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
