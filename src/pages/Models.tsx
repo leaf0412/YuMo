@@ -7,7 +7,7 @@ import {
   CheckCircleOutlined, CloudOutlined, ImportOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
 import { listen } from '@tauri-apps/api/event';
-import { invoke, formatError } from '../lib/logger';
+import { invoke, formatError, logEvent } from '../lib/logger';
 import useAppStore from '../stores/useAppStore';
 const { Title, Text } = Typography;
 
@@ -83,9 +83,15 @@ export default function Models() {
 
   // Listen for model download progress events
   useEffect(() => {
+    const lastLoggedProgress: Record<string, number> = {};
     const unlisten = listen<{ model_repo: string; progress: number }>('model-download-progress', (event) => {
       const { model_repo, progress } = event.payload;
       setDownloadProgress((prev) => ({ ...prev, [model_repo]: progress }));
+      const bucket = Math.floor(progress / 10) * 10;
+      if ((lastLoggedProgress[model_repo] ?? -1) < bucket) {
+        lastLoggedProgress[model_repo] = bucket;
+        logEvent('Models', 'download_progress', { repo: model_repo, progress: bucket });
+      }
     });
     return () => { unlisten.then((fn) => fn()); };
   }, []);
@@ -101,6 +107,7 @@ export default function Models() {
   useEffect(() => {
     const unlisten = listen<{ stage: string; message?: string }>('daemon-setup-status', (event) => {
       const { stage, message: msg } = event.payload;
+      logEvent('Models', 'daemon_setup_stage', { stage });
       if (stage === 'ready') {
         setSetupMessage(null);
       } else if (msg) {
@@ -116,6 +123,7 @@ export default function Models() {
 
 
   const handleSelect = async (modelId: string) => {
+    logEvent('Models', 'select_model', { model_id: modelId });
     try {
       await invoke('select_model', { modelId });
       storeSetSettings({ selected_model_id: modelId });
@@ -138,6 +146,7 @@ export default function Models() {
   };
 
   const handleLanguageChange = async (value: string) => {
+    logEvent('Models', 'language_change', { value });
     try {
       await invoke('update_setting', { key: 'language', value });
       storeSetSettings({ language: value });
@@ -156,6 +165,7 @@ export default function Models() {
   };
 
   const handleSaveApiKey = async () => {
+    logEvent('Models', 'save_api_key', { provider: settings.cloud_provider ?? 'unknown' });
     try {
       await invoke('update_setting', { key: 'cloud_api_key', value: cloudApiKey });
       message.success('API Key 已保存');
@@ -170,6 +180,7 @@ export default function Models() {
 
   const handleDaemonStart = async () => {
     if (daemonBusy) return;
+    logEvent('Models', 'daemon_start');
     setDaemonBusy(true);
     try {
       await invoke('daemon_start');
@@ -183,6 +194,7 @@ export default function Models() {
   };
 
   const handleDaemonStop = async () => {
+    logEvent('Models', 'daemon_stop');
     try {
       await invoke('daemon_stop');
       await invoke('update_setting', { key: 'selected_model_id', value: '' });
@@ -196,16 +208,19 @@ export default function Models() {
 
   const handleLoadModel = async (modelRepo: string, modelId: string) => {
     if (loadingModel || daemonBusy) return;
+    logEvent('Models', 'load_model_start', { model_id: modelId, repo: modelRepo });
     setLoadingModel(modelId);
     setDaemonBusy(true);
     try {
       await invoke('daemon_load_model', { modelRepo });
       await invoke('select_model', { modelId });
       storeSetSettings({ selected_model_id: modelId });
+      logEvent('Models', 'load_model_complete', { model_id: modelId });
       message.success('模型已加载');
       fetchDaemonStatus();
       fetchModels();
     } catch (e) {
+      logEvent('Models', 'load_model_error', { model_id: modelId, error: formatError(e, 'unknown') });
       message.error(formatError(e, '模型加载失败'));
     } finally {
       setLoadingModel(null);
@@ -220,6 +235,7 @@ export default function Models() {
   };
 
   const handleDeleteModel = async (modelId: string) => {
+    logEvent('Models', 'delete_model', { model_id: modelId });
     try {
       await invoke('delete_model', { modelId });
       storeSetDaemonStatus({ ...daemonStatus, loaded_model: null });

@@ -6,7 +6,7 @@ import {
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
-import { invoke, formatError } from '../lib/logger';
+import { invoke, formatError, logEvent } from '../lib/logger';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -94,6 +94,9 @@ export default function Enhancement() {
     try {
       await invoke('update_setting', { key, value });
       setSettings((prev) => ({ ...prev, [key]: value }));
+      if (key === 'llm_provider') {
+        logEvent('Enhancement', 'provider_changed', { provider: value as string });
+      }
     } catch (e) {
       message.error(formatError(e, '设置更新失败'));
     }
@@ -102,6 +105,7 @@ export default function Enhancement() {
   const handleSaveApiKey = async () => {
     try {
       await invoke('store_api_key', { provider: settings.llm_provider, key: apiKey });
+      logEvent('Enhancement', 'api_key_saved', { provider: settings.llm_provider });
       message.success('API Key 已保存');
     } catch (e) {
       message.error(formatError(e, '保存失败'));
@@ -111,6 +115,7 @@ export default function Enhancement() {
   const handleSelectPrompt = async (id: string) => {
     try {
       await invoke('select_prompt', { id });
+      logEvent('Enhancement', 'prompt_selected', { id });
       message.success('已切换 Prompt');
       loadPrompts();
     } catch (e) {
@@ -121,6 +126,7 @@ export default function Enhancement() {
   const handleDeletePrompt = async (id: string) => {
     try {
       await invoke('delete_prompt', { id });
+      logEvent('Enhancement', 'prompt_deleted', { id });
       message.success('已删除');
       loadPrompts();
     } catch (e) {
@@ -154,6 +160,7 @@ export default function Enhancement() {
           systemMsg: values.systemMsg,
           userMsg: values.userMsg,
         });
+        logEvent('Enhancement', 'prompt_updated', { id: editingPrompt.id });
         message.success('已更新');
       } else {
         await invoke('add_prompt', {
@@ -161,6 +168,7 @@ export default function Enhancement() {
           systemMsg: values.systemMsg,
           userMsg: values.userMsg,
         });
+        logEvent('Enhancement', 'prompt_created');
         message.success('已创建');
       }
       setModalOpen(false);

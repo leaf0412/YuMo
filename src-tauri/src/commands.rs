@@ -144,6 +144,8 @@ pub async fn stop_recording(
             })?
     };
 
+    let pipeline_start = std::time::Instant::now();
+
     // 2. Stop recording
     info!("[pipeline] stopping recorder...");
     let audio_data = recorder::stop_recording(handle).map_err(|e| {
@@ -229,6 +231,7 @@ pub async fn stop_recording(
     );
 
     // 5. Transcribe — route by model provider
+    let transcribe_start = std::time::Instant::now();
     let all = transcriber::all_models(&state.paths.models_dir);
     let model_info = all.iter().find(|m| m.id == model_id);
     info!(
@@ -354,6 +357,7 @@ pub async fn stop_recording(
         result.duration_ms,
         mask::mask_text(&text)
     );
+    info!("[pipeline] [transcribe_complete] elapsed_ms={} text_len={}", transcribe_start.elapsed().as_millis(), text.len());
 
     // 6. Apply text processing
     let replacements: Vec<(String, String)> = {
@@ -389,8 +393,13 @@ pub async fn stop_recording(
         );
 
         // TODO: integrate with keychain and enhancer module
+        let enhance_start = std::time::Instant::now();
         info!("[pipeline] enhancement not implemented yet, skipping");
-        None
+        let enhanced_text_inner: Option<String> = None;
+        if let Some(ref et) = enhanced_text_inner {
+            info!("[pipeline] [enhance_complete] elapsed_ms={} text_len={}", enhance_start.elapsed().as_millis(), et.len());
+        }
+        enhanced_text_inner
     } else {
         info!("[pipeline] enhancement disabled, skipping");
         None
@@ -474,6 +483,7 @@ pub async fn stop_recording(
     // Hide floating recorder window
     crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
 
+    info!("[pipeline] [complete] total_ms={}", pipeline_start.elapsed().as_millis());
     Ok(())
 }
 
@@ -936,9 +946,29 @@ pub fn daemon_stop(state: State<AppState>) -> Result<(), AppError> {
 
 #[tauri::command]
 pub fn daemon_status(state: State<AppState>) -> Result<serde_json::Value, AppError> {
+    use std::sync::LazyLock;
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    static LAST_LOG: LazyLock<Mutex<(Instant, bool, Option<String>)>> =
+        LazyLock::new(|| Mutex::new((Instant::now(), false, None)));
+
+    let running = state.daemon.is_running();
+    let loaded = state.daemon.loaded_model();
+
+    // Only log on state change or every 30 seconds
+    if let Ok(mut last) = LAST_LOG.lock() {
+        let changed = last.1 != running || last.2 != loaded;
+        let elapsed = last.0.elapsed().as_secs() >= 30;
+        if changed || elapsed {
+            info!("[daemon] [status] running={} loaded_model={:?}", running, loaded);
+            *last = (Instant::now(), running, loaded.clone());
+        }
+    }
+
     Ok(serde_json::json!({
-        "running": state.daemon.is_running(),
-        "loaded_model": state.daemon.loaded_model(),
+        "running": running,
+        "loaded_model": loaded,
     }))
 }
 
@@ -963,9 +993,10 @@ pub async fn daemon_load_model(
         let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "checking_python"}));
 
         if !state.daemon.has_python() {
-            let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "installing_deps", "message": "正在安装 Python 依赖，首次需要几分钟..."}));
             // Run bootstrap in a blocking thread so we don't freeze the async runtime
-            tokio::task::spawn_blocking(|| crate::daemon::DaemonManager::ensure_python_static())
+            // bootstrap_venv internally emits "creating_venv" and "installing_deps" stages
+            let app_for_setup = app.clone();
+            tokio::task::spawn_blocking(move || crate::daemon::DaemonManager::ensure_python_static(Some(app_for_setup)))
                 .await
                 .map_err(|e| AppError::Transcription(format!("setup failed: {e}")))?
                 .map_err(|e| {
@@ -986,21 +1017,44 @@ pub async fn daemon_load_model(
     let repo_clone = model_repo.clone();
     let final_resp = tokio::task::spawn_blocking(move || {
         let mut last_resp = None;
+        let mut last_logged_pct: i64 = -1;
+        let load_start = std::time::Instant::now();
+        log::info!("[daemon] [load_model] begin repo={}", repo_clone);
+
         while let Ok(resp) = rx.recv() {
             if resp.status == "downloading" {
                 let progress = resp.progress.as_ref()
                     .and_then(|p| p.as_f64())
                     .unwrap_or(0.0);
+                let pct = (progress * 100.0) as i64;
+                if pct >= last_logged_pct + 10 {
+                    log::info!("[daemon] [load_model] downloading progress={}%", pct);
+                    last_logged_pct = pct;
+                }
                 let _ = app.emit("model-download-progress", serde_json::json!({
                     "model_repo": repo_clone,
                     "progress": progress,
                 }));
+            } else if resp.status == "download_complete" {
+                log::info!("[daemon] [load_model] download_complete");
             }
             let is_terminal = resp.status != "downloading"
                 && resp.status != "download_complete";
             last_resp = Some(resp);
             if is_terminal { break; }
         }
+
+        if let Some(ref resp) = last_resp {
+            let elapsed = load_start.elapsed().as_millis();
+            let cached = resp.cached.unwrap_or(false);
+            if resp.status == "success" || resp.status == "loaded" {
+                log::info!("[daemon] [load_model] loaded cached={} elapsed_ms={}", cached, elapsed);
+            } else {
+                log::error!("[daemon] [load_model] FAILED status={} error={:?} elapsed_ms={}",
+                    resp.status, resp.error, elapsed);
+            }
+        }
+
         last_resp.ok_or_else(|| AppError::Transcription("no response from daemon".into()))
     })
     .await

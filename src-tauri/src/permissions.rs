@@ -38,6 +38,7 @@ pub fn check_microphone() -> bool {
 
 /// Open microphone settings.
 pub fn request_microphone() {
+    log::info!("[permissions] [request] opening microphone settings");
     open_settings("Privacy_Microphone");
 }
 
@@ -62,6 +63,7 @@ pub fn check_all() -> PermissionStatus {
 
 /// Open System Settings to the accessibility pane.
 pub fn open_accessibility_settings() {
+    log::info!("[permissions] [request] opening accessibility settings");
     let _ = std::process::Command::new("open")
         .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         .spawn();
@@ -78,5 +80,6 @@ fn open_settings(pane: &str) {
 
 /// Open System Settings to the microphone pane.
 pub fn open_microphone_settings() {
+    log::info!("[permissions] [request] opening microphone settings");
     open_settings("Privacy_Microphone");
 }

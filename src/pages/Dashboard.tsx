@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { invoke, formatError } from '../lib/logger';
+import { invoke, formatError, logEvent } from '../lib/logger';
 import SpriteAnimation, { type SpriteManifest } from '../components/SpriteAnimation';
 import useAppStore from '../stores/useAppStore';
 
@@ -50,6 +50,7 @@ export default function Dashboard() {
     try {
       const perms = await invoke<Permissions>('check_permissions');
       setPermissions(perms);
+      logEvent('Dashboard', 'permissions_loaded', { microphone: perms.microphone, accessibility: perms.accessibility });
       return perms;
     } catch { return null; }
   }, []);
@@ -123,9 +124,12 @@ export default function Dashboard() {
     if (recording) {
       try {
         await invoke('stop_recording');
+        logEvent('Dashboard', 'recording_stopped');
         message.success('转录完成');
       } catch (e: unknown) {
-        message.error(formatError(e, '停止录音失败'));
+        const errorMessage = formatError(e, '停止录音失败');
+        logEvent('Dashboard', 'recording_error', { error: errorMessage });
+        message.error(errorMessage);
       } finally {
         setRecording(false);
         loadData();
@@ -134,8 +138,11 @@ export default function Dashboard() {
       try {
         await invoke('start_recording');
         setRecording(true);
+        logEvent('Dashboard', 'recording_started');
       } catch (e: unknown) {
-        message.error(formatError(e, '开始录音失败'));
+        const errorMessage = formatError(e, '开始录音失败');
+        logEvent('Dashboard', 'recording_error', { error: errorMessage });
+        message.error(errorMessage);
       }
     }
   };
@@ -144,6 +151,7 @@ export default function Dashboard() {
   const openSettings = async (permissionType: string) => {
     try {
       await invoke('request_permission', { permissionType });
+      logEvent('Dashboard', 'open_system_settings', { type: permissionType });
     } catch {
       message.error('无法打开系统设置');
       return;

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Input, Button, Flex, Space, Tag, Typography, Popconfirm, message, Card } from 'antd';
 import { CopyOutlined, DeleteOutlined, ClearOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
-import { invoke, formatError } from '../lib/logger';
+import { invoke, formatError, logEvent } from '../lib/logger';
 const { Text, Paragraph } = Typography;
 
 interface Transcription {
@@ -46,6 +46,7 @@ export default function History() {
       audio.onerror = () => { setPlayingId(null); audioRef.current = null; message.error('播放失败'); };
       audioRef.current = audio;
       setPlayingId(item.id);
+      logEvent('History', 'playback_start');
       audio.play();
     } catch (e) {
       message.error(formatError(e, '无法加载录音'));
@@ -81,7 +82,7 @@ export default function History() {
   }, [loadTranscriptions]);
 
   const handleSearch = (value: string) => {
-    
+    logEvent('History', 'search', { query: value });
     setSearchQuery(value);
   };
 
@@ -92,14 +93,14 @@ export default function History() {
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
-    
+    logEvent('History', 'copy_text');
     message.success('已复制');
   };
 
   const handleDelete = async (id: string) => {
-    
     try {
       await invoke('delete_transcription', { id });
+      logEvent('History', 'delete');
       setTranscriptions((prev) => prev.filter((t) => t.id !== id));
       message.success('已删除');
     } catch (e) {

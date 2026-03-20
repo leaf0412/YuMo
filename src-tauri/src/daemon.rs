@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use tauri::Emitter;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -204,12 +205,12 @@ impl DaemonManager {
     }
 
     /// Bootstrap venv if needed (blocking — call from spawn_blocking).
-    pub fn ensure_python_static() -> AppResult<()> {
+    pub fn ensure_python_static(app: Option<tauri::AppHandle>) -> AppResult<()> {
         if has_working_python() {
             return Ok(());
         }
         log::info!("[daemon] ensure_python: bootstrapping venv");
-        bootstrap_venv()?;
+        bootstrap_venv(app)?;
         Ok(())
     }
 
@@ -231,15 +232,13 @@ impl DaemonManager {
 
         let python = find_python()?;
         log::info!("[daemon] using python: {}", python);
-        let stderr_path = self.data_dir.join("daemon_stderr.log");
-        let stderr_file = std::fs::File::create(&stderr_path)
-            .map_err(|e| AppError::Io(format!("create stderr log: {e}")))?;
+        log::info!("[daemon] [start] python={} script={}", python, self.script_path.display());
 
         let mut child = Command::new(&python)
             .arg(&self.script_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(stderr_file)
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| {
                 AppError::Transcription(format!(
@@ -256,6 +255,20 @@ impl DaemonManager {
             .stdout
             .take()
             .ok_or_else(|| AppError::Transcription("no stdout handle".into()))?;
+        let stderr = child.stderr.take().expect("no stderr handle");
+
+        // Forward daemon stderr lines to the unified log.
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::new(stderr);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) if !l.trim().is_empty() => log::info!("[daemon] [stderr] {}", l.trim()),
+                    Err(_) => break,
+                    _ => {}
+                }
+            }
+        });
 
         // Create the BufReader ONCE here — all subsequent reads use this same
         // reader so buffered data is never lost between calls.
@@ -263,20 +276,9 @@ impl DaemonManager {
 
         // Wait for the ready handshake.
         if let Err(e) = wait_for_ready(&mut reader) {
-            // Read stderr log for more context
-            let stderr_content = std::fs::read_to_string(&stderr_path).unwrap_or_default();
-            let detail = if stderr_content.is_empty() {
-                e.to_string()
-            } else {
-                // Take last 500 chars to keep it readable
-                let tail = if stderr_content.len() > 500 {
-                    &stderr_content[stderr_content.len() - 500..]
-                } else {
-                    &stderr_content
-                };
-                format!("{e}\n--- daemon stderr ---\n{tail}")
-            };
-            return Err(AppError::Transcription(detail));
+            return Err(AppError::Transcription(
+                format!("{e} (check log.txt for [daemon] [stderr] entries)")
+            ));
         }
 
         *guard = Some(DaemonProcess {
@@ -566,8 +568,12 @@ fn wait_for_ready(reader: &mut BufReader<ChildStdout>) -> AppResult<()> {
                 log::info!("[daemon] ready signal received");
                 return Ok(());
             }
+            // Valid JSON but not ready — log it
+            log::info!("[daemon] [stdout-preready] {}", trimmed);
+        } else {
+            // Not valid JSON — log it (import warnings, etc.)
+            log::info!("[daemon] [stdout-preready] {}", trimmed);
         }
-        // Any other output before ready is silently ignored.
     }
 }
 
@@ -658,18 +664,21 @@ fn find_python() -> AppResult<String> {
 
     // 3. No python with mlx_audio found — auto-bootstrap venv
     log::info!("[daemon] no python with mlx_audio found, bootstrapping venv...");
-    if let Ok(python) = bootstrap_venv() {
+    if let Ok(python) = bootstrap_venv(None) {
         return Ok(python);
     }
 
     // 4. Fallback: any working python3 (will fail later with clearer error)
-    for candidate in python_candidates() {
+    let candidates = python_candidates();
+    let candidates_count = candidates.len();
+    for candidate in candidates {
         if std::path::Path::new(&candidate).exists() {
-            log::warn!("[daemon] falling back to python without mlx_audio: {}", candidate);
+            log::warn!("[daemon] [find_python] fallback python={} (no mlx_audio)", candidate);
             return Ok(candidate);
         }
     }
 
+    log::error!("[daemon] [find_python] FAILED no python found, candidates_checked={}", candidates_count);
     Err(AppError::NotFound(
         "python3 not found; install Python 3 via Homebrew or python.org".into(),
     ))
@@ -713,51 +722,107 @@ fn find_uv() -> Option<PathBuf> {
     None
 }
 
+/// Run a command, streaming its stderr to log.txt line by line.
+/// Splits on both \r and \n to handle uv's carriage-return progress bars.
+fn run_and_stream_stderr(cmd: &mut Command, tag: &str) -> AppResult<()> {
+    use std::io::Read;
+
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| AppError::Transcription(format!("{tag} spawn failed: {e}")))?;
+
+    let stderr = child.stderr.take().expect("no stderr");
+    let mut buf = Vec::new();
+
+    for byte in stderr.bytes() {
+        match byte {
+            Ok(b'\n') | Ok(b'\r') => {
+                if !buf.is_empty() {
+                    let line = String::from_utf8_lossy(&buf);
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() {
+                        log::info!("[daemon] [bootstrap] [{}] {}", tag, trimmed);
+                    }
+                    buf.clear();
+                }
+            }
+            Ok(b) => buf.push(b),
+            Err(_) => break,
+        }
+    }
+    // Flush remaining
+    if !buf.is_empty() {
+        let line = String::from_utf8_lossy(&buf);
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            log::info!("[daemon] [bootstrap] [{}] {}", tag, trimmed);
+        }
+    }
+
+    let status = child.wait()
+        .map_err(|e| AppError::Transcription(format!("{tag} wait failed: {e}")))?;
+
+    if !status.success() {
+        let code = status.code().unwrap_or(-1);
+        return Err(AppError::Transcription(format!("{tag} failed exit_code={code}")));
+    }
+    Ok(())
+}
+
 /// Create a venv at ~/.voiceink/venv and install mlx-audio-plus using `uv`.
 /// `uv` is bundled with the app — it auto-downloads Python if needed and
 /// installs packages 10-100x faster than pip.
 /// Returns the venv python path on success.
-fn bootstrap_venv() -> AppResult<String> {
+fn bootstrap_venv(app: Option<tauri::AppHandle>) -> AppResult<String> {
+    let start = std::time::Instant::now();
     let uv = find_uv().ok_or_else(|| {
         AppError::NotFound("uv binary not found; app resources may be corrupted".into())
     })?;
-    log::info!("[daemon] using uv: {:?}", uv);
+    log::info!("[daemon] [bootstrap] using uv: {:?}", uv);
 
     let venv_dir = dirs::home_dir()
         .unwrap_or_default()
         .join(".voiceink/venv");
     let venv_dir_str = venv_dir.to_string_lossy().to_string();
 
-    // Create venv (uv auto-downloads Python if not available)
-    log::info!("[daemon] creating venv at {} via uv", venv_dir_str);
-    let status = Command::new(&uv)
-        .args(["venv", &venv_dir_str, "--python", "3.12"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .status()
-        .map_err(|e| AppError::Transcription(format!("uv venv failed: {e}")))?;
-
-    if !status.success() {
-        return Err(AppError::Transcription("uv venv creation failed".into()));
+    // Step 1: Create venv
+    log::info!("[daemon] [bootstrap] creating venv at {} python=3.12", venv_dir_str);
+    if let Some(ref app) = app {
+        let _ = app.emit("daemon-setup-status", serde_json::json!({
+            "stage": "creating_venv"
+        }));
     }
+    run_and_stream_stderr(
+        Command::new(&uv).args(["venv", &venv_dir_str, "--python", "3.12"]),
+        "uv-venv",
+    ).map_err(|e| {
+        log::error!("[daemon] [bootstrap] FAILED stage=venv elapsed_ms={}", start.elapsed().as_millis());
+        e
+    })?;
 
-    // Install dependencies via uv (much faster than pip)
-    log::info!("[daemon] installing dependencies via uv...");
-    let output = Command::new(&uv)
-        .args(["pip", "install", "--python", &format!("{}/bin/python3", venv_dir_str),
-               "mlx-audio-plus", "soundfile"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| AppError::Transcription(format!("uv pip install failed: {e}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        log::error!("[daemon] uv pip install failed: {}", stderr);
-        return Err(AppError::Transcription(format!("dependency install failed: {}", stderr)));
+    // Step 2: Install deps
+    log::info!("[daemon] [bootstrap] venv created, installing deps: mlx-audio-plus, soundfile");
+    if let Some(ref app) = app {
+        let _ = app.emit("daemon-setup-status", serde_json::json!({
+            "stage": "installing_deps",
+            "message": "正在安装 Python 依赖，首次需要几分钟..."
+        }));
     }
+    run_and_stream_stderr(
+        Command::new(&uv).args([
+            "pip", "install",
+            "--python", &format!("{}/bin/python3", venv_dir_str),
+            "mlx-audio-plus", "soundfile",
+        ]),
+        "uv-pip",
+    ).map_err(|e| {
+        log::error!("[daemon] [bootstrap] FAILED stage=pip_install elapsed_ms={}", start.elapsed().as_millis());
+        e
+    })?;
 
     let venv_python = venv_python_path();
-    log::info!("[daemon] venv bootstrap complete via uv");
+    log::info!("[daemon] [bootstrap] complete elapsed_ms={}", start.elapsed().as_millis());
     Ok(venv_python)
 }
