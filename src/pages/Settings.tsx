@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Collapse, Switch, Slider, Select, Input, Button, Flex, Space, Typography,
-  message, Popconfirm, InputNumber, Alert, Modal,
+  message, Popconfirm, Alert, Modal,
 } from 'antd';
 import {
   AudioOutlined, FilterOutlined, ThunderboltOutlined, CopyOutlined,
