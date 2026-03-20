@@ -63,3 +63,21 @@ export function formatError(e: unknown, fallback: string): string {
   }
   return fallback;
 }
+
+// ---------------------------------------------------------------------------
+// Public: log structured frontend events
+// ---------------------------------------------------------------------------
+
+/**
+ * Log a structured event to both console and backend log.txt.
+ * Usage: logEvent('Models', 'select_model', { model_id: 'xxx' })
+ * Output: [frontend:Models] [select_model] model_id="xxx"
+ */
+export function logEvent(module: string, event: string, data?: Record<string, unknown>) {
+  const kvs = data
+    ? ' ' + Object.entries(data).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ')
+    : '';
+  const msg = `[frontend:${module}] [${event}]${kvs}`;
+  console.log(msg);
+  sendToBackend('info', msg);
+}
