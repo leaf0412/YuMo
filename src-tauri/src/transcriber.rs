@@ -432,6 +432,9 @@ pub async fn transcribe_via_daemon(
     // Cleanup temp file
     let _ = std::fs::remove_file(&wav_path);
 
+    // Check daemon memory after each transcription — restart if bloated
+    daemon.check_and_restart_if_bloated();
+
     if resp.status == "success" {
         Ok(TranscriptionResult {
             text: resp.text.unwrap_or_default(),

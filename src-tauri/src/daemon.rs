@@ -51,6 +51,24 @@ struct DaemonProcess {
     model_repo: Option<String>,
 }
 
+/// Maximum RSS (in bytes) for the Python daemon before auto-restart.
+/// 8 GB — generous enough for large models, catches genuine leaks.
+const DAEMON_RSS_LIMIT: u64 = 8 * 1024 * 1024 * 1024;
+
+/// Query RSS of a process by pid (macOS only, uses `ps`).
+fn get_process_rss(pid: u32) -> Option<u64> {
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid.to_string()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    // ps reports RSS in kilobytes
+    let kb: u64 = text.trim().parse().ok()?;
+    Some(kb * 1024)
+}
+
 impl DaemonProcess {
     /// Write a JSON command and return the next meaningful response.
     ///
@@ -442,6 +460,40 @@ impl DaemonManager {
             Err(_) => Err(AppError::Transcription(
                 format!("daemon response timed out after {}s", timeout.as_secs()),
             )),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Memory watchdog
+    // -----------------------------------------------------------------------
+
+    /// Check daemon RSS and restart if it exceeds the limit.
+    /// Call this after each transcription to catch leaks early.
+    pub fn check_and_restart_if_bloated(&self) {
+        let pid = {
+            let guard = match self.process.lock() {
+                Ok(g) => g,
+                Err(_) => return,
+            };
+            match guard.as_ref() {
+                Some(proc) => proc._child.id(),
+                None => return,
+            }
+        };
+
+        if let Some(rss) = get_process_rss(pid) {
+            let rss_mb = rss / (1024 * 1024);
+            log::info!("[daemon] post-transcription RSS: {} MB (limit: {} MB)", rss_mb, DAEMON_RSS_LIMIT / (1024 * 1024));
+
+            if rss > DAEMON_RSS_LIMIT {
+                log::warn!(
+                    "[daemon] RSS {} MB exceeds limit {} MB — restarting daemon",
+                    rss_mb,
+                    DAEMON_RSS_LIMIT / (1024 * 1024)
+                );
+                self.stop();
+                // Caller should re-start + re-load model on next transcription.
+            }
         }
     }
 

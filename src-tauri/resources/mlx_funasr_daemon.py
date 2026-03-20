@@ -20,6 +20,7 @@ import sys
 import os
 import json
 import gc
+import time
 
 # All model cache lives under ~/.voiceink/models
 _mlx_cache = os.path.join(os.path.expanduser("~"), ".voiceink", "models")
@@ -519,19 +520,33 @@ def _restore_eos_tokens(model, original_eos):
 
 
 def _stream_with_repetition_check(model, audio_input, params, STTOutput):
-    """Stream model output and stop early on character repetition."""
-    full_text = ""
+    """Stream model output and stop early on character repetition or safety limits."""
+    chunks = []
+    total_len = 0
     last_char = ""
     repeat_count = 0
     max_repeats = 5
+    max_length = 50000   # hard cap: no transcription should exceed this
+    timeout_sec = 120    # 2 min timeout for generation
+    start_time = time.time()
 
     for chunk in model.generate(audio_input, **params):
+        if time.time() - start_time > timeout_sec:
+            log(f"Generation timeout after {timeout_sec}s, collected {total_len} chars")
+            break
+
         if isinstance(chunk, str):
-            full_text += chunk
+            chunks.append(chunk)
+            total_len += len(chunk)
+
+            if total_len > max_length:
+                log(f"Hit max length {max_length}, stopping")
+                break
+
             if chunk and chunk == last_char:
                 repeat_count += 1
                 if repeat_count >= max_repeats:
-                    log(f"Detected repetition, stopping early at {len(full_text)} chars")
+                    log(f"Detected repetition, stopping early at {total_len} chars")
                     break
             else:
                 repeat_count = 0
@@ -539,6 +554,7 @@ def _stream_with_repetition_check(model, audio_input, params, STTOutput):
         else:
             return chunk
 
+    full_text = "".join(chunks)
     return STTOutput(text=full_text, language=None, task="transcribe", duration=0, tokens=[])
 
 
@@ -671,6 +687,11 @@ def main():
                     model = None
                     model_repo = None
                     gc.collect()
+                    try:
+                        import mlx.core as mx
+                        mx.metal.clear_cache()
+                    except Exception:
+                        pass
 
                 # Download if not available
                 if not check_model_downloaded(new_repo):
@@ -719,7 +740,12 @@ def main():
             model = None
             model_repo = None
             gc.collect()
-            log("Model unloaded (memory freed)")
+            try:
+                import mlx.core as mx
+                mx.metal.clear_cache()
+            except Exception:
+                pass
+            log("Model unloaded (memory freed, metal cache cleared)")
             send_response({"status": "unloaded"})
 
         elif action == "quit":
