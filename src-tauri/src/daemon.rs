@@ -232,6 +232,7 @@ impl DaemonManager {
 
         let python = find_python()?;
         log::info!("[daemon] using python: {}", python);
+        log::info!("[daemon] [start] python={} script={}", python, self.script_path.display());
 
         let mut child = Command::new(&python)
             .arg(&self.script_path)
@@ -668,13 +669,16 @@ fn find_python() -> AppResult<String> {
     }
 
     // 4. Fallback: any working python3 (will fail later with clearer error)
-    for candidate in python_candidates() {
+    let candidates = python_candidates();
+    let candidates_count = candidates.len();
+    for candidate in candidates {
         if std::path::Path::new(&candidate).exists() {
-            log::warn!("[daemon] falling back to python without mlx_audio: {}", candidate);
+            log::warn!("[daemon] [find_python] fallback python={} (no mlx_audio)", candidate);
             return Ok(candidate);
         }
     }
 
+    log::error!("[daemon] [find_python] FAILED no python found, candidates_checked={}", candidates_count);
     Err(AppError::NotFound(
         "python3 not found; install Python 3 via Homebrew or python.org".into(),
     ))
