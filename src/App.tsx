@@ -13,6 +13,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons';
 import { listen } from '@tauri-apps/api/event';
+import yumoIcon from './assets/yumo-icon.svg';
 import { invoke, logEvent } from './lib/logger';
 import { broadcast } from './lib/broadcast';
 import Dashboard from './pages/Dashboard';
@@ -65,7 +66,8 @@ function AppLayout() {
   return (
     <Layout style={{ height: '100vh' }}>
       <Sider width={200} theme="light" style={{ overflow: 'auto' }}>
-        <div style={{ padding: '16px', textAlign: 'center' }}>
+        <div style={{ padding: '16px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+          <img src={yumoIcon} alt="语墨" style={{ width: 28, height: 28 }} />
           <Title level={4} style={{ margin: 0 }}>{t('app.name')}</Title>
         </div>
         <Menu
