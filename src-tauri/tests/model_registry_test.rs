@@ -1,5 +1,5 @@
 use yumo_lib::transcriber::{
-    self, ModelInfo, ModelProvider, ModelFilter,
+    self, ModelProvider,
 };
 
 // ---------------------------------------------------------------------------

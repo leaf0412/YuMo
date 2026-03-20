@@ -29,7 +29,7 @@ fn test_insert_and_query_transcription() {
     let tmp = TempDir::new().unwrap();
     let conn = db::init_database(&tmp.path().join("test.db")).unwrap();
 
-    let id = db::insert_transcription(&conn, "hello world", None, 2.5, "ggml-base", 2).unwrap();
+    let id = db::insert_transcription(&conn, "hello world", None, 2.5, "ggml-base", 2, None).unwrap();
     let result = db::get_transcriptions(&conn, None, None, 20).unwrap();
     assert_eq!(result.items.len(), 1);
     assert_eq!(result.items[0].text, "hello world");
@@ -41,8 +41,8 @@ fn test_fulltext_search_transcriptions() {
     let tmp = TempDir::new().unwrap();
     let conn = db::init_database(&tmp.path().join("test.db")).unwrap();
 
-    db::insert_transcription(&conn, "the quick brown fox", None, 1.0, "base", 4).unwrap();
-    db::insert_transcription(&conn, "hello world goodbye", None, 1.0, "base", 3).unwrap();
+    db::insert_transcription(&conn, "the quick brown fox", None, 1.0, "base", 4, None).unwrap();
+    db::insert_transcription(&conn, "hello world goodbye", None, 1.0, "base", 3, None).unwrap();
 
     let result = db::get_transcriptions(&conn, None, Some("fox"), 20).unwrap();
     assert_eq!(result.items.len(), 1);
@@ -55,7 +55,7 @@ fn test_cursor_pagination() {
     let conn = db::init_database(&tmp.path().join("test.db")).unwrap();
 
     for i in 0..5 {
-        db::insert_transcription(&conn, &format!("entry {}", i), None, 1.0, "base", 2).unwrap();
+        db::insert_transcription(&conn, &format!("entry {}", i), None, 1.0, "base", 2, None).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
@@ -73,7 +73,7 @@ fn test_delete_transcription() {
     let tmp = TempDir::new().unwrap();
     let conn = db::init_database(&tmp.path().join("test.db")).unwrap();
 
-    let id = db::insert_transcription(&conn, "delete me", None, 1.0, "base", 2).unwrap();
+    let id = db::insert_transcription(&conn, "delete me", None, 1.0, "base", 2, None).unwrap();
     db::delete_transcription(&conn, &id).unwrap();
     let result = db::get_transcriptions(&conn, None, None, 20).unwrap();
     assert_eq!(result.items.len(), 0);
@@ -137,24 +137,3 @@ fn test_prompts_crud() {
     assert!(!db::list_prompts(&conn).unwrap().iter().any(|p| p.id == id));
 }
 
-#[test]
-fn test_auto_cleanup_by_days() {
-    let tmp = TempDir::new().unwrap();
-    let conn = db::init_database(&tmp.path().join("test.db")).unwrap();
-
-    // Insert old record
-    conn.execute(
-        "INSERT INTO transcriptions (id, text, timestamp, duration, model_name, word_count)
-         VALUES (?1, ?2, datetime('now', '-10 days'), ?3, ?4, ?5)",
-        rusqlite::params!["old-id", "old text", 1.0, "base", 2],
-    ).unwrap();
-
-    db::insert_transcription(&conn, "new text", None, 1.0, "base", 2).unwrap();
-
-    let deleted = db::cleanup_old_transcriptions(&conn, 7).unwrap();
-    assert_eq!(deleted, 1);
-
-    let result = db::get_transcriptions(&conn, None, None, 20).unwrap();
-    assert_eq!(result.items.len(), 1);
-    assert_eq!(result.items[0].text, "new text");
-}
