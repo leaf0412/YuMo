@@ -1,3 +1,4 @@
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -279,9 +280,10 @@ pub fn check_mlx_model_downloaded(model_repo: &str) -> bool {
         .join(format!("models--{}", cache_name))
         .join("snapshots");
 
-    log::info!("[transcriber] check_mlx_model_downloaded repo={} path={:?} exists={}", model_repo, cache_path, cache_path.exists());
+    let exists = cache_path.exists();
+    info!("[transcriber] [check_mlx] repo={} exists={}", model_repo, exists);
 
-    if !cache_path.exists() {
+    if !exists {
         return false;
     }
 
@@ -296,7 +298,7 @@ pub fn check_mlx_model_downloaded(model_repo: &str) -> bool {
                         let is_symlink = fp.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false);
                         let target_exists = fp.exists(); // follows symlink
                         if ext.as_deref() == Some("safetensors") && target_exists {
-                            log::info!("[transcriber] found safetensors: {:?} symlink={} target_exists={}", fp, is_symlink, target_exists);
+                            info!("[transcriber] found safetensors: {:?} symlink={} target_exists={}", fp, is_symlink, target_exists);
                             return true;
                         }
                     }
@@ -305,7 +307,7 @@ pub fn check_mlx_model_downloaded(model_repo: &str) -> bool {
         }
     }
 
-    log::info!("[transcriber] no safetensors found for {}", model_repo);
+    info!("[transcriber] no safetensors found for {}", model_repo);
     false
 }
 
@@ -330,6 +332,7 @@ pub fn all_models(models_dir: &Path) -> Vec<ModelInfo> {
         }
     }
 
+    info!("[transcriber] [all_models] total={}", models.len());
     models
 }
 
@@ -399,6 +402,7 @@ pub async fn transcribe_via_daemon(
     max_tokens: u32,
 ) -> Result<TranscriptionResult, AppError> {
     let start = std::time::Instant::now();
+    info!("[transcriber] [transcribe_via_daemon] begin language={} samples={}", language, samples.len());
 
     // Write samples to a temp WAV file under ~/.voiceink (daemon expects a file path)
     let tmp_dir = dirs::home_dir().unwrap_or_default().join(".voiceink/tmp");
@@ -418,6 +422,9 @@ pub async fn transcribe_via_daemon(
     }
     writer.finalize().map_err(|e| AppError::Io(e.to_string()))?;
 
+    let file_size = std::fs::metadata(&wav_path).map(|m| m.len()).unwrap_or(0);
+    info!("[transcriber] [transcribe_via_daemon] wav_created size_kb={}", file_size / 1024);
+
     let cmd = serde_json::json!({
         "action": "transcribe",
         "audio": wav_path.to_string_lossy(),
@@ -426,6 +433,7 @@ pub async fn transcribe_via_daemon(
         "temperature": temperature,
     });
 
+    info!("[transcriber] [transcribe_via_daemon] daemon_command_sent action=transcribe");
     let timeout = std::time::Duration::from_secs(120);
     let resp = daemon.send_command_async(&cmd, timeout).await?;
 
@@ -436,14 +444,16 @@ pub async fn transcribe_via_daemon(
     daemon.check_and_restart_if_bloated();
 
     if resp.status == "success" {
+        let text = resp.text.unwrap_or_default();
+        info!("[transcriber] [transcribe_via_daemon] complete status={} text_len={} elapsed_ms={}", resp.status, text.len(), start.elapsed().as_millis());
         Ok(TranscriptionResult {
-            text: resp.text.unwrap_or_default(),
+            text,
             duration_ms: start.elapsed().as_millis() as u64,
         })
     } else {
-        Err(AppError::Transcription(
-            resp.error.unwrap_or_else(|| "Transcription failed".into())
-        ))
+        let err_msg = resp.error.unwrap_or_else(|| "Transcription failed".into());
+        error!("[transcriber] [transcribe_via_daemon] FAILED error={}", err_msg);
+        Err(AppError::Transcription(err_msg))
     }
 }
 
@@ -455,6 +465,9 @@ pub fn transcribe(
     language: &str,
     temperature: f32,
 ) -> Result<TranscriptionResult, AppError> {
+    let start = std::time::Instant::now();
+    info!("[transcriber] [transcribe] begin language={} samples={}", language, samples.len());
+
     let mut params =
         whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
     params.set_language(Some(language));
@@ -463,14 +476,17 @@ pub fn transcribe(
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
 
-    let start = std::time::Instant::now();
-
     let mut state = ctx
         .create_state()
         .map_err(|e| AppError::Transcription(format!("Failed to create state: {}", e)))?;
+    info!("[transcriber] [transcribe] model_loaded");
+
     state
         .full(params, samples)
-        .map_err(|e| AppError::Transcription(format!("Transcription failed: {}", e)))?;
+        .map_err(|e| {
+            error!("[transcriber] [transcribe] FAILED error={}", e);
+            AppError::Transcription(format!("Transcription failed: {}", e))
+        })?;
 
     let num_segments = state.full_n_segments();
 
@@ -485,6 +501,7 @@ pub fn transcribe(
     }
 
     let duration_ms = start.elapsed().as_millis() as u64;
+    info!("[transcriber] [transcribe] complete segments={} text_len={} elapsed_ms={}", num_segments, text.len(), start.elapsed().as_millis());
 
     Ok(TranscriptionResult {
         text: text.trim().to_string(),
