@@ -1,18 +1,18 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Collapse, Switch, Slider, Select, Input, Button, Flex, Space, Typography,
-  message, Popconfirm, Alert, Modal,
+  message, Popconfirm, InputNumber,
 } from 'antd';
 import {
   AudioOutlined, FilterOutlined, ThunderboltOutlined, CopyOutlined,
   FontSizeOutlined, DesktopOutlined, KeyOutlined, AppstoreOutlined,
-  HistoryOutlined, SettingOutlined, ClearOutlined, ImportOutlined,
-  PictureOutlined,
+  HistoryOutlined, SettingOutlined, ClearOutlined,
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { emit } from '@tauri-apps/api/event';
+import i18n from '../i18n';
+import { getResolvedLocale, type UiLocale } from '../i18n/utils';
 import { invoke, formatError, logEvent } from '../lib/logger';
-import SpriteManager from '../components/SpriteManager';
-import { broadcast } from '../lib/broadcast';
 
 const { Text } = Typography;
 
@@ -37,13 +37,15 @@ interface AppSettings {
   system_mute?: boolean;
   hotkey?: string;
   menu_bar_mode?: boolean;
+  auto_cleanup?: boolean;
+  auto_cleanup_days?: number;
   autostart?: boolean;
   data_path?: string;
-  selected_sprite_id?: string;
-  sprite_size?: number;
+  ui_locale?: string;
 }
 
 export default function Settings() {
+  const { t } = useTranslation();
   const [settings, setSettings] = useState<AppSettings>({});
   const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
   const [hotkeyInput, setHotkeyInput] = useState('');
@@ -73,9 +75,8 @@ export default function Settings() {
       await invoke('update_setting', { key, value });
       setSettings((prev) => ({ ...prev, [key]: value }));
       logEvent('Settings', 'setting_changed', { key, value });
-      broadcast('settings-changed', key);
     } catch (e) {
-      message.error(formatError(e, '设置更新失败'));
+      message.error(formatError(e, t('settings.updateFailed')));
     }
   };
 
@@ -115,94 +116,12 @@ export default function Settings() {
           await invoke('register_hotkey', { shortcut });
           updateSetting('hotkey', shortcut);
           logEvent('Settings', 'hotkey_registered', { shortcut });
-          message.success(`快捷键已设置: ${shortcut}`);
+          message.success(t('settings.hotkeySet', { shortcut }));
         } catch (e: unknown) {
-          message.error(formatError(e, '注册失败'));
+          message.error(formatError(e, t('settings.registerFailed')));
         }
       })();
     }
-  };
-
-  const [importing, setImporting] = useState(false);
-  const [legacyPath, setLegacyPath] = useState<string | null>(null);
-
-  // Auto-detect VoiceInk legacy path on mount
-  useEffect(() => {
-    invoke<string | null>('detect_voiceink_legacy_path').then(setLegacyPath).catch(() => {});
-  }, []);
-
-  const showImportResult = (result: {
-    transcriptions_imported: number;
-    transcriptions_skipped: number;
-    vocabulary_imported: number;
-    replacements_imported: number;
-    recordings_copied: number;
-  }) => {
-    logEvent('Settings', 'import_voiceink', result);
-    emit('stats-updated');
-    message.success(
-      `导入完成：${result.transcriptions_imported} 条转录，` +
-      `${result.vocabulary_imported} 个词汇，` +
-      `${result.recordings_copied} 个录音文件` +
-      (result.transcriptions_skipped > 0 ? `（跳过 ${result.transcriptions_skipped} 条重复）` : '')
-    );
-  };
-
-  const handleImportVoiceInk = async () => {
-    if (!legacyPath) return;
-    Modal.confirm({
-      title: '导入 VoiceInk 数据',
-      content: '将从 VoiceInk macOS 版导入转录历史、词典和替换规则。已存在的记录会自动跳过。',
-      okText: '开始导入',
-      cancelText: '取消',
-      onOk: async () => {
-        setImporting(true);
-        try {
-          const result = await invoke<{
-            transcriptions_imported: number;
-            transcriptions_skipped: number;
-            vocabulary_imported: number;
-            replacements_imported: number;
-            recordings_copied: number;
-          }>('import_voiceink_legacy', { storePath: legacyPath });
-          showImportResult(result);
-        } catch (e) {
-          message.error(formatError(e, '导入失败'));
-        }
-        setImporting(false);
-      },
-    });
-  };
-
-  const handleImportFromDialog = async () => {
-    setImporting(true);
-    try {
-      const result = await invoke<{
-        transcriptions_imported: number;
-        transcriptions_skipped: number;
-        vocabulary_imported: number;
-        replacements_imported: number;
-        recordings_copied: number;
-      }>('import_voiceink_from_dialog');
-      showImportResult(result);
-    } catch (e) {
-      const errMsg = String(e);
-      if (!errMsg.includes('用户取消')) {
-        Modal.error({
-          title: '导入失败',
-          content: (
-            <>
-              <p>{formatError(e, '未知错误')}</p>
-              <p style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
-                请确认选择的是 VoiceInk macOS 版数据目录下的 default.store 文件，
-                默认路径为 ~/Library/Application Support/com.prakashjoshipax.VoiceInk/default.store
-              </p>
-            </>
-          ),
-        });
-      }
-    }
-    setImporting(false);
   };
 
   const handleClearHotkey = async () => {
@@ -212,9 +131,9 @@ export default function Settings() {
       setRecordingHotkey(false);
       updateSetting('hotkey', '');
       logEvent('Settings', 'hotkey_cleared');
-      message.success('快捷键已清除');
+      message.success(t('settings.hotkeyCleared'));
     } catch (e) {
-      message.error(formatError(e, '清除失败'));
+      message.error(formatError(e, t('settings.clearFailed')));
     }
   };
 
@@ -222,10 +141,9 @@ export default function Settings() {
     try {
       await invoke('delete_all_transcriptions');
       logEvent('Settings', 'history_cleared');
-      emit('stats-updated');
-      message.success('已清空所有历史记录');
+      message.success(t('settings.historyClearedSuccess'));
     } catch (e) {
-      message.error(formatError(e, '清空失败'));
+      message.error(formatError(e, t('settings.clearHistoryFailed')));
     }
   };
 
@@ -239,53 +157,53 @@ export default function Settings() {
   const items = [
     {
       key: 'audio',
-      label: <Space><AudioOutlined />录音</Space>,
+      label: <Space><AudioOutlined />{t('settings.sectionAudio')}</Space>,
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
-          {settingRow('音频设备',
-            <Select value={settings.audio_device} onChange={(v) => updateSetting('audio_device', v)} style={{ width: 250 }} placeholder="选择音频设备" options={audioDevices.map((d) => ({ value: d.id, label: d.name }))} />,
+          {settingRow(t('settings.audioDevice'),
+            <Select value={settings.audio_device} onChange={(v) => updateSetting('audio_device', v)} style={{ width: 250 }} placeholder={t('settings.audioDevicePlaceholder')} options={audioDevices.map((d) => ({ value: d.id, label: d.name }))} />,
           )}
-          {settingRow('转录语言',
+          {settingRow(t('settings.transcriptionLang'),
             <Select value={settings.language || 'auto'} onChange={(v) => updateSetting('language', v)} style={{ width: 250 }}
               options={[
-                { value: 'auto', label: '自动检测' },
-                { value: 'zh', label: '中文' },
+                { value: 'auto', label: t('settings.langAutoDetect') },
+                { value: 'zh', label: t('settings.langChinese') },
                 { value: 'en', label: 'English' },
-                { value: 'ja', label: '日本語' },
-                { value: 'ko', label: '한국어' },
-                { value: 'fr', label: 'Français' },
+                { value: 'ja', label: '\u65E5\u672C\u8A9E' },
+                { value: 'ko', label: '\uD55C\uAD6D\uC5B4' },
+                { value: 'fr', label: 'Fran\u00E7ais' },
                 { value: 'de', label: 'Deutsch' },
-                { value: 'es', label: 'Español' },
-                { value: 'ru', label: 'Русский' },
+                { value: 'es', label: 'Espa\u00F1ol' },
+                { value: 'ru', label: '\u0420\u0443\u0441\u0441\u043A\u0438\u0439' },
               ]}
             />,
           )}
-          {settingRow('录音提示音',
+          {settingRow(t('settings.recordingSound'),
             <Switch checked={settings.sound_enabled} onChange={(v) => updateSetting('sound_enabled', v)} />,
           )}
-          {settingRow('自定义提示音文件',
-            <Input value={settings.custom_sound_file || ''} onChange={(e) => updateSetting('custom_sound_file', e.target.value)} placeholder="文件路径..." style={{ width: 250 }} />,
+          {settingRow(t('settings.customSoundFile'),
+            <Input value={settings.custom_sound_file || ''} onChange={(e) => updateSetting('custom_sound_file', e.target.value)} placeholder={t('settings.customSoundFilePlaceholder')} style={{ width: 250 }} />,
           )}
         </Flex>
       ),
     },
     {
       key: 'noise',
-      label: <Space><FilterOutlined />降噪</Space>,
-      children: settingRow('启用降噪', <Switch checked={settings.noise_reduction} onChange={(v) => updateSetting('noise_reduction', v)} />),
+      label: <Space><FilterOutlined />{t('settings.sectionNoise')}</Space>,
+      children: settingRow(t('settings.enableNoise'), <Switch checked={settings.noise_reduction} onChange={(v) => updateSetting('noise_reduction', v)} />),
     },
     {
       key: 'vad',
-      label: <Space><ThunderboltOutlined />VAD 流式转录</Space>,
+      label: <Space><ThunderboltOutlined />{t('settings.sectionVad')}</Space>,
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
-          {settingRow('启用 VAD', <Switch checked={settings.vad_enabled} onChange={(v) => updateSetting('vad_enabled', v)} />)}
+          {settingRow(t('settings.enableVad'), <Switch checked={settings.vad_enabled} onChange={(v) => updateSetting('vad_enabled', v)} />)}
           <div style={{ padding: '8px 0' }}>
-            <Text>灵敏度</Text>
+            <Text>{t('settings.vadSensitivity')}</Text>
             <Slider min={0} max={100} value={settings.vad_sensitivity ?? 50} onChange={(v) => updateSetting('vad_sensitivity', v)} />
           </div>
           <div style={{ padding: '8px 0' }}>
-            <Text>静音超时 (ms)</Text>
+            <Text>{t('settings.vadSilenceTimeout')}</Text>
             <Slider min={100} max={5000} step={100} value={settings.vad_silence_timeout ?? 1000} onChange={(v) => updateSetting('vad_silence_timeout', v)} />
           </div>
         </Flex>
@@ -293,12 +211,12 @@ export default function Settings() {
     },
     {
       key: 'paste',
-      label: <Space><CopyOutlined />粘贴</Space>,
+      label: <Space><CopyOutlined />{t('settings.sectionPaste')}</Space>,
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
-          {settingRow('恢复剪贴板', <Switch checked={settings.clipboard_restore} onChange={(v) => updateSetting('clipboard_restore', v)} />)}
+          {settingRow(t('settings.clipboardRestore'), <Switch checked={settings.clipboard_restore} onChange={(v) => updateSetting('clipboard_restore', v)} />)}
           <div style={{ padding: '8px 0' }}>
-            <Text>粘贴延迟 (ms)</Text>
+            <Text>{t('settings.pasteDelay')}</Text>
             <Slider min={0} max={1000} step={50} value={settings.paste_delay ?? 100} onChange={(v) => updateSetting('paste_delay', v)} />
           </div>
         </Flex>
@@ -306,111 +224,77 @@ export default function Settings() {
     },
     {
       key: 'format',
-      label: <Space><FontSizeOutlined />文本格式化</Space>,
-      children: settingRow('自动大写', <Switch checked={settings.auto_capitalize} onChange={(v) => updateSetting('auto_capitalize', v)} />),
+      label: <Space><FontSizeOutlined />{t('settings.sectionFormat')}</Space>,
+      children: settingRow(t('settings.autoCapitalize'), <Switch checked={settings.auto_capitalize} onChange={(v) => updateSetting('auto_capitalize', v)} />),
     },
     {
       key: 'system',
-      label: <Space><DesktopOutlined />系统控制</Space>,
-      children: settingRow('录音时静音系统', <Switch checked={settings.system_mute} onChange={(v) => updateSetting('system_mute', v)} />),
+      label: <Space><DesktopOutlined />{t('settings.sectionSystem')}</Space>,
+      children: settingRow(t('settings.systemMute'), <Switch checked={settings.system_mute} onChange={(v) => updateSetting('system_mute', v)} />),
     },
     {
       key: 'hotkey',
-      label: <Space><KeyOutlined />快捷键</Space>,
+      label: <Space><KeyOutlined />{t('settings.sectionHotkey')}</Space>,
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
           <Space.Compact style={{ width: '100%' }}>
             <Input
-              placeholder={recordingHotkey ? '请按下快捷键组合...' : '点击"录制"后按下快捷键'}
+              placeholder={recordingHotkey ? t('settings.hotkeyPlaceholderRecording') : t('settings.hotkeyPlaceholderIdle')}
               value={hotkeyInput}
               readOnly
               onKeyDown={recordingHotkey ? handleHotkeyKeyDown : undefined}
               style={recordingHotkey ? { borderColor: '#1677ff', boxShadow: '0 0 0 2px rgba(22,119,255,0.2)' } : {}}
             />
             <Button type={recordingHotkey ? 'default' : 'primary'} onClick={() => setRecordingHotkey(!recordingHotkey)}>
-              {recordingHotkey ? '取消' : '录制'}
+              {recordingHotkey ? t('settings.hotkeyCancel') : t('settings.hotkeyRecord')}
             </Button>
-            <Button onClick={handleClearHotkey}>清除</Button>
+            <Button onClick={handleClearHotkey}>{t('settings.hotkeyClear')}</Button>
           </Space.Compact>
         </Flex>
       ),
     },
     {
       key: 'tray',
-      label: <Space><AppstoreOutlined />系统托盘</Space>,
-      children: settingRow('菜单栏模式', <Switch checked={settings.menu_bar_mode} onChange={(v) => updateSetting('menu_bar_mode', v)} />),
-    },
-    {
-      key: 'sprite',
-      label: <Space><PictureOutlined />精灵图</Space>,
-      children: (
-        <SpriteManager
-          selectedSpriteId={settings.selected_sprite_id || ''}
-          onSelectedChange={(v) => updateSetting('selected_sprite_id', v)}
-          spriteSize={settings.sprite_size ?? 180}
-          onSizeChange={(v) => updateSetting('sprite_size', v)}
-        />
-      ),
+      label: <Space><AppstoreOutlined />{t('settings.sectionTray')}</Space>,
+      children: settingRow(t('settings.menuBarMode'), <Switch checked={settings.menu_bar_mode} onChange={(v) => updateSetting('menu_bar_mode', v)} />),
     },
     {
       key: 'history',
-      label: <Space><HistoryOutlined />历史管理</Space>,
+      label: <Space><HistoryOutlined />{t('settings.sectionHistory')}</Space>,
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
-          <Popconfirm title="确认清空所有历史记录？" onConfirm={handleClearAllHistory} okText="确认" cancelText="取消">
-            <Button danger icon={<ClearOutlined />}>清空所有记录</Button>
+          {settingRow(t('settings.autoCleanup'), <Switch checked={settings.auto_cleanup} onChange={(v) => updateSetting('auto_cleanup', v)} />)}
+          {settingRow(t('settings.autoCleanupDays'), <InputNumber min={1} max={365} value={settings.auto_cleanup_days ?? 30} onChange={(v) => v && updateSetting('auto_cleanup_days', v)} style={{ width: 120 }} />)}
+          <Popconfirm title={t('settings.confirmClearHistory')} onConfirm={handleClearAllHistory} okText={t('common.confirm')} cancelText={t('common.cancel')}>
+            <Button danger icon={<ClearOutlined />}>{t('settings.clearAllHistory')}</Button>
           </Popconfirm>
         </Flex>
       ),
     },
     {
-      key: 'import',
-      label: <Space><ImportOutlined />数据导入</Space>,
-      children: (
-        <Flex vertical gap={8} style={{ width: '100%' }}>
-          {legacyPath && (
-            <>
-              <Alert
-                type="info"
-                showIcon
-                message="检测到 VoiceInk macOS 版数据"
-                description={
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    路径: {legacyPath}<br />
-                    可导入转录历史、词典、替换规则和录音文件。已存在的记录会自动跳过。
-                  </Text>
-                }
-              />
-              <Button
-                type="primary"
-                icon={<ImportOutlined />}
-                loading={importing}
-                onClick={handleImportVoiceInk}
-              >
-                一键导入检测到的数据
-              </Button>
-            </>
-          )}
-          <Button
-            icon={<ImportOutlined />}
-            loading={importing}
-            onClick={handleImportFromDialog}
-          >
-            选择 .store 文件导入
-          </Button>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            手动选择 VoiceInk macOS 版的 default.store 文件，支持导入转录历史、词典、替换规则和录音文件。
-          </Text>
-        </Flex>
-      ),
-    },
-    {
       key: 'general',
-      label: <Space><SettingOutlined />通用</Space>,
+      label: <Space><SettingOutlined />{t('settings.sectionGeneral')}</Space>,
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
-          {settingRow('开机自启', <Switch checked={settings.autostart} onChange={(v) => updateSetting('autostart', v)} />)}
-          {settingRow('数据目录', <Text type="secondary" copyable>{settings.data_path || '未设置'}</Text>)}
+          {settingRow(t('settings.language'),
+            <Select
+              value={(settings.ui_locale as string) || 'system'}
+              onChange={async (v: string) => {
+                await updateSetting('ui_locale', v);
+                const resolved = await getResolvedLocale(v as UiLocale);
+                i18n.changeLanguage(resolved);
+                emit('language-changed', resolved);
+              }}
+              style={{ width: 250 }}
+              options={[
+                { value: 'system', label: t('settings.langFollowSystem') },
+                { value: 'zh-CN', label: t('settings.langChinese') },
+                { value: 'en', label: t('settings.langEnglish') },
+              ]}
+            />,
+          )}
+          {settingRow(t('settings.autostart'), <Switch checked={settings.autostart} onChange={(v) => updateSetting('autostart', v)} />)}
+          {settingRow(t('settings.dataPath'), <Text type="secondary" copyable>{settings.data_path || t('settings.dataPathNotSet')}</Text>)}
         </Flex>
       ),
     },
@@ -418,7 +302,7 @@ export default function Settings() {
 
   return (
     <Flex vertical gap="large" style={{ width: '100%' }}>
-      <Typography.Title level={3}>设置</Typography.Title>
+      <Typography.Title level={3}>{t('settings.title')}</Typography.Title>
       <Collapse items={items} defaultActiveKey={['audio', 'hotkey']} />
     </Flex>
   );

@@ -10,6 +10,7 @@ import {
   LoadingOutlined,
 } from '@ant-design/icons';
 import { listen } from '@tauri-apps/api/event';
+import { useTranslation } from 'react-i18next';
 import { invoke, formatError, logEvent } from '../lib/logger';
 import useAppStore, { type ModelInfo } from '../stores/useAppStore';
 
@@ -27,6 +28,7 @@ interface Props {
 }
 
 export default function OnboardingWizard({ onComplete }: Props) {
+  const { t } = useTranslation();
   const [step, setStep] = useState(0);
   const [ready, setReady] = useState(false);
 
@@ -149,7 +151,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
       logEvent('Onboarding', 'download_complete', { model_id: model.id });
     } catch (e) {
       setDownloading(false);
-      message.error(formatError(e, '下载失败'));
+      message.error(formatError(e, t('onboarding.modelDownloadFailed')));
       logEvent('Onboarding', 'download_error', { model_id: model.id, error: formatError(e, 'unknown') });
     }
   };
@@ -186,9 +188,9 @@ export default function OnboardingWizard({ onComplete }: Props) {
           await updateSetting('hotkey', shortcut);
           setHotkeySet(true);
           logEvent('Onboarding', 'hotkey_set', { shortcut });
-          message.success(`快捷键已设置: ${shortcut}`);
+          message.success(t('onboarding.hotkeySet', { shortcut }));
         } catch (e) {
-          message.error(formatError(e, '注册失败'));
+          message.error(formatError(e, t('onboarding.hotkeyRegisterFailed')));
         }
       })();
     }
@@ -208,26 +210,26 @@ export default function OnboardingWizard({ onComplete }: Props) {
       case 0: // Welcome
         return (
           <Flex vertical align="center" gap={24} style={{ padding: '40px 0' }}>
-            <Title level={2} style={{ margin: 0 }}>欢迎使用语墨</Title>
+            <Title level={2} style={{ margin: 0 }}>{t('onboarding.welcomeTitle')}</Title>
             <Paragraph style={{ fontSize: 16, textAlign: 'center', maxWidth: 400 }}>
-              语音转文字工具，按下快捷键说话，松开后文字自动粘贴到光标位置。
+              {t('onboarding.welcomeDesc')}
             </Paragraph>
-            <Paragraph type="secondary">接下来几步帮你完成初始设置。</Paragraph>
+            <Paragraph type="secondary">{t('onboarding.welcomeHint')}</Paragraph>
           </Flex>
         );
 
       case 1: // Microphone
         return (
           <Flex vertical gap={16} style={{ padding: '24px 0' }}>
-            <Title level={4}>麦克风权限</Title>
-            <Paragraph>语墨需要麦克风权限来录制你的语音。</Paragraph>
+            <Title level={4}>{t('onboarding.micTitle')}</Title>
+            <Paragraph>{t('onboarding.micDesc')}</Paragraph>
             {micOk ? (
-              <Alert message="麦克风权限已授权" type="success" showIcon icon={<CheckCircleOutlined />} />
+              <Alert message={t('onboarding.micGranted')} type="success" showIcon icon={<CheckCircleOutlined />} />
             ) : (
               <Flex vertical gap={12}>
-                <Alert message="需要麦克风权限" type="warning" showIcon />
+                <Alert message={t('onboarding.micNeeded')} type="warning" showIcon />
                 <Button type="primary" onClick={() => requestPermission('microphone')} loading={checkingPerm}>
-                  授予麦克风权限
+                  {t('onboarding.micGrant')}
                 </Button>
               </Flex>
             )}
@@ -237,15 +239,15 @@ export default function OnboardingWizard({ onComplete }: Props) {
       case 2: // Accessibility
         return (
           <Flex vertical gap={16} style={{ padding: '24px 0' }}>
-            <Title level={4}>辅助功能权限</Title>
-            <Paragraph>语墨需要辅助功能权限来将转写文字自动粘贴到光标位置。</Paragraph>
+            <Title level={4}>{t('onboarding.accTitle')}</Title>
+            <Paragraph>{t('onboarding.accDesc')}</Paragraph>
             {accOk ? (
-              <Alert message="辅助功能权限已授权" type="success" showIcon icon={<CheckCircleOutlined />} />
+              <Alert message={t('onboarding.accGranted')} type="success" showIcon icon={<CheckCircleOutlined />} />
             ) : (
               <Flex vertical gap={12}>
-                <Alert message="需要辅助功能权限" description="点击后会打开系统设置，在列表中找到语墨并勾选" type="warning" showIcon />
+                <Alert message={t('onboarding.accNeeded')} description={t('onboarding.accNeededDesc')} type="warning" showIcon />
                 <Button type="primary" onClick={() => requestPermission('accessibility')} loading={checkingPerm}>
-                  前往系统设置
+                  {t('onboarding.accGrant')}
                 </Button>
               </Flex>
             )}
@@ -255,11 +257,11 @@ export default function OnboardingWizard({ onComplete }: Props) {
       case 3: // Model
         return (
           <Flex vertical gap={16} style={{ padding: '24px 0' }}>
-            <Title level={4}>选择语音模型</Title>
-            <Paragraph>选择一个模型下载，下载完成后即可开始转写。</Paragraph>
+            <Title level={4}>{t('onboarding.modelTitle')}</Title>
+            <Paragraph>{t('onboarding.modelDesc')}</Paragraph>
             {modelReady ? (
               <Alert
-                message={`${selectedModel?.name} 已就绪`}
+                message={t('onboarding.modelReady', { name: selectedModel?.name })}
                 type="success"
                 showIcon
                 icon={<CheckCircleOutlined />}
@@ -267,7 +269,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
             ) : downloading ? (
               <Card>
                 <Flex vertical gap={8}>
-                  <Text>{selectedModel?.name} 下载中...</Text>
+                  <Text>{t('onboarding.modelDownloading', { name: selectedModel?.name })}</Text>
                   <Progress percent={Math.round(downloadProgress)} status="active" />
                 </Flex>
               </Card>
@@ -285,11 +287,11 @@ export default function OnboardingWizard({ onComplete }: Props) {
                       <Flex vertical gap={2}>
                         <Space>
                           <Text strong>{m.name}</Text>
-                          {m.is_recommended && <Tag color="blue">推荐</Tag>}
+                          {m.is_recommended && <Tag color="blue">{t('onboarding.modelRecommended')}</Tag>}
                         </Space>
                         <Text type="secondary" style={{ fontSize: 12 }}>{m.description} · {m.size_mb >= 1000 ? `${(m.size_mb / 1024).toFixed(1)}GB` : `${m.size_mb}MB`}</Text>
                       </Flex>
-                      <Button type="primary" size="small">下载</Button>
+                      <Button type="primary" size="small">{t('onboarding.modelDownload')}</Button>
                     </Flex>
                   </Card>
                 ))}
@@ -301,16 +303,16 @@ export default function OnboardingWizard({ onComplete }: Props) {
       case 4: // Hotkey
         return (
           <Flex vertical gap={16} style={{ padding: '24px 0' }}>
-            <Title level={4}>设置全局快捷键</Title>
-            <Paragraph>设置一个快捷键，在任何应用中按下即可开始录音。</Paragraph>
+            <Title level={4}>{t('onboarding.hotkeyTitle')}</Title>
+            <Paragraph>{t('onboarding.hotkeyDesc')}</Paragraph>
             {hotkeySet ? (
-              <Alert message={`快捷键已设置: ${hotkeyValue}`} type="success" showIcon icon={<CheckCircleOutlined />} />
+              <Alert message={t('onboarding.hotkeySet', { shortcut: hotkeyValue })} type="success" showIcon icon={<CheckCircleOutlined />} />
             ) : (
               <Flex vertical gap={12}>
                 <Input
                   readOnly
-                  value={recordingHotkey ? '请按下快捷键组合...' : hotkeyValue}
-                  placeholder="点击此处开始录制快捷键"
+                  value={recordingHotkey ? t('onboarding.hotkeyRecording') : hotkeyValue}
+                  placeholder={t('onboarding.hotkeyPlaceholder')}
                   onFocus={() => setRecordingHotkey(true)}
                   onBlur={() => setRecordingHotkey(false)}
                   onKeyDown={recordingHotkey ? handleHotkeyKeyDown : undefined}
@@ -326,11 +328,11 @@ export default function OnboardingWizard({ onComplete }: Props) {
         return (
           <Flex vertical align="center" gap={24} style={{ padding: '40px 0' }}>
             <CheckCircleOutlined style={{ fontSize: 64, color: '#52c41a' }} />
-            <Title level={2} style={{ margin: 0 }}>设置完成！</Title>
+            <Title level={2} style={{ margin: 0 }}>{t('onboarding.doneTitle')}</Title>
             <Paragraph style={{ fontSize: 16, textAlign: 'center', maxWidth: 400 }}>
               {hotkeyValue
-                ? <>按下 <Tag color="blue">{hotkeyValue}</Tag> 开始录音，松开后自动转写并粘贴到光标位置。</>
-                : '在首页点击录音按钮，或前往设置页配置快捷键。'
+                ? <>{t('onboarding.doneHotkeyPrefix')} <Tag color="blue">{hotkeyValue}</Tag> {t('onboarding.doneHotkeySuffix')}</>
+                : t('onboarding.doneNoHotkey')
               }
             </Paragraph>
           </Flex>
@@ -351,10 +353,10 @@ export default function OnboardingWizard({ onComplete }: Props) {
   };
 
   const nextLabel = () => {
-    if (step === 0) return '开始设置';
-    if (step === 4 && !hotkeySet) return '跳过';
-    if (step === 5) return '开始使用';
-    return '下一步';
+    if (step === 0) return t('onboarding.startSetup');
+    if (step === 4 && !hotkeySet) return t('onboarding.skip');
+    if (step === 5) return t('onboarding.startUsing');
+    return t('onboarding.next');
   };
 
   const handleNext = () => {
@@ -371,12 +373,12 @@ export default function OnboardingWizard({ onComplete }: Props) {
   };
 
   const stepItems = [
-    { title: '欢迎', icon: <SmileOutlined /> },
-    { title: '麦克风', icon: <AudioOutlined /> },
-    { title: '辅助功能', icon: <DesktopOutlined /> },
-    { title: '模型', icon: <CloudDownloadOutlined /> },
-    { title: '快捷键', icon: <ThunderboltOutlined /> },
-    { title: '完成', icon: <CheckCircleOutlined /> },
+    { title: t('onboarding.stepWelcome'), icon: <SmileOutlined /> },
+    { title: t('onboarding.stepMic'), icon: <AudioOutlined /> },
+    { title: t('onboarding.stepAcc'), icon: <DesktopOutlined /> },
+    { title: t('onboarding.stepModel'), icon: <CloudDownloadOutlined /> },
+    { title: t('onboarding.stepHotkey'), icon: <ThunderboltOutlined /> },
+    { title: t('onboarding.stepDone'), icon: <CheckCircleOutlined /> },
   ];
 
   if (!ready) return null;
