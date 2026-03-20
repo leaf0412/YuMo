@@ -566,6 +566,19 @@ pub fn get_pipeline_state(state: State<AppState>) -> Result<serde_json::Value, A
 }
 
 #[tauri::command]
+pub fn get_statistics(
+    state: State<AppState>,
+    days: Option<i64>,
+) -> Result<db::Statistics, AppError> {
+    info!("[cmd] get_statistics days={:?}", days);
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    db::get_statistics(&conn, days)
+}
+
+#[tauri::command]
 pub fn list_audio_devices() -> Vec<recorder::AudioInputDevice> {
     info!("[cmd] list_audio_devices");
     recorder::list_input_devices()

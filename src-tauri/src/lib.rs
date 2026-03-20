@@ -22,6 +22,7 @@ pub mod vad;
 pub mod window_manager;
 
 use log::info;
+use tauri::Emitter;
 use state::AppPaths;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -201,6 +202,7 @@ pub fn run() {
                                     Ok(resp) if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" => {
                                         state.daemon.set_loaded_model(Some(repo.clone()));
                                         info!("[warmup] model loaded: {}", repo);
+                                        let _ = handle.emit("daemon-status-changed", ());
                                     }
                                     Ok(resp) => info!("[warmup] load response: {}", resp.status),
                                     Err(e) => info!("[warmup] load failed: {}", e),
@@ -235,6 +237,7 @@ pub fn run() {
             commands::get_recording,
             commands::delete_transcription,
             commands::delete_all_transcriptions,
+            commands::get_statistics,
             // Vocabulary
             commands::get_vocabulary,
             commands::add_vocabulary,
