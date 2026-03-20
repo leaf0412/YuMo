@@ -269,15 +269,17 @@ pub fn predefined_mlx_models() -> Vec<ModelInfo> {
         .collect()
 }
 
-/// Check if an MLX model is available in the app's mlx-cache directory.
+/// Check if an MLX model is available in the app's models directory.
 /// Looks for any `.safetensors` file under the model's snapshots directory.
 pub fn check_mlx_model_downloaded(model_repo: &str) -> bool {
     let cache_name = model_repo.replace('/', "--");
     let cache_path = dirs::home_dir()
         .unwrap_or_default()
-        .join(".voiceink/mlx-cache")
+        .join(".voiceink/models")
         .join(format!("models--{}", cache_name))
         .join("snapshots");
+
+    log::info!("[transcriber] check_mlx_model_downloaded repo={} path={:?} exists={}", model_repo, cache_path, cache_path.exists());
 
     if !cache_path.exists() {
         return false;
@@ -285,15 +287,16 @@ pub fn check_mlx_model_downloaded(model_repo: &str) -> bool {
 
     if let Ok(entries) = std::fs::read_dir(&cache_path) {
         for entry in entries.flatten() {
-            if entry.path().is_dir() {
-                if let Ok(files) = std::fs::read_dir(entry.path()) {
+            let p = entry.path();
+            if p.is_dir() {
+                if let Ok(files) = std::fs::read_dir(&p) {
                     for file in files.flatten() {
-                        if file
-                            .path()
-                            .extension()
-                            .map(|e| e == "safetensors")
-                            .unwrap_or(false)
-                        {
+                        let fp = file.path();
+                        let ext = fp.extension().map(|e| e.to_string_lossy().to_string());
+                        let is_symlink = fp.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false);
+                        let target_exists = fp.exists(); // follows symlink
+                        if ext.as_deref() == Some("safetensors") && target_exists {
+                            log::info!("[transcriber] found safetensors: {:?} symlink={} target_exists={}", fp, is_symlink, target_exists);
                             return true;
                         }
                     }
@@ -302,6 +305,7 @@ pub fn check_mlx_model_downloaded(model_repo: &str) -> bool {
         }
     }
 
+    log::info!("[transcriber] no safetensors found for {}", model_repo);
     false
 }
 
@@ -396,8 +400,8 @@ pub async fn transcribe_via_daemon(
 ) -> Result<TranscriptionResult, AppError> {
     let start = std::time::Instant::now();
 
-    // Write samples to a temp WAV file (daemon expects a file path)
-    let tmp_dir = std::env::temp_dir().join("voiceink");
+    // Write samples to a temp WAV file under ~/.voiceink (daemon expects a file path)
+    let tmp_dir = dirs::home_dir().unwrap_or_default().join(".voiceink/tmp");
     std::fs::create_dir_all(&tmp_dir)?;
     let wav_path = tmp_dir.join("recording.wav");
 

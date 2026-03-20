@@ -21,8 +21,8 @@ import os
 import json
 import gc
 
-# All model cache lives under ~/.voiceink/mlx-cache
-_mlx_cache = os.path.join(os.path.expanduser("~"), ".voiceink", "mlx-cache")
+# All model cache lives under ~/.voiceink/models
+_mlx_cache = os.path.join(os.path.expanduser("~"), ".voiceink", "models")
 os.makedirs(_mlx_cache, exist_ok=True)
 os.environ["HF_HUB_CACHE"] = _mlx_cache
 os.environ["HF_HOME"] = _mlx_cache
@@ -74,7 +74,7 @@ def get_install_command(missing_packages):
 
 
 def get_model_cache_path(model_repo):
-    """Get the model cache path under ~/.voiceink/mlx-cache."""
+    """Get the model cache path under ~/.voiceink/models."""
     hf_model_dir = f"models--{model_repo.replace('/', '--')}"
     return os.path.join(_mlx_cache, hf_model_dir)
 
@@ -101,8 +101,28 @@ def check_model_downloaded(model_repo):
     return False
 
 
+def _get_cache_blobs_dir(model_repo):
+    """Return the blobs directory where HF stores incomplete/complete downloads."""
+    cache_path = get_model_cache_path(model_repo)
+    return os.path.join(cache_path, "blobs")
+
+
+def _measure_blobs_size(blobs_dir):
+    """Sum up all file sizes in the blobs directory (includes .incomplete files)."""
+    total = 0
+    if not os.path.isdir(blobs_dir):
+        return 0
+    for f in os.listdir(blobs_dir):
+        fp = os.path.join(blobs_dir, f)
+        if os.path.isfile(fp):
+            total += os.path.getsize(fp)
+    return total
+
+
 def download_model(model_repo):
     """Download model from HuggingFace with byte-level progress reporting."""
+    import threading
+    import time
     from huggingface_hub import HfApi, hf_hub_download
 
     log(f"Downloading model: {model_repo}")
@@ -115,43 +135,41 @@ def download_model(model_repo):
         total_bytes = sum(size for _, size in files)
         log(f"Model has {len(files)} files, total size: {total_bytes / 1024 / 1024:.0f} MB")
 
-        # Shared state for byte-level progress tracking across all files
-        state = {"downloaded": 0, "last_progress": -1}
+        if total_bytes == 0:
+            total_bytes = 1  # avoid division by zero
 
-        class DownloadProgress:
-            """tqdm-compatible class that reports byte-level progress."""
-            def __init__(self, *args, **kwargs):
-                self.n = kwargs.get("initial", 0)
+        blobs_dir = _get_cache_blobs_dir(model_repo)
+        download_error = [None]
+        download_done = threading.Event()
 
-            def update(self, n=1):
-                self.n += n
-                state["downloaded"] += n
-                if total_bytes > 0:
-                    progress = min(int(state["downloaded"] * 100 / total_bytes), 99)
-                    if progress != state["last_progress"]:
-                        state["last_progress"] = progress
-                        send_response({"status": "downloading", "model": model_repo, "progress": progress})
-
-            def close(self): pass
-            def clear(self): pass
-            def refresh(self): pass
-            def set_postfix_str(self, *a, **kw): pass
-            def __enter__(self): return self
-            def __exit__(self, *a): self.close()
-
-        for i, (filename, size) in enumerate(files):
-            size_mb = size / 1024 / 1024
-            log(f"Downloading [{i+1}/{len(files)}]: {filename} ({size_mb:.1f} MB)")
+        def _do_download():
             try:
-                hf_hub_download(model_repo, filename, tqdm_class=DownloadProgress)
-            except TypeError:
-                # Newer huggingface_hub removed tqdm_class parameter
-                hf_hub_download(model_repo, filename)
-                state["downloaded"] += size
-                progress = min(int(state["downloaded"] * 100 / total_bytes), 99) if total_bytes > 0 else 0
-                if progress != state["last_progress"]:
-                    state["last_progress"] = progress
-                    send_response({"status": "downloading", "model": model_repo, "progress": progress})
+                for i, (filename, size) in enumerate(files):
+                    size_mb = size / 1024 / 1024
+                    log(f"Downloading [{i+1}/{len(files)}]: {filename} ({size_mb:.1f} MB)")
+                    hf_hub_download(model_repo, filename)
+            except Exception as e:
+                download_error[0] = e
+            finally:
+                download_done.set()
+
+        # Start download in background thread
+        t = threading.Thread(target=_do_download, daemon=True)
+        t.start()
+
+        # Poll blob sizes and report progress until download finishes
+        last_progress = -1
+        while not download_done.is_set():
+            current = _measure_blobs_size(blobs_dir)
+            progress = min(int(current * 100 / total_bytes), 99)
+            if progress != last_progress:
+                last_progress = progress
+                send_response({"status": "downloading", "model": model_repo, "progress": progress})
+            download_done.wait(timeout=0.5)
+
+        t.join()
+        if download_error[0]:
+            raise download_error[0]
 
         send_response({"status": "download_complete", "model": model_repo})
         log(f"Download complete: {model_repo}")
