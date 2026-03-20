@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { invoke } from '../lib/logger';
 import { onBroadcast } from '../lib/broadcast';
 import {
@@ -20,6 +21,10 @@ export default function RecorderFloat() {
   const [duration, setDuration] = useState(0);
   const timerRef = useRef<number | null>(null);
   const prevStateRef = useRef<PipelineState>(PIPELINE_IDLE);
+
+  // ESC hint
+  const [escHint, setEscHint] = useState<string | null>(null);
+  const escHintTimer = useRef<number | null>(null);
 
   // Sprite
   const [spriteManifest, setSpriteManifest] = useState<SpriteManifest | null>(null);
@@ -45,6 +50,27 @@ export default function RecorderFloat() {
   }, []);
 
   useEffect(() => { loadSprite(); }, [loadSprite]);
+
+  // Listen for ESC events to show hint in recorder window
+  useEffect(() => {
+    let lastEsc = 0;
+    const unlisten = listen('escape-pressed', () => {
+      const now = Date.now();
+      if (now - lastEsc < 500) {
+        setEscHint('录音已取消');
+        lastEsc = 0;
+      } else {
+        lastEsc = now;
+        setEscHint('再按一次 ESC 取消');
+        if (escHintTimer.current) clearTimeout(escHintTimer.current);
+        escHintTimer.current = window.setTimeout(() => setEscHint(null), 2000);
+      }
+    });
+    return () => {
+      unlisten.then(fn => fn());
+      if (escHintTimer.current) clearTimeout(escHintTimer.current);
+    };
+  }, []);
 
   // Shared state-transition handler
   const applyState = useCallback((next: PipelineState) => {
@@ -185,6 +211,22 @@ export default function RecorderFloat() {
           ✕
         </span>
       </div>
+
+      {escHint && (
+        <div style={{
+          marginTop: 4,
+          padding: '2px 10px',
+          borderRadius: 10,
+          background: escHint === '录音已取消' ? 'rgba(255,77,79,0.85)' : 'rgba(0,0,0,0.6)',
+          color: '#fff',
+          fontSize: 11,
+          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+          pointerEvents: 'none',
+          transition: 'opacity 0.2s',
+        }}>
+          {escHint}
+        </div>
+      )}
 
       <style>{`
         @keyframes pulse {
