@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
-import { Layout, Menu, Modal, Typography } from 'antd';
+import { ConfigProvider, Layout, Menu, Modal, Typography } from 'antd';
+import { useTranslation } from 'react-i18next';
+import zhCN from 'antd/locale/zh_CN';
+import enUS from 'antd/locale/en_US';
+import i18n from './i18n';
 import {
   DashboardOutlined,
   HistoryOutlined,
@@ -23,15 +27,6 @@ import useAppStore from './stores/useAppStore';
 const { Sider, Content } = Layout;
 const { Title } = Typography;
 
-const menuItems = [
-  { key: '/', icon: <DashboardOutlined />, label: '统计' },
-  { key: '/history', icon: <HistoryOutlined />, label: '转录历史' },
-  { key: '/models', icon: <CloudDownloadOutlined />, label: '模型管理' },
-  { key: '/dictionary', icon: <BookOutlined />, label: '词典' },
-  { key: '/enhancement', icon: <ThunderboltOutlined />, label: 'AI 增强' },
-  { key: '/settings', icon: <SettingOutlined />, label: '设置' },
-];
-
 const pageEntries: { key: string; render: () => ReactNode }[] = [
   { key: '/', render: () => <Dashboard /> },
   { key: '/history', render: () => <History /> },
@@ -42,7 +37,17 @@ const pageEntries: { key: string; render: () => ReactNode }[] = [
 ];
 
 function AppLayout() {
+  const { t } = useTranslation();
   const { activeKey, setActiveKey } = useAppStore();
+
+  const menuItems = [
+    { key: '/', icon: <DashboardOutlined />, label: t('menu.dashboard') },
+    { key: '/history', icon: <HistoryOutlined />, label: t('menu.history') },
+    { key: '/models', icon: <CloudDownloadOutlined />, label: t('menu.models') },
+    { key: '/dictionary', icon: <BookOutlined />, label: t('menu.dictionary') },
+    { key: '/enhancement', icon: <ThunderboltOutlined />, label: t('menu.enhancement') },
+    { key: '/settings', icon: <SettingOutlined />, label: t('menu.settings') },
+  ];
   // Track which pages have been visited — only render after first visit
   const [mounted, setMounted] = useState<Set<string>>(() => new Set(['/']));
 
@@ -61,7 +66,7 @@ function AppLayout() {
     <Layout style={{ height: '100vh' }}>
       <Sider width={200} theme="light" style={{ overflow: 'auto' }}>
         <div style={{ padding: '16px', textAlign: 'center' }}>
-          <Title level={4} style={{ margin: 0 }}>语墨</Title>
+          <Title level={4} style={{ margin: 0 }}>{t('app.name')}</Title>
         </div>
         <Menu
           mode="inline"
@@ -86,12 +91,13 @@ function AppLayout() {
 /** Check if a downloaded model is selected; if not, show warning and return false */
 function checkModelReady(): boolean {
   const { settings, models, setActiveKey } = useAppStore.getState();
+  const t = i18n.t;
   const modelId = typeof settings.selected_model_id === 'string' ? settings.selected_model_id : '';
   if (!modelId) {
     Modal.warning({
-      title: '请先选择模型',
-      content: '录音需要一个已下载的语音识别模型。',
-      okText: '前往模型页',
+      title: t('app.selectModelFirst'),
+      content: t('app.selectModelFirstDesc'),
+      okText: t('app.goToModels'),
       onOk: () => setActiveKey('/models'),
     });
     logEvent('App', 'recording_blocked', { reason: 'no_model_selected' });
@@ -100,9 +106,9 @@ function checkModelReady(): boolean {
   const model = models.find(m => m.id === modelId);
   if (model && !model.is_downloaded && ['local', 'mlxWhisper', 'mlxFunASR'].includes(model.provider)) {
     Modal.warning({
-      title: '模型未下载',
-      content: `模型 "${model.name}" 尚未下载，请先下载。`,
-      okText: '前往模型页',
+      title: t('app.modelNotDownloaded'),
+      content: t('app.modelNotDownloadedDesc', { name: model.name }),
+      okText: t('app.goToModels'),
       onOk: () => setActiveKey('/models'),
     });
     logEvent('App', 'recording_blocked', { reason: 'model_not_downloaded', model_id: modelId });
@@ -112,6 +118,7 @@ function checkModelReady(): boolean {
 }
 
 export default function App() {
+  const { i18n: i18nInstance } = useTranslation();
   const pipelineRef = useRef('idle');
   const { fetchSettings } = useAppStore();
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -158,11 +165,11 @@ export default function App() {
       if (now - lastEsc < 500) {
         logEvent('App', 'hotkey_cancel', { current_state: pipelineRef.current });
         invoke('cancel_recording').catch(() => {});
-        import('antd').then(({ message }) => message.info('录音已取消'));
+        import('antd').then(({ message }) => message.info(i18n.t('app.recordingCancelled')));
         lastEsc = 0;
       } else {
         lastEsc = now;
-        import('antd').then(({ message }) => message.info('再按一次 ESC 取消录音'));
+        import('antd').then(({ message }) => message.info(i18n.t('app.pressEscAgain')));
       }
     });
 
@@ -173,11 +180,11 @@ export default function App() {
         if (now - lastEsc < 500) {
           logEvent('App', 'hotkey_cancel', { current_state: pipelineRef.current });
           invoke('cancel_recording').catch(() => {});
-          import('antd').then(({ message }) => message.info('录音已取消'));
+          import('antd').then(({ message }) => message.info(i18n.t('app.recordingCancelled')));
           lastEsc = 0;
         } else {
           lastEsc = now;
-          import('antd').then(({ message }) => message.info('再按一次 ESC 取消录音'));
+          import('antd').then(({ message }) => message.info(i18n.t('app.pressEscAgain')));
         }
       }
     };
@@ -191,14 +198,16 @@ export default function App() {
     };
   }, []);
 
+  const antdLocale = i18nInstance.language === 'zh-CN' ? zhCN : enUS;
+
   if (!onboardingChecked) return null; // Wait for settings to load
 
   return (
-    <>
+    <ConfigProvider locale={antdLocale}>
       {showOnboarding && (
         <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
       )}
       <AppLayout />
-    </>
+    </ConfigProvider>
   );
 }

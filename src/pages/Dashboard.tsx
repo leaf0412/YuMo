@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
 import { Card, Flex, Typography, Row, Col, Segmented, Spin, Empty, Tooltip } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
@@ -43,21 +44,6 @@ interface Statistics {
   wpm_stats: WpmStats;
 }
 
-const TIME_RANGES = [
-  { label: '7 天', value: 7 },
-  { label: '30 天', value: 30 },
-  { label: '90 天', value: 90 },
-  { label: '全部', value: 0 },
-];
-
-function formatTimeSaved(minutes: number): string {
-  if (minutes < 1) return '不到 1 分钟';
-  if (minutes < 60) return `${Math.round(minutes)} 分钟`;
-  const hours = Math.floor(minutes / 60);
-  const mins = Math.round(minutes % 60);
-  return mins > 0 ? `${hours} 小时 ${mins} 分钟` : `${hours} 小时`;
-}
-
 function formatDate(dateStr: string): string {
   const [, m, d] = dateStr.split('-');
   return `${Number(m)}/${Number(d)}`;
@@ -68,9 +54,27 @@ function formatNumber(n: number): string {
 }
 
 export default function Dashboard() {
+  const { t } = useTranslation();
   const [stats, setStats] = useState<Statistics | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState<number>(30);
+
+  const timeRanges = [
+    { label: t('dashboard.range7d'), value: 7 },
+    { label: t('dashboard.range30d'), value: 30 },
+    { label: t('dashboard.range90d'), value: 90 },
+    { label: t('dashboard.rangeAll'), value: 0 },
+  ];
+
+  const formatTimeSaved = (minutes: number): string => {
+    if (minutes < 1) return t('dashboard.timeLessThanMin');
+    if (minutes < 60) return t('dashboard.timeMinutes', { count: Math.round(minutes) });
+    const hours = Math.floor(minutes / 60);
+    const mins = Math.round(minutes % 60);
+    return mins > 0
+      ? t('dashboard.timeHoursMinutes', { hours, minutes: mins })
+      : t('dashboard.timeHours', { hours });
+  };
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -104,8 +108,8 @@ export default function Dashboard() {
   if (!stats || stats.total_sessions === 0) {
     return (
       <Flex vertical align="center" justify="center" gap="middle" style={{ height: 400 }}>
-        <Empty description="暂无录音数据" />
-        <Text type="secondary">开始你的第一次语音录入吧</Text>
+        <Empty description={t('dashboard.noData')} />
+        <Text type="secondary">{t('dashboard.noDataHint')}</Text>
       </Flex>
     );
   }
@@ -122,13 +126,13 @@ export default function Dashboard() {
         textAlign: 'center',
       }}>
         <Title level={4} style={{ color: '#fff', margin: 0 }}>
-          你已节省 <span style={{ fontWeight: 800 }}>{formatTimeSaved(time_saved_minutes)}</span> 使用 VoiceInk{' '}
-          <Tooltip title="节省时间 = 手动打字时间 − 录音时长。手动打字速度按中文 100 字/分钟、英文 40 词/分钟估算">
+          {t('dashboard.timeSavedBanner', { time: formatTimeSaved(time_saved_minutes) })}{' '}
+          <Tooltip title={t('dashboard.timeSavedTooltip')}>
             <InfoCircleOutlined style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', cursor: 'help' }} />
           </Tooltip>
         </Title>
         <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 14 }}>
-          共转录 {formatNumber(total_words)} 个字，完成 {formatNumber(total_sessions)} 次录音。
+          {t('dashboard.totalSummary', { words: formatNumber(total_words), sessions: formatNumber(total_sessions) })}
         </Text>
       </div>
 
@@ -138,54 +142,54 @@ export default function Dashboard() {
           <Card size="small" style={{ borderRadius: 10 }}>
             <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
               <AudioOutlined style={{ fontSize: 16, color: '#f5222d' }} />
-              <Text type="secondary">录音次数</Text>
-              <Tooltip title="统计录音时长超过 1 秒的有效录音次数">
+              <Text type="secondary">{t('dashboard.recordings')}</Text>
+              <Tooltip title={t('dashboard.recordingsTooltip')}>
                 <InfoCircleOutlined style={{ fontSize: 12, color: 'rgba(128,128,128,0.45)', cursor: 'help' }} />
               </Tooltip>
             </Flex>
             <Title level={2} style={{ margin: 0 }}>{formatNumber(total_sessions)}</Title>
-            <Text type="secondary" style={{ fontSize: 12 }}>VoiceInk 录音完成</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('dashboard.recordingsFooter')}</Text>
           </Card>
         </Col>
         <Col xs={24} sm={12}>
           <Card size="small" style={{ borderRadius: 10 }}>
             <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
               <EditOutlined style={{ fontSize: 16, color: '#1890ff' }} />
-              <Text type="secondary">转录字数</Text>
-              <Tooltip title="中日韩字符每个计 1 字，英文等按空格分词计数">
+              <Text type="secondary">{t('dashboard.words')}</Text>
+              <Tooltip title={t('dashboard.wordsTooltip')}>
                 <InfoCircleOutlined style={{ fontSize: 12, color: 'rgba(128,128,128,0.45)', cursor: 'help' }} />
               </Tooltip>
             </Flex>
             <Title level={2} style={{ margin: 0 }}>{formatNumber(total_words)}</Title>
-            <Text type="secondary" style={{ fontSize: 12 }}>已生成字数</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('dashboard.wordsFooter')}</Text>
           </Card>
         </Col>
         <Col xs={24} sm={12}>
           <Card size="small" style={{ borderRadius: 10 }}>
             <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
               <DashboardOutlined style={{ fontSize: 16, color: '#52c41a' }} />
-              <Text type="secondary">每分钟字数</Text>
-              <Tooltip title="总字数 ÷ 总录音时长（分钟），衡量语音输入效率">
+              <Text type="secondary">{t('dashboard.wpm')}</Text>
+              <Tooltip title={t('dashboard.wpmTooltip')}>
                 <InfoCircleOutlined style={{ fontSize: 12, color: 'rgba(128,128,128,0.45)', cursor: 'help' }} />
               </Tooltip>
             </Flex>
             <Title level={2} style={{ margin: 0 }}>
               {avg_wpm > 0 ? avg_wpm.toFixed(1) : 'N/A'}
             </Title>
-            <Text type="secondary" style={{ fontSize: 12 }}>语音输入 vs 手动打字</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('dashboard.wpmFooter')}</Text>
           </Card>
         </Col>
         <Col xs={24} sm={12}>
           <Card size="small" style={{ borderRadius: 10 }}>
             <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
               <FieldTimeOutlined style={{ fontSize: 16, color: '#fa8c16' }} />
-              <Text type="secondary">节省按键</Text>
-              <Tooltip title="中日韩字符按拼音输入估算每字 6 次按键，英文单词按平均每词 5 次按键计算">
+              <Text type="secondary">{t('dashboard.keystrokes')}</Text>
+              <Tooltip title={t('dashboard.keystrokesTooltip')}>
                 <InfoCircleOutlined style={{ fontSize: 12, color: 'rgba(128,128,128,0.45)', cursor: 'help' }} />
               </Tooltip>
             </Flex>
             <Title level={2} style={{ margin: 0 }}>{formatNumber(total_keystrokes_saved)}</Title>
-            <Text type="secondary" style={{ fontSize: 12 }}>减少的按键次数</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('dashboard.keystrokesFooter')}</Text>
           </Card>
         </Col>
       </Row>
@@ -197,15 +201,15 @@ export default function Dashboard() {
         title={
           <Flex align="center" gap={8}>
             <DashboardOutlined />
-            <span>WPM 历史</span>
+            <span>{t('dashboard.wpmHistory')}</span>
           </Flex>
         }
         extra={
           <Flex align="center" gap={12}>
-            <Text type="secondary" style={{ fontSize: 12 }}>{daily_wpm.length} 条记录</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('dashboard.records', { count: daily_wpm.length })}</Text>
             <Segmented
               size="small"
-              options={TIME_RANGES.map(r => ({ label: r.label, value: r.value }))}
+              options={timeRanges.map(r => ({ label: r.label, value: r.value }))}
               value={days}
               onChange={(v) => setDays(v as number)}
             />
@@ -236,7 +240,7 @@ export default function Dashboard() {
               />
               <RechartsTooltip
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                formatter={(value: any) => [`${Number(value).toFixed(1)} WPM`, '每分钟字数'] as any}
+                formatter={(value: any) => [`${Number(value).toFixed(1)} WPM`, t('dashboard.wpmLabel')] as any}
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 labelFormatter={(label: any) => String(label ?? '') as any}
               />
@@ -256,15 +260,15 @@ export default function Dashboard() {
         {/* Footer stats */}
         <Flex justify="flex-start" gap={40} style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid rgba(128,128,128,0.15)' }}>
           <div>
-            <Text type="secondary" style={{ fontSize: 11 }}>平均</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>{t('dashboard.average')}</Text>
             <Title level={4} style={{ margin: 0 }}>{wpm_stats.avg.toFixed(1)}</Title>
           </div>
           <div>
-            <Text type="secondary" style={{ fontSize: 11 }}>最高</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>{t('dashboard.highest')}</Text>
             <Title level={4} style={{ margin: 0 }}>{wpm_stats.max.toFixed(1)}</Title>
           </div>
           <div>
-            <Text type="secondary" style={{ fontSize: 11 }}>最低</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>{t('dashboard.lowest')}</Text>
             <Title level={4} style={{ margin: 0 }}>{wpm_stats.min.toFixed(1)}</Title>
           </div>
         </Flex>

@@ -241,6 +241,7 @@ pub fn run() {
             // Import
             commands::import_voiceink_legacy,
             commands::detect_voiceink_legacy_path,
+            commands::import_voiceink_from_dialog,
             // Vocabulary
             commands::get_vocabulary,
             commands::add_vocabulary,
@@ -283,6 +284,8 @@ pub fn run() {
             commands::import_sprite_zip,
             commands::delete_sprite,
             commands::process_sprite_background,
+            // System locale
+            commands::get_system_locale,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

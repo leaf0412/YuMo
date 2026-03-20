@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Card, Button, Flex, Space, Tag, Typography, Row, Col, Select,
   Input, InputNumber, Slider, Progress, message, Divider, Tabs, Badge,
@@ -28,15 +29,8 @@ function formatSize(mb: number): string {
   return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${mb} MB`;
 }
 
-function languageLabel(lang: string): string {
-  switch (lang) {
-    case 'en': return 'English';
-    case 'multi': return '多语言';
-    default: return lang;
-  }
-}
-
 export default function Models() {
+  const { t } = useTranslation();
   const { models, settings, daemonStatus, fetchModels, fetchSettings, fetchDaemonStatus, setSettings: storeSetSettings, setDaemonStatus: storeSetDaemonStatus } = useAppStore();
   const [cloudApiKey, setCloudApiKey] = useState('');
   const [activeTab, setActiveTab] = useState('mlx');
@@ -45,6 +39,11 @@ export default function Models() {
   const [setupMessage, setSetupMessage] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [modelSettings, setModelSettings] = useState<Record<string, ModelSettings>>({});
+
+  const languageLabelMap: Record<string, string> = {
+    en: 'English',
+    multi: t('models.language.multi'),
+  };
 
   const getModelSettings = (modelId: string): ModelSettings =>
     modelSettings[modelId] ?? DEFAULT_MODEL_SETTINGS;
@@ -58,7 +57,7 @@ export default function Models() {
         [modelId]: { ...getModelSettings(modelId), [key]: value },
       }));
     } catch (e) {
-      message.error(formatError(e, '设置失败'));
+      message.error(formatError(e, t('models.error.settingFailed')));
     }
   };
 
@@ -113,13 +112,13 @@ export default function Models() {
       } else if (msg) {
         setSetupMessage(msg);
       } else if (stage === 'checking_python') {
-        setSetupMessage('检查 Python 环境...');
+        setSetupMessage(t('models.setup.checkingPython'));
       } else if (stage === 'starting_daemon') {
-        setSetupMessage('启动 Daemon...');
+        setSetupMessage(t('models.setup.startingDaemon'));
       }
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, []);
+  }, [t]);
 
 
   const handleSelect = async (modelId: string) => {
@@ -127,9 +126,9 @@ export default function Models() {
     try {
       await invoke('select_model', { modelId });
       storeSetSettings({ selected_model_id: modelId });
-      message.success('已切换模型');
+      message.success(t('models.toast.modelSwitched'));
     } catch (e) {
-      message.error(formatError(e, '切换失败'));
+      message.error(formatError(e, t('models.error.switchFailed')));
     }
   };
 
@@ -137,11 +136,11 @@ export default function Models() {
     try {
       const imported = await invoke<boolean>('import_model');
       if (imported) {
-        message.success('导入完成');
+        message.success(t('models.toast.importComplete'));
         fetchModels();
       }
     } catch (e) {
-      message.error(formatError(e, '导入失败'));
+      message.error(formatError(e, t('models.error.importFailed')));
     }
   };
 
@@ -151,7 +150,7 @@ export default function Models() {
       await invoke('update_setting', { key: 'language', value });
       storeSetSettings({ language: value });
     } catch (e) {
-      message.error(formatError(e, '设置失败'));
+      message.error(formatError(e, t('models.error.settingFailed')));
     }
   };
 
@@ -160,7 +159,7 @@ export default function Models() {
       await invoke('update_setting', { key: 'cloud_provider', value });
       storeSetSettings({ cloud_provider: value });
     } catch (e) {
-      message.error(formatError(e, '设置失败'));
+      message.error(formatError(e, t('models.error.settingFailed')));
     }
   };
 
@@ -168,14 +167,14 @@ export default function Models() {
     logEvent('Models', 'save_api_key', { provider: settings.cloud_provider ?? 'unknown' });
     try {
       await invoke('update_setting', { key: 'cloud_api_key', value: cloudApiKey });
-      message.success('API Key 已保存');
+      message.success(t('models.toast.apiKeySaved'));
     } catch (e) {
-      message.error(formatError(e, '保存失败'));
+      message.error(formatError(e, t('models.error.saveFailed')));
     }
   };
 
   const handleTestConnection = () => {
-    message.info('云端连接测试暂未实现');
+    message.info(t('models.toast.testNotImplemented'));
   };
 
   const handleDaemonStart = async () => {
@@ -184,10 +183,10 @@ export default function Models() {
     setDaemonBusy(true);
     try {
       await invoke('daemon_start');
-      message.success('Daemon 已启动');
+      message.success(t('models.daemon.started'));
       fetchDaemonStatus();
     } catch (e) {
-      message.error(formatError(e, 'Daemon 启动失败，请检查 Python 3 和 mlx-audio 是否已安装'));
+      message.error(formatError(e, t('models.daemon.startFailed')));
     } finally {
       setDaemonBusy(false);
     }
@@ -200,9 +199,9 @@ export default function Models() {
       await invoke('update_setting', { key: 'selected_model_id', value: '' });
       storeSetDaemonStatus({ running: false, loaded_model: null });
       storeSetSettings({ selected_model_id: undefined });
-      message.success('Daemon 已停止');
+      message.success(t('models.daemon.stoppedSuccess'));
     } catch (e) {
-      message.error(formatError(e, '停止失败'));
+      message.error(formatError(e, t('models.daemon.stopFailed')));
     }
   };
 
@@ -216,12 +215,12 @@ export default function Models() {
       await invoke('select_model', { modelId });
       storeSetSettings({ selected_model_id: modelId });
       logEvent('Models', 'load_model_complete', { model_id: modelId });
-      message.success('模型已加载');
+      message.success(t('models.toast.modelLoaded'));
       fetchDaemonStatus();
       fetchModels();
     } catch (e) {
       logEvent('Models', 'load_model_error', { model_id: modelId, error: formatError(e, 'unknown') });
-      message.error(formatError(e, '模型加载失败'));
+      message.error(formatError(e, t('models.error.loadFailed')));
     } finally {
       setLoadingModel(null);
       setDaemonBusy(false);
@@ -241,9 +240,9 @@ export default function Models() {
       storeSetDaemonStatus({ ...daemonStatus, loaded_model: null });
       storeSetSettings({ selected_model_id: undefined });
       fetchModels();
-      message.success('模型已删除');
+      message.success(t('models.toast.modelDeleted'));
     } catch (e) {
-      message.error(formatError(e, '删除失败'));
+      message.error(formatError(e, t('models.error.deleteFailed')));
     }
   };
 
@@ -264,13 +263,13 @@ export default function Models() {
       <Flex justify="space-between" align="center" style={{ marginBottom: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 8 }}>
         <Space>
           <Badge status={daemonStatus.running ? (daemonStatus.loaded_model ? 'success' : 'warning') : 'default'} />
-          <Text>{daemonStatus.running ? (daemonStatus.loaded_model ? 'Daemon 运行中' : 'Daemon 空闲') : 'Daemon 未启动'}</Text>
-          {daemonStatus.loaded_model && <Tag color="blue">已加载: {daemonStatus.loaded_model.split('/').pop()}</Tag>}
+          <Text>{daemonStatus.running ? (daemonStatus.loaded_model ? t('models.daemon.running') : t('models.daemon.idle')) : t('models.daemon.stopped')}</Text>
+          {daemonStatus.loaded_model && <Tag color="blue">{t('models.daemon.loaded', { name: daemonStatus.loaded_model.split('/').pop() })}</Tag>}
         </Space>
         <Space>
           {daemonStatus.running
-            ? <Button size="small" onClick={handleDaemonStop}>停止</Button>
-            : <Button type="primary" size="small" loading={daemonBusy} onClick={handleDaemonStart}>启动 Daemon</Button>}
+            ? <Button size="small" onClick={handleDaemonStop}>{t('models.daemon.stop')}</Button>
+            : <Button type="primary" size="small" loading={daemonBusy} onClick={handleDaemonStart}>{t('models.daemon.start')}</Button>}
         </Space>
       </Flex>
       <Row gutter={[16, 16]}>
@@ -281,22 +280,22 @@ export default function Models() {
                 <Flex justify="space-between" align="center">
                   <Space><ThunderboltOutlined /><Text strong>{model.name}</Text></Space>
                   {daemonStatus.loaded_model === model.model_repo
-                    ? <Tag color="blue" icon={isSelected(model.id) ? <CheckCircleOutlined /> : undefined}>{isSelected(model.id) ? '使用中 · 已加载' : '已加载'}</Tag>
+                    ? <Tag color="blue" icon={isSelected(model.id) ? <CheckCircleOutlined /> : undefined}>{isSelected(model.id) ? t('models.tag.activeLoaded') : t('models.tag.loaded')}</Tag>
                     : model.is_downloaded
-                      ? <Tag color="green" icon={isSelected(model.id) ? <CheckCircleOutlined /> : undefined}>{isSelected(model.id) ? '使用中 · 已缓存' : '已缓存'}</Tag>
+                      ? <Tag color="green" icon={isSelected(model.id) ? <CheckCircleOutlined /> : undefined}>{isSelected(model.id) ? t('models.tag.activeCached') : t('models.tag.cached')}</Tag>
                       : isSelected(model.id)
-                        ? <Tag color="red">需要下载</Tag>
-                        : <Tag>未下载</Tag>}
+                        ? <Tag color="red">{t('models.tag.needsDownload')}</Tag>
+                        : <Tag>{t('models.tag.notDownloaded')}</Tag>}
                 </Flex>
                 {model.description && <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>}
                 <Flex gap={16}>
-                  <div><Text type="secondary">大小: </Text><Text>{formatSize(model.size_mb)}</Text></div>
-                  <div><Text type="secondary">语言: </Text>{model.languages.map((lang) => <Tag key={lang} color="blue" bordered={false}>{languageLabel(lang)}</Tag>)}</div>
+                  <div><Text type="secondary">{t('models.label.size')}</Text><Text>{formatSize(model.size_mb)}</Text></div>
+                  <div><Text type="secondary">{t('models.label.language')}</Text>{model.languages.map((lang) => <Tag key={lang} color="blue" bordered={false}>{languageLabelMap[lang] ?? lang}</Tag>)}</div>
                 </Flex>
                 {model.is_downloaded && (
                   <Flex vertical gap={4} style={{ padding: '8px 0' }}>
                     <Flex align="center" gap={8}>
-                      <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>温度:</Text>
+                      <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>{t('models.label.temperature')}</Text>
                       <Slider
                         min={0} max={1} step={0.1}
                         value={getModelSettings(model.id).temperature}
@@ -306,7 +305,7 @@ export default function Models() {
                       <Text style={{ fontSize: 12, minWidth: 28 }}>{getModelSettings(model.id).temperature}</Text>
                     </Flex>
                     <Flex align="center" gap={8}>
-                      <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>Token:</Text>
+                      <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>{t('models.label.token')}</Text>
                       <InputNumber
                         size="small"
                         min={100} max={10000} step={100}
@@ -326,19 +325,19 @@ export default function Models() {
                 <Flex justify="flex-end" gap={8}>
                   {daemonStatus.loaded_model === model.model_repo ? (
                     <>
-                      {!isSelected(model.id) && <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>设为默认</Button>}
-                      <Button size="small" danger onClick={() => handleDeleteModel(model.id)}>删除模型</Button>
+                      {!isSelected(model.id) && <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>{t('models.button.setDefault')}</Button>}
+                      <Button size="small" danger onClick={() => handleDeleteModel(model.id)}>{t('models.button.deleteModel')}</Button>
                     </>
                   ) : model.is_downloaded ? (
                     <>
-                      <Button type="primary" size="small" onClick={() => handleLoadModel(model.model_repo!, model.id)}>加载模型</Button>
-                      <Button size="small" danger onClick={() => handleDeleteModel(model.id)}>删除</Button>
+                      <Button type="primary" size="small" onClick={() => handleLoadModel(model.model_repo!, model.id)}>{t('models.button.loadModel')}</Button>
+                      <Button size="small" danger onClick={() => handleDeleteModel(model.id)}>{t('common.delete')}</Button>
                     </>
                   ) : (
                     <Button type="primary" size="small" loading={loadingModel === model.id} onClick={() => handleLoadModel(model.model_repo!, model.id)}>
                       {loadingModel === model.id
-                        ? (model.model_repo && downloadProgress[model.model_repo] != null ? '下载中...' : '加载中...')
-                        : '加载模型'}
+                        ? (model.model_repo && downloadProgress[model.model_repo] != null ? t('models.button.downloading') : t('models.button.loading'))
+                        : t('models.button.loadModel')}
                     </Button>
                   )}
                 </Flex>
@@ -360,15 +359,15 @@ export default function Models() {
                 <Flex justify="space-between" align="center">
                   <Space><CloudOutlined /><Text strong>{model.name}</Text></Space>
                   {isSelected(model.id) ? (
-                    <Tag color="green" icon={<CheckCircleOutlined />}>使用中</Tag>
+                    <Tag color="green" icon={<CheckCircleOutlined />}>{t('models.tag.active')}</Tag>
                   ) : (
-                    <Tag color="blue">云端可用</Tag>
+                    <Tag color="blue">{t('models.tag.cloudAvailable')}</Tag>
                   )}
                 </Flex>
                 {model.description && <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>}
                 <Flex vertical gap={4} style={{ padding: '8px 0' }}>
                   <Flex align="center" gap={8}>
-                    <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>温度:</Text>
+                    <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>{t('models.label.temperature')}</Text>
                     <Slider
                       min={0} max={1} step={0.1}
                       value={getModelSettings(model.id).temperature}
@@ -378,7 +377,7 @@ export default function Models() {
                     <Text style={{ fontSize: 12, minWidth: 28 }}>{getModelSettings(model.id).temperature}</Text>
                   </Flex>
                   <Flex align="center" gap={8}>
-                    <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>Token:</Text>
+                    <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>{t('models.label.token')}</Text>
                     <InputNumber
                       size="small"
                       min={100} max={10000} step={100}
@@ -390,7 +389,7 @@ export default function Models() {
                 </Flex>
                 <Flex justify="flex-end" gap={8}>
                   {!isSelected(model.id) && (
-                    <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>使用此模型</Button>
+                    <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>{t('models.button.useModel')}</Button>
                   )}
                 </Flex>
               </Flex>
@@ -399,20 +398,20 @@ export default function Models() {
         ))}
       </Row>
       <Divider />
-      <Card title="API 配置">
+      <Card title={t('models.cloud.apiConfig')}>
         <Flex vertical gap={8} style={{ width: '100%' }}>
           <div>
-            <Text>服务商</Text>
-            <Select placeholder="选择云端服务商" value={settings.cloud_provider} onChange={handleCloudProviderChange} style={{ width: '100%', marginTop: 8 }} options={CLOUD_PROVIDERS} />
+            <Text>{t('models.cloud.provider')}</Text>
+            <Select placeholder={t('models.cloud.selectProvider')} value={settings.cloud_provider} onChange={handleCloudProviderChange} style={{ width: '100%', marginTop: 8 }} options={CLOUD_PROVIDERS} />
           </div>
           <div>
-            <Text>API Key</Text>
+            <Text>{t('models.cloud.apiKey')}</Text>
             <Space.Compact style={{ width: '100%', marginTop: 8 }}>
-              <Input.Password placeholder="输入 API Key" value={cloudApiKey} onChange={(e) => setCloudApiKey(e.target.value)} />
-              <Button onClick={handleSaveApiKey}>保存</Button>
+              <Input.Password placeholder={t('models.cloud.enterApiKey')} value={cloudApiKey} onChange={(e) => setCloudApiKey(e.target.value)} />
+              <Button onClick={handleSaveApiKey}>{t('common.save')}</Button>
             </Space.Compact>
           </div>
-          <Button icon={<CloudOutlined />} onClick={handleTestConnection}>测试连接</Button>
+          <Button icon={<CloudOutlined />} onClick={handleTestConnection}>{t('models.cloud.testConnection')}</Button>
         </Flex>
       </Card>
     </>
@@ -421,23 +420,23 @@ export default function Models() {
   return (
     <Flex vertical gap="large" style={{ width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={3} style={{ margin: 0 }}>模型管理</Title>
+        <Title level={3} style={{ margin: 0 }}>{t('models.title')}</Title>
         <Space>
-          <Select placeholder="语言" value={settings.language} onChange={handleLanguageChange} style={{ width: 160 }}
+          <Select placeholder={t('models.language.placeholder')} value={settings.language} onChange={handleLanguageChange} style={{ width: 160 }}
             options={[
-              { value: 'auto', label: '自动检测' },
-              { value: 'zh', label: '中文' },
+              { value: 'auto', label: t('models.language.auto') },
+              { value: 'zh', label: t('models.language.zh') },
               { value: 'en', label: 'English' },
-              { value: 'ja', label: '日本語' },
+              { value: 'ja', label: '\u65E5\u672C\u8A9E' },
             ]}
           />
-          <Button icon={<ImportOutlined />} onClick={handleImport}>导入模型</Button>
+          <Button icon={<ImportOutlined />} onClick={handleImport}>{t('models.button.importModel')}</Button>
         </Space>
       </div>
       <Tabs activeKey={activeTab} onChange={setActiveTab}
         items={[
-          { key: 'mlx', label: `MLX 模型 (${mlxModels.length})`, children: mlxTabContent },
-          { key: 'cloud', label: `云端模型 (${cloudModels.length})`, children: cloudTabContent },
+          { key: 'mlx', label: t('models.tab.mlx', { count: mlxModels.length }), children: mlxTabContent },
+          { key: 'cloud', label: t('models.tab.cloud', { count: cloudModels.length }), children: cloudTabContent },
         ]}
       />
     </Flex>

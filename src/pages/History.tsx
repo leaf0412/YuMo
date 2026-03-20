@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { Input, Button, Flex, Space, Tag, Typography, Popconfirm, message, Card } from 'antd';
 import { CopyOutlined, DeleteOutlined, ClearOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
 import { emit } from '@tauri-apps/api/event';
+import { useTranslation } from 'react-i18next';
 import { invoke, formatError, logEvent } from '../lib/logger';
 const { Text, Paragraph } = Typography;
 
@@ -17,6 +18,7 @@ interface Transcription {
 const PAGE_SIZE = 20;
 
 export default function History() {
+  const { t } = useTranslation();
   const [transcriptions, setTranscriptions] = useState<Transcription[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -44,13 +46,13 @@ export default function History() {
       const dataUri = await invoke<string>('get_recording', { recordingPath: item.recording_path });
       const audio = new Audio(dataUri);
       audio.onended = () => { setPlayingId(null); audioRef.current = null; };
-      audio.onerror = () => { setPlayingId(null); audioRef.current = null; message.error('播放失败'); };
+      audio.onerror = () => { setPlayingId(null); audioRef.current = null; message.error(t('history.playbackFailed')); };
       audioRef.current = audio;
       setPlayingId(item.id);
       logEvent('History', 'playback_start');
       audio.play();
     } catch (e) {
-      message.error(formatError(e, '无法加载录音'));
+      message.error(formatError(e, t('history.cannotLoadRecording')));
     }
   };
 
@@ -95,7 +97,7 @@ export default function History() {
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
     logEvent('History', 'copy_text');
-    message.success('已复制');
+    message.success(t('common.copied'));
   };
 
   const handleDelete = async (id: string) => {
@@ -104,9 +106,9 @@ export default function History() {
       logEvent('History', 'delete');
       setTranscriptions((prev) => prev.filter((t) => t.id !== id));
       emit('stats-updated');
-      message.success('已删除');
+      message.success(t('common.deleted'));
     } catch (e) {
-      message.error(formatError(e, '删除失败'));
+      message.error(formatError(e, t('history.deleteFailed')));
     }
   };
 
@@ -116,9 +118,9 @@ export default function History() {
       await invoke('delete_all_transcriptions');
       setTranscriptions([]);
       emit('stats-updated');
-      message.success('已清空');
+      message.success(t('common.cleared'));
     } catch (e) {
-      message.error(formatError(e, '清空失败'));
+      message.error(formatError(e, t('history.clearFailed')));
     }
   };
 
@@ -158,18 +160,18 @@ export default function History() {
     <Flex vertical gap="middle" style={{ width: '100%' }}>
       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
         <Input.Search
-          placeholder="搜索转录内容..."
+          placeholder={t('history.searchPlaceholder')}
           onSearch={handleSearch}
           allowClear
           style={{ width: 400 }}
         />
-        <Popconfirm title="确认清空所有转录记录？" onConfirm={handleClearAll} okText="确认" cancelText="取消">
-          <Button danger icon={<ClearOutlined />}>清空全部</Button>
+        <Popconfirm title={t('history.confirmClearAll')} onConfirm={handleClearAll} okText={t('common.confirm')} cancelText={t('common.cancel')}>
+          <Button danger icon={<ClearOutlined />}>{t('history.clearAll')}</Button>
         </Popconfirm>
       </Space>
 
       {transcriptions.length === 0 && !loading ? (
-        <Text type="secondary">暂无转录记录</Text>
+        <Text type="secondary">{t('history.noRecords')}</Text>
       ) : (
         transcriptions.map((item) => {
           const expanded = expandedIds.has(item.id);
@@ -181,13 +183,13 @@ export default function History() {
                   <Space>
                     <Text type="secondary">{item.timestamp}</Text>
                     <Tag>{item.model_name}</Tag>
-                    <Tag color="blue">{wordCount(item.text)} 词</Tag>
+                    <Tag color="blue">{t('history.wordCount', { count: wordCount(item.text) })}</Tag>
                   </Space>
                   <Paragraph style={{ cursor: 'pointer', marginBottom: 4, marginTop: 8 }} onClick={() => toggleExpand(item.id)}>
                     {expanded ? item.text : preview}
                   </Paragraph>
                   {expanded && item.enhanced_text && (
-                    <Card size="small" title="AI 增强文本" style={{ marginTop: 8 }}>
+                    <Card size="small" title={t('history.aiEnhanced')} style={{ marginTop: 8 }}>
                       <Paragraph>{item.enhanced_text}</Paragraph>
                     </Card>
                   )}
@@ -198,11 +200,11 @@ export default function History() {
                       type="text"
                       icon={playingId === item.id ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
                       onClick={() => handlePlay(item)}
-                      title={playingId === item.id ? '停止' : '播放录音'}
+                      title={playingId === item.id ? t('history.stop') : t('history.play')}
                     />
                   )}
                   <Button type="text" icon={<CopyOutlined />} onClick={() => handleCopy(item.enhanced_text || item.text)} />
-                  <Popconfirm title="确认删除？" onConfirm={() => handleDelete(item.id)} okText="确认" cancelText="取消">
+                  <Popconfirm title={t('history.confirmDelete')} onConfirm={() => handleDelete(item.id)} okText={t('common.confirm')} cancelText={t('common.cancel')}>
                     <Button type="text" danger icon={<DeleteOutlined />} />
                   </Popconfirm>
                 </Space>
@@ -214,7 +216,7 @@ export default function History() {
 
       {hasMore && transcriptions.length > 0 && (
         <div style={{ textAlign: 'center' }}>
-          <Button onClick={handleLoadMore} loading={loading}>加载更多</Button>
+          <Button onClick={handleLoadMore} loading={loading}>{t('common.loadMore')}</Button>
         </div>
       )}
     </Flex>

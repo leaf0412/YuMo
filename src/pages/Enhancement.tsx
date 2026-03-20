@@ -6,6 +6,7 @@ import {
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { invoke, formatError, logEvent } from '../lib/logger';
 
 const { Title, Text, Paragraph } = Typography;
@@ -50,6 +51,7 @@ const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
 };
 
 export default function Enhancement() {
+  const { t } = useTranslation();
   const [settings, setSettings] = useState<Settings>({});
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -98,7 +100,7 @@ export default function Enhancement() {
         logEvent('Enhancement', 'provider_changed', { provider: value as string });
       }
     } catch (e) {
-      message.error(formatError(e, '设置更新失败'));
+      message.error(formatError(e, t('enhancement.settingUpdateFailed')));
     }
   };
 
@@ -106,9 +108,9 @@ export default function Enhancement() {
     try {
       await invoke('store_api_key', { provider: settings.llm_provider, key: apiKey });
       logEvent('Enhancement', 'api_key_saved', { provider: settings.llm_provider });
-      message.success('API Key 已保存');
+      message.success(t('enhancement.apiKeySaved'));
     } catch (e) {
-      message.error(formatError(e, '保存失败'));
+      message.error(formatError(e, t('enhancement.saveFailed')));
     }
   };
 
@@ -116,10 +118,10 @@ export default function Enhancement() {
     try {
       await invoke('select_prompt', { id });
       logEvent('Enhancement', 'prompt_selected', { id });
-      message.success('已切换 Prompt');
+      message.success(t('enhancement.promptSwitched'));
       loadPrompts();
     } catch (e) {
-      message.error(formatError(e, '切换失败'));
+      message.error(formatError(e, t('enhancement.switchFailed')));
     }
   };
 
@@ -127,10 +129,10 @@ export default function Enhancement() {
     try {
       await invoke('delete_prompt', { id });
       logEvent('Enhancement', 'prompt_deleted', { id });
-      message.success('已删除');
+      message.success(t('common.deleted'));
       loadPrompts();
     } catch (e) {
-      message.error(formatError(e, '删除失败'));
+      message.error(formatError(e, t('enhancement.deleteFailed')));
     }
   };
 
@@ -161,7 +163,7 @@ export default function Enhancement() {
           userMsg: values.userMsg,
         });
         logEvent('Enhancement', 'prompt_updated', { id: editingPrompt.id });
-        message.success('已更新');
+        message.success(t('enhancement.updated'));
       } else {
         await invoke('add_prompt', {
           name: values.name,
@@ -169,7 +171,7 @@ export default function Enhancement() {
           userMsg: values.userMsg,
         });
         logEvent('Enhancement', 'prompt_created');
-        message.success('已创建');
+        message.success(t('enhancement.created'));
       }
       setModalOpen(false);
       loadPrompts();
@@ -183,53 +185,53 @@ export default function Enhancement() {
 
   return (
     <Flex vertical gap="large" style={{ width: '100%' }}>
-      <Title level={3}>AI 增强</Title>
+      <Title level={3}>{t('enhancement.title')}</Title>
       <Card>
         <Flex vertical gap="middle" style={{ width: '100%' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text strong>启用 AI 增强</Text>
+            <Text strong>{t('enhancement.enableToggle')}</Text>
             <Switch checked={settings.ai_enhancement_enabled} onChange={(checked) => updateSetting('ai_enhancement_enabled', checked)} />
           </div>
           <Divider style={{ margin: '8px 0' }} />
           <div>
-            <Text>LLM 服务商</Text>
-            <Select value={settings.llm_provider} onChange={(v) => updateSetting('llm_provider', v)} style={{ width: '100%', marginTop: 8 }} options={PROVIDERS} placeholder="选择服务商" />
+            <Text>{t('enhancement.provider')}</Text>
+            <Select value={settings.llm_provider} onChange={(v) => updateSetting('llm_provider', v)} style={{ width: '100%', marginTop: 8 }} options={PROVIDERS} placeholder={t('enhancement.selectProvider')} />
           </div>
           <div>
-            <Text>模型</Text>
-            <Select value={settings.llm_model} onChange={(v) => updateSetting('llm_model', v)} style={{ width: '100%', marginTop: 8 }} options={modelOptions} placeholder="选择模型" />
+            <Text>{t('enhancement.model')}</Text>
+            <Select value={settings.llm_model} onChange={(v) => updateSetting('llm_model', v)} style={{ width: '100%', marginTop: 8 }} options={modelOptions} placeholder={t('enhancement.selectModel')} />
           </div>
           <div>
-            <Text>API Key</Text>
+            <Text>{t('enhancement.apiKey')}</Text>
             <Space.Compact style={{ width: '100%', marginTop: 8 }}>
-              <Input.Password placeholder="输入 API Key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-              <Button onClick={handleSaveApiKey}>保存</Button>
+              <Input.Password placeholder={t('enhancement.enterApiKey')} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+              <Button onClick={handleSaveApiKey}>{t('common.save')}</Button>
             </Space.Compact>
           </div>
           {provider === 'ollama' && (
             <div>
-              <Text>Ollama URL</Text>
+              <Text>{t('enhancement.ollamaUrl')}</Text>
               <Input placeholder="http://localhost:11434" value={settings.ollama_url || ''} onChange={(e) => updateSetting('ollama_url', e.target.value)} style={{ marginTop: 8 }} />
             </div>
           )}
         </Flex>
       </Card>
-      <Card title="Prompt 管理" extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>新建 Prompt</Button>}>
+      <Card title={t('enhancement.promptManagement')} extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>{t('enhancement.newPrompt')}</Button>}>
         {prompts.length === 0 ? (
-          <Text type="secondary">暂无 Prompt</Text>
+          <Text type="secondary">{t('enhancement.noPrompts')}</Text>
         ) : (
           prompts.map((prompt) => (
             <div key={prompt.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
               <div style={{ flex: 1 }}>
                 <Space>
                   <Text>{prompt.name}</Text>
-                  {selectedPromptId === prompt.id && <Tag color="green" icon={<CheckCircleOutlined />}>当前</Tag>}
-                  {prompt.is_predefined && <Tag>内置</Tag>}
+                  {selectedPromptId === prompt.id && <Tag color="green" icon={<CheckCircleOutlined />}>{t('enhancement.tagCurrent')}</Tag>}
+                  {prompt.is_predefined && <Tag>{t('enhancement.tagBuiltIn')}</Tag>}
                 </Space>
                 <Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ marginBottom: 0, marginTop: 4 }}>{prompt.system_message}</Paragraph>
               </div>
               <Space>
-                {selectedPromptId !== prompt.id && <Button type="link" onClick={() => handleSelectPrompt(prompt.id)}>使用</Button>}
+                {selectedPromptId !== prompt.id && <Button type="link" onClick={() => handleSelectPrompt(prompt.id)}>{t('enhancement.use')}</Button>}
                 {!prompt.is_predefined && <Button type="text" icon={<EditOutlined />} onClick={() => openEditModal(prompt)} />}
                 {!prompt.is_predefined && <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDeletePrompt(prompt.id)} />}
               </Space>
@@ -237,11 +239,11 @@ export default function Enhancement() {
           ))
         )}
       </Card>
-      <Modal title={editingPrompt ? '编辑 Prompt' : '新建 Prompt'} open={modalOpen} onOk={handleModalOk} onCancel={() => setModalOpen(false)} okText="保存" cancelText="取消">
+      <Modal title={editingPrompt ? t('enhancement.editPrompt') : t('enhancement.newPrompt')} open={modalOpen} onOk={handleModalOk} onCancel={() => setModalOpen(false)} okText={t('common.save')} cancelText={t('common.cancel')}>
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}><Input placeholder="Prompt 名称" /></Form.Item>
-          <Form.Item name="systemMsg" label="系统消息" rules={[{ required: true, message: '请输入系统消息' }]}><TextArea rows={4} placeholder="系统消息..." /></Form.Item>
-          <Form.Item name="userMsg" label="用户消息模板" rules={[{ required: true, message: '请输入用户消息模板' }]}><TextArea rows={4} placeholder="使用 {{text}} 作为转录文本占位符" /></Form.Item>
+          <Form.Item name="name" label={t('enhancement.nameLabel')} rules={[{ required: true, message: t('enhancement.nameRequired') }]}><Input placeholder={t('enhancement.namePlaceholder')} /></Form.Item>
+          <Form.Item name="systemMsg" label={t('enhancement.systemMessageLabel')} rules={[{ required: true, message: t('enhancement.systemMessageRequired') }]}><TextArea rows={4} placeholder={t('enhancement.systemMessagePlaceholder')} /></Form.Item>
+          <Form.Item name="userMsg" label={t('enhancement.userMessageLabel')} rules={[{ required: true, message: t('enhancement.userMessageRequired') }]}><TextArea rows={4} placeholder={t('enhancement.userMessagePlaceholder', { skipInterpolation: true })} /></Form.Item>
         </Form>
       </Modal>
     </Flex>

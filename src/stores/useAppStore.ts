@@ -36,6 +36,7 @@ interface AppState {
   models: ModelInfo[];
   daemonStatus: DaemonStatus;
   downloadingModelId: string | null;
+  uiLocale: string;
 
   // Navigation
   activeKey: string;
@@ -56,6 +57,7 @@ const useAppStore = create<AppState>((set, get) => ({
   models: [],
   daemonStatus: { running: false, loaded_model: null },
   downloadingModelId: null,
+  uiLocale: 'system',
   activeKey: '/',
   setActiveKey: (key) => set({ activeKey: key }),
 
@@ -63,6 +65,9 @@ const useAppStore = create<AppState>((set, get) => ({
     try {
       const result = await invoke<AppSettings>('get_settings');
       set({ settings: result });
+      if (typeof result.ui_locale === 'string') {
+        set({ uiLocale: result.ui_locale });
+      }
     } catch { /* logged */ }
   },
 

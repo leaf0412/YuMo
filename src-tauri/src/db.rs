@@ -383,7 +383,10 @@ pub fn import_voiceink_legacy(
 
     let src = Connection::open(store_path).map_err(|e| {
         error!("[db] import_voiceink_legacy open failed: {}", e);
-        AppError::Database(format!("Cannot open VoiceInk database: {}", e))
+        AppError::Database(format!(
+            "无法打开数据库文件，请确认所选文件是 VoiceInk 的 default.store 文件（{}）",
+            e
+        ))
     })?;
 
     // Import transcriptions
@@ -391,7 +394,10 @@ pub fn import_voiceink_legacy(
         "SELECT ZTEXT, ZENHANCEDTEXT, ZTIMESTAMP, ZDURATION,
                 ZTRANSCRIPTIONMODELNAME, ZWORDCOUNT, ZAUDIOFILEURL
          FROM ZTRANSCRIPTION ORDER BY ZTIMESTAMP ASC"
-    ).map_err(|e| AppError::Database(format!("Invalid VoiceInk database: {}", e)))?;
+    ).map_err(|e| AppError::Database(format!(
+        "该文件不是有效的 VoiceInk 数据库，缺少所需的数据表（{}）",
+        e
+    )))?;
 
     let mut imported = 0usize;
     let mut skipped = 0usize;
