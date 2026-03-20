@@ -72,5 +72,20 @@
   "dashboard.range7d": "7 天",
   "dashboard.range30d": "30 天",
   "dashboard.range90d": "90 天",
-  "dashboard.rangeAll": "全部"
+  "dashboard.rangeAll": "全部",
+
+  "history.searchPlaceholder": "搜索转录内容...",
+  "history.refresh": "刷新",
+  "history.clearAll": "清空全部",
+  "history.confirmClearAll": "确认清空所有转录记录？",
+  "history.noRecords": "暂无转录记录",
+  "history.wordCount": "{{count}} 词",
+  "history.aiEnhanced": "AI 增强文本",
+  "history.playbackFailed": "播放失败",
+  "history.cannotLoadRecording": "无法加载录音",
+  "history.stop": "停止",
+  "history.play": "播放录音",
+  "history.confirmDelete": "确认删除？",
+  "history.deleteFailed": "删除失败",
+  "history.clearFailed": "清空失败"
 }

@@ -72,5 +72,20 @@
   "dashboard.range7d": "7 days",
   "dashboard.range30d": "30 days",
   "dashboard.range90d": "90 days",
-  "dashboard.rangeAll": "All"
+  "dashboard.rangeAll": "All",
+
+  "history.searchPlaceholder": "Search transcriptions...",
+  "history.refresh": "Refresh",
+  "history.clearAll": "Clear all",
+  "history.confirmClearAll": "Clear all transcriptions?",
+  "history.noRecords": "No transcriptions yet",
+  "history.wordCount": "{{count}} words",
+  "history.aiEnhanced": "AI Enhanced",
+  "history.playbackFailed": "Playback failed",
+  "history.cannotLoadRecording": "Cannot load recording",
+  "history.stop": "Stop",
+  "history.play": "Play recording",
+  "history.confirmDelete": "Confirm delete?",
+  "history.deleteFailed": "Delete failed",
+  "history.clearFailed": "Clear failed"
 }
