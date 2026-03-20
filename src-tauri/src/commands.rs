@@ -174,6 +174,12 @@ pub async fn stop_recording(
         audio_data.channels,
         rms
     );
+    let audio_duration_secs = if audio_data.sample_rate > 0 && audio_data.channels > 0 {
+        audio_data.pcm_samples.len() as f64 / audio_data.sample_rate as f64 / audio_data.channels as f64
+    } else {
+        0.0
+    };
+    info!("[pipeline] audio duration: {:.2}s", audio_duration_secs);
 
     // 2.5 Save recording WAV file
     let recording_path = match recorder::save_recording(&audio_data, &state.paths.recordings_dir) {
@@ -453,7 +459,7 @@ pub async fn stop_recording(
             &conn,
             &processed_text,
             enhanced_text.as_deref(),
-            0.0, // TODO: actual audio duration
+            audio_duration_secs,
             &model_id,
             word_count,
             recording_path.as_deref(),
