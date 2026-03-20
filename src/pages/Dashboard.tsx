@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { Card, Flex, Typography, Row, Col, Segmented, Spin, Empty } from 'antd';
 import {
   AudioOutlined,
@@ -82,6 +83,14 @@ export default function Dashboard() {
   }, [days]);
 
   useEffect(() => { loadStats(); }, [loadStats]);
+
+  // Auto-refresh stats when a recording completes
+  useEffect(() => {
+    const unlisten = listen<{ state: string }>('recording-state', (event) => {
+      if (event.payload.state === 'idle') loadStats();
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [loadStats]);
 
   if (loading && !stats) {
     return <Flex justify="center" align="center" style={{ height: 300 }}><Spin size="large" /></Flex>;

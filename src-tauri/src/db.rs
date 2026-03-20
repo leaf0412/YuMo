@@ -156,9 +156,46 @@ pub fn init_database(path: &Path) -> Result<Connection, AppError> {
     ); // Silently ignore if column already exists
 
     seed_predefined_prompts(&conn)?;
+    backfill_durations_from_wav(&conn);
 
     info!("[db] init_database complete");
     Ok(conn)
+}
+
+/// One-time migration: read WAV files to backfill duration for records with duration=0.
+fn backfill_durations_from_wav(conn: &Connection) {
+    let mut stmt = match conn.prepare(
+        "SELECT id, recording_path FROM transcriptions WHERE duration = 0.0 AND recording_path IS NOT NULL"
+    ) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let rows: Vec<(String, String)> = match stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?))) {
+        Ok(r) => r.filter_map(|r| r.ok()).collect(),
+        Err(_) => return,
+    };
+
+    if rows.is_empty() { return; }
+    info!("[db] backfill_durations_from_wav: {} records to update", rows.len());
+
+    let mut updated = 0;
+    for (id, path) in &rows {
+        let p = std::path::Path::new(path);
+        if !p.exists() { continue; }
+        if let Ok(reader) = hound::WavReader::open(p) {
+            let spec = reader.spec();
+            let num_samples = reader.len() as f64;
+            if spec.sample_rate > 0 && spec.channels > 0 {
+                let duration = num_samples / spec.sample_rate as f64 / spec.channels as f64;
+                let _ = conn.execute(
+                    "UPDATE transcriptions SET duration = ?1 WHERE id = ?2",
+                    params![duration, id],
+                );
+                updated += 1;
+            }
+        }
+    }
+    info!("[db] backfill_durations_from_wav: updated {} records", updated);
 }
 
 fn seed_predefined_prompts(conn: &Connection) -> Result<(), AppError> {
