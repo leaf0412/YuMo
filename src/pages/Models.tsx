@@ -42,6 +42,7 @@ export default function Models() {
   const [activeTab, setActiveTab] = useState('mlx');
   const [loadingModel, setLoadingModel] = useState<string | null>(null);
   const [daemonBusy, setDaemonBusy] = useState(false);
+  const [setupMessage, setSetupMessage] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [modelSettings, setModelSettings] = useState<Record<string, ModelSettings>>({});
 
@@ -95,6 +96,23 @@ export default function Models() {
     const interval = setInterval(fetchDaemonStatus, 3000);
     return () => clearInterval(interval);
   }, [activeTab, fetchDaemonStatus]);
+
+  // Listen for daemon setup status (venv bootstrap, etc.)
+  useEffect(() => {
+    const unlisten = listen<{ stage: string; message?: string }>('daemon-setup-status', (event) => {
+      const { stage, message: msg } = event.payload;
+      if (stage === 'ready') {
+        setSetupMessage(null);
+      } else if (msg) {
+        setSetupMessage(msg);
+      } else if (stage === 'checking_python') {
+        setSetupMessage('检查 Python 环境...');
+      } else if (stage === 'starting_daemon') {
+        setSetupMessage('启动 Daemon...');
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
 
 
   const handleSelect = async (modelId: string) => {
@@ -167,7 +185,9 @@ export default function Models() {
   const handleDaemonStop = async () => {
     try {
       await invoke('daemon_stop');
+      await invoke('update_setting', { key: 'selected_model_id', value: '' });
       storeSetDaemonStatus({ running: false, loaded_model: null });
+      storeSetSettings({ selected_model_id: undefined });
       message.success('Daemon 已停止');
     } catch (e) {
       message.error(formatError(e, '停止失败'));
@@ -178,9 +198,10 @@ export default function Models() {
     if (loadingModel || daemonBusy) return;
     setLoadingModel(modelId);
     setDaemonBusy(true);
-    setDownloadProgress((prev) => ({ ...prev, [modelRepo]: 0 }));
     try {
       await invoke('daemon_load_model', { modelRepo });
+      await invoke('select_model', { modelId });
+      storeSetSettings({ selected_model_id: modelId });
       message.success('模型已加载');
       fetchDaemonStatus();
       fetchModels();
@@ -189,6 +210,7 @@ export default function Models() {
     } finally {
       setLoadingModel(null);
       setDaemonBusy(false);
+      setSetupMessage(null);
       setDownloadProgress((prev) => {
         const next = { ...prev };
         delete next[modelRepo];
@@ -197,13 +219,15 @@ export default function Models() {
     }
   };
 
-  const handleUnloadModel = async () => {
+  const handleDeleteModel = async (modelId: string) => {
     try {
-      await invoke('daemon_unload_model');
-      fetchDaemonStatus();
-      message.success('模型已卸载');
+      await invoke('delete_model', { modelId });
+      storeSetDaemonStatus({ ...daemonStatus, loaded_model: null });
+      storeSetSettings({ selected_model_id: undefined });
+      fetchModels();
+      message.success('模型已删除');
     } catch (e) {
-      message.error(formatError(e, '卸载失败'));
+      message.error(formatError(e, '删除失败'));
     }
   };
 
@@ -223,8 +247,8 @@ export default function Models() {
     <>
       <Flex justify="space-between" align="center" style={{ marginBottom: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 8 }}>
         <Space>
-          <Badge status={daemonStatus.running ? 'success' : 'default'} />
-          <Text>{daemonStatus.running ? 'Daemon 运行中' : 'Daemon 未启动'}</Text>
+          <Badge status={daemonStatus.running ? (daemonStatus.loaded_model ? 'success' : 'warning') : 'default'} />
+          <Text>{daemonStatus.running ? (daemonStatus.loaded_model ? 'Daemon 运行中' : 'Daemon 空闲') : 'Daemon 未启动'}</Text>
           {daemonStatus.loaded_model && <Tag color="blue">已加载: {daemonStatus.loaded_model.split('/').pop()}</Tag>}
         </Space>
         <Space>
@@ -245,7 +269,7 @@ export default function Models() {
                     : model.is_downloaded
                       ? <Tag color="green" icon={isSelected(model.id) ? <CheckCircleOutlined /> : undefined}>{isSelected(model.id) ? '使用中 · 已缓存' : '已缓存'}</Tag>
                       : isSelected(model.id)
-                        ? <Tag color="orange">使用中 · 未下载</Tag>
+                        ? <Tag color="red">需要下载</Tag>
                         : <Tag>未下载</Tag>}
                 </Flex>
                 {model.description && <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>}
@@ -277,6 +301,9 @@ export default function Models() {
                     </Flex>
                   </Flex>
                 )}
+                {loadingModel === model.id && setupMessage && (
+                  <Text type="warning" style={{ fontSize: 12 }}>{setupMessage}</Text>
+                )}
                 {model.model_repo && downloadProgress[model.model_repo] != null && (
                   <Progress percent={downloadProgress[model.model_repo]} size="small" status="active" />
                 )}
@@ -284,11 +311,18 @@ export default function Models() {
                   {daemonStatus.loaded_model === model.model_repo ? (
                     <>
                       {!isSelected(model.id) && <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>设为默认</Button>}
-                      <Button size="small" onClick={handleUnloadModel}>卸载</Button>
+                      <Button size="small" danger onClick={() => handleDeleteModel(model.id)}>删除模型</Button>
+                    </>
+                  ) : model.is_downloaded ? (
+                    <>
+                      <Button type="primary" size="small" onClick={() => handleLoadModel(model.model_repo!, model.id)}>加载模型</Button>
+                      <Button size="small" danger onClick={() => handleDeleteModel(model.id)}>删除</Button>
                     </>
                   ) : (
                     <Button type="primary" size="small" loading={loadingModel === model.id} onClick={() => handleLoadModel(model.model_repo!, model.id)}>
-                      {loadingModel === model.id ? '下载中...' : '加载模型'}
+                      {loadingModel === model.id
+                        ? (model.model_repo && downloadProgress[model.model_repo] != null ? '下载中...' : '加载中...')
+                        : '加载模型'}
                     </Button>
                   )}
                 </Flex>

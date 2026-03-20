@@ -214,13 +214,13 @@ export default function Dashboard() {
               <Flex vertical gap={4}>
                 <Text strong>{selectedModel.name}</Text>
                 {!selectedModel.is_downloaded && ['mlxWhisper', 'mlxFunASR', 'local'].includes(selectedModel.provider) && (
-                  <Tag color="orange">模型未下载</Tag>
+                  <Tag color="red">模型需要下载</Tag>
                 )}
                 {['mlxWhisper', 'mlxFunASR'].includes(selectedModel.provider) && (
-                  <Tag color={daemonStatus.running ? 'green' : 'default'}>
-                    {daemonStatus.running
-                      ? daemonStatus.loaded_model ? `已加载: ${daemonStatus.loaded_model.split('/').pop()}` : 'Daemon 运行中'
-                      : 'Daemon 未启动'}
+                  <Tag color={daemonStatus.loaded_model ? 'green' : daemonStatus.running ? 'orange' : 'default'}>
+                    {daemonStatus.loaded_model
+                      ? `已加载: ${daemonStatus.loaded_model.split('/').pop()}`
+                      : daemonStatus.running ? 'Daemon 空闲' : 'Daemon 未启动'}
                   </Tag>
                 )}
               </Flex>
