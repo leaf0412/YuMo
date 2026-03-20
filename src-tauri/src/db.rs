@@ -427,22 +427,23 @@ pub fn get_statistics(conn: &Connection, days: Option<i64>) -> Result<Statistics
         conn.query_row("SELECT COUNT(*) FROM transcriptions", [], |row| row.get(0))?
     };
 
-    let texts: Vec<String> = if let Some(ref df) = date_filter {
+    // Fetch all rows for accurate CJK-aware word counting and per-day aggregation
+    let rows: Vec<(String, String, f64)> = if let Some(ref df) = date_filter {
         let mut s = conn.prepare(
-            "SELECT text FROM transcriptions WHERE timestamp >= datetime('now', ?1)"
+            "SELECT DATE(timestamp), text, duration FROM transcriptions WHERE timestamp >= datetime('now', ?1)"
         )?;
-        let rows = s.query_map(params![df], |row| row.get::<_, String>(0))?;
-        rows.collect::<Result<Vec<_>, _>>()?
+        let r = s.query_map(params![df], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        r.collect::<Result<Vec<_>, _>>()?
     } else {
-        let mut s = conn.prepare("SELECT text FROM transcriptions")?;
-        let rows = s.query_map([], |row| row.get::<_, String>(0))?;
-        rows.collect::<Result<Vec<_>, _>>()?
+        let mut s = conn.prepare("SELECT DATE(timestamp), text, duration FROM transcriptions")?;
+        let r = s.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        r.collect::<Result<Vec<_>, _>>()?
     };
 
     let mut total_words: i64 = 0;
     let mut total_keystrokes: i64 = 0;
     let mut total_typing_minutes: f64 = 0.0;
-    for text in &texts {
+    for (_, text, _) in &rows {
         total_words += count_words(text);
         total_keystrokes += calc_keystrokes(text);
         total_typing_minutes += calc_typing_time_minutes(text);
@@ -457,34 +458,19 @@ pub fn get_statistics(conn: &Connection, days: Option<i64>) -> Result<Statistics
         0.0
     };
 
-    let daily_wpm: Vec<DailyWpm> = if let Some(ref df) = date_filter {
-        let mut s = conn.prepare(
-            "SELECT DATE(timestamp) as day, SUM(word_count) as words, SUM(duration) as dur, COUNT(*) as cnt
-             FROM transcriptions
-             WHERE timestamp >= datetime('now', ?1) AND duration > 1.0
-             GROUP BY day ORDER BY day ASC"
-        )?;
-        let rows = s.query_map(params![df], |row| {
-            let words: f64 = row.get(1)?;
-            let dur: f64 = row.get(2)?;
-            let wpm = if dur > 0.0 { words / (dur / 60.0) } else { 0.0 };
-            Ok(DailyWpm { date: row.get(0)?, wpm, session_count: row.get(3)? })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    } else {
-        let mut s = conn.prepare(
-            "SELECT DATE(timestamp) as day, SUM(word_count) as words, SUM(duration) as dur, COUNT(*) as cnt
-             FROM transcriptions WHERE duration > 1.0
-             GROUP BY day ORDER BY day ASC"
-        )?;
-        let rows = s.query_map([], |row| {
-            let words: f64 = row.get(1)?;
-            let dur: f64 = row.get(2)?;
-            let wpm = if dur > 0.0 { words / (dur / 60.0) } else { 0.0 };
-            Ok(DailyWpm { date: row.get(0)?, wpm, session_count: row.get(3)? })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
+    // Aggregate daily WPM using CJK-aware word counting (duration > 1s only)
+    let mut daily_map: std::collections::BTreeMap<String, (i64, f64, i32)> = std::collections::BTreeMap::new();
+    for (date, text, dur) in &rows {
+        if *dur <= 1.0 { continue; }
+        let entry = daily_map.entry(date.clone()).or_insert((0, 0.0, 0));
+        entry.0 += count_words(text);
+        entry.1 += dur;
+        entry.2 += 1;
+    }
+    let daily_wpm: Vec<DailyWpm> = daily_map.into_iter().map(|(date, (words, dur, cnt))| {
+        let wpm = if dur > 0.0 { words as f64 / (dur / 60.0) } else { 0.0 };
+        DailyWpm { date, wpm, session_count: cnt }
+    }).collect();
 
     let wpm_stats = if daily_wpm.is_empty() {
         WpmStats { avg: 0.0, max: 0.0, min: 0.0 }

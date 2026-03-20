@@ -57,8 +57,8 @@ function formatTimeSaved(minutes: number): string {
 }
 
 function formatDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  const [, m, d] = dateStr.split('-');
+  return `${Number(m)}/${Number(d)}`;
 }
 
 function formatNumber(n: number): string {
