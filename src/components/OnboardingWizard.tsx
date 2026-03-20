@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Modal, Steps, Button, Typography, Alert, Flex, Card, Progress, Input, Tag, message, Space } from 'antd';
 import {
   SmileOutlined,
@@ -28,6 +28,7 @@ interface Props {
 
 export default function OnboardingWizard({ onComplete }: Props) {
   const [step, setStep] = useState(0);
+  const [ready, setReady] = useState(false);
 
   // Permissions
   const [micOk, setMicOk] = useState(false);
@@ -36,7 +37,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const permPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Model
-  const { models, fetchModels, updateSetting } = useAppStore();
+  const { models, fetchModels, fetchSettings, updateSetting } = useAppStore();
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null);
@@ -48,6 +49,32 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const [hotkeySet, setHotkeySet] = useState(false);
 
   const recommendedModels = models.filter(m => RECOMMENDED_IDS.includes(m.id));
+
+  // --- Auto-detect already completed steps on mount ---
+  useEffect(() => {
+    (async () => {
+      const perms = await invoke<{ microphone: boolean; accessibility: boolean }>('check_permissions').catch(() => null);
+      if (perms) {
+        setMicOk(perms.microphone);
+        setAccOk(perms.accessibility);
+      }
+      await fetchModels();
+      await fetchSettings();
+      const s = useAppStore.getState();
+      const modelId = typeof s.settings.selected_model_id === 'string' ? s.settings.selected_model_id : '';
+      const model = modelId ? s.models.find(m => m.id === modelId) : null;
+      if (model && model.is_downloaded) {
+        setModelReady(true);
+        setSelectedModel(model);
+      }
+      const hotkey = typeof s.settings.hotkey === 'string' ? s.settings.hotkey : '';
+      if (hotkey) {
+        setHotkeyValue(hotkey);
+        setHotkeySet(true);
+      }
+      setReady(true);
+    })();
+  }, [fetchModels, fetchSettings]);
 
   // --- Permission helpers ---
   const checkPermissions = useCallback(async () => {
@@ -351,6 +378,8 @@ export default function OnboardingWizard({ onComplete }: Props) {
     { title: '快捷键', icon: <ThunderboltOutlined /> },
     { title: '完成', icon: <CheckCircleOutlined /> },
   ];
+
+  if (!ready) return null;
 
   return (
     <Modal
