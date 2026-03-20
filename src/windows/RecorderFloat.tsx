@@ -29,6 +29,7 @@ export default function RecorderFloat() {
   // Sprite
   const [spriteManifest, setSpriteManifest] = useState<SpriteManifest | null>(null);
   const [spriteImageSrc, setSpriteImageSrc] = useState<string | null>(null);
+  const [spriteSize, setSpriteSize] = useState(180);
 
   const loadSprite = useCallback(async () => {
     invoke('frontend_log', { level: 'info', message: '[recorder] loadSprite start' });
@@ -38,11 +39,12 @@ export default function RecorderFloat() {
       if (sprites.length === 0) return;
 
       // Use selected sprite from settings, fallback to first
-      let settings: { selected_sprite_id?: string } = {};
+      let settings: { selected_sprite_id?: string; sprite_size?: number } = {};
       try {
-        settings = await invoke<{ selected_sprite_id?: string }>('get_settings');
+        settings = await invoke<typeof settings>('get_settings');
       } catch { /* use default */ }
 
+      if (settings.sprite_size) setSpriteSize(settings.sprite_size);
       const selectedId = settings.selected_sprite_id;
       const target = (selectedId && sprites.find(s => s.dirId === selectedId)) || sprites[0];
 
@@ -63,7 +65,7 @@ export default function RecorderFloat() {
   // Reload sprite when settings change
   useEffect(() => {
     const cleanup = onBroadcast('settings-changed', (key) => {
-      if (key === 'selected_sprite_id') {
+      if (key === 'selected_sprite_id' || key === 'sprite_size') {
         loadSprite();
       }
     });
@@ -167,8 +169,8 @@ export default function RecorderFloat() {
           manifest={spriteManifest}
           imageSrc={spriteImageSrc}
           isPlaying={isRecording}
-          width={180}
-          height={180}
+          width={spriteSize}
+          height={spriteSize}
         />
       ) : (
         <div style={{

@@ -40,6 +40,7 @@ interface AppSettings {
   autostart?: boolean;
   data_path?: string;
   selected_sprite_id?: string;
+  sprite_size?: number;
 }
 
 export default function Settings() {
@@ -305,6 +306,8 @@ export default function Settings() {
         <SpriteManager
           selectedSpriteId={settings.selected_sprite_id || ''}
           onSelectedChange={(v) => updateSetting('selected_sprite_id', v)}
+          spriteSize={settings.sprite_size ?? 180}
+          onSizeChange={(v) => updateSetting('sprite_size', v)}
         />
       ),
     },

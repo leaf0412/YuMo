@@ -12,9 +12,11 @@ type SpriteEntry = SpriteManifest & { dirId: string };
 interface SpriteManagerProps {
   selectedSpriteId: string;
   onSelectedChange: (dirId: string) => void;
+  spriteSize: number;
+  onSizeChange: (size: number) => void;
 }
 
-export default function SpriteManager({ selectedSpriteId, onSelectedChange }: SpriteManagerProps) {
+export default function SpriteManager({ selectedSpriteId, onSelectedChange, spriteSize, onSizeChange }: SpriteManagerProps) {
   const [sprites, setSprites] = useState<SpriteEntry[]>([]);
   const [imageSrcs, setImageSrcs] = useState<Record<string, string>>({});
   const [threshold, setThreshold] = useState(0.18);
@@ -147,24 +149,39 @@ export default function SpriteManager({ selectedSpriteId, onSelectedChange }: Sp
       )}
 
       {sprites.length > 0 && (
-        <div style={{ maxWidth: 400 }}>
-          <Flex justify="space-between" align="center">
-            <Text>背景去除</Text>
-            <Text type="secondary">{threshold.toFixed(2)}</Text>
-          </Flex>
-          <Slider
-            min={0.01}
-            max={0.50}
-            step={0.01}
-            value={threshold}
-            onChange={setThreshold}
-            onChangeComplete={handleThresholdCommit}
-            disabled={!selectedSpriteId || processing}
-          />
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            值越高去除背景越彻底，但可能影响精灵图本体颜色。需先选中一个精灵图。
-          </Text>
-        </div>
+        <Flex vertical gap={16} style={{ maxWidth: 400 }}>
+          <div>
+            <Flex justify="space-between" align="center">
+              <Text>精灵图大小</Text>
+              <Text type="secondary">{spriteSize}px</Text>
+            </Flex>
+            <Slider
+              min={80}
+              max={300}
+              step={10}
+              value={spriteSize}
+              onChange={onSizeChange}
+            />
+          </div>
+          <div>
+            <Flex justify="space-between" align="center">
+              <Text>背景去除</Text>
+              <Text type="secondary">{threshold.toFixed(2)}</Text>
+            </Flex>
+            <Slider
+              min={0.01}
+              max={0.50}
+              step={0.01}
+              value={threshold}
+              onChange={setThreshold}
+              onChangeComplete={handleThresholdCommit}
+              disabled={!selectedSpriteId || processing}
+            />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              值越高去除背景越彻底，但可能影响精灵图本体颜色。需先选中一个精灵图。
+            </Text>
+          </div>
+        </Flex>
       )}
     </Flex>
   );
