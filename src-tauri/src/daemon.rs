@@ -231,15 +231,12 @@ impl DaemonManager {
 
         let python = find_python()?;
         log::info!("[daemon] using python: {}", python);
-        let stderr_path = self.data_dir.join("daemon_stderr.log");
-        let stderr_file = std::fs::File::create(&stderr_path)
-            .map_err(|e| AppError::Io(format!("create stderr log: {e}")))?;
 
         let mut child = Command::new(&python)
             .arg(&self.script_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(stderr_file)
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| {
                 AppError::Transcription(format!(
@@ -256,6 +253,20 @@ impl DaemonManager {
             .stdout
             .take()
             .ok_or_else(|| AppError::Transcription("no stdout handle".into()))?;
+        let stderr = child.stderr.take().expect("no stderr handle");
+
+        // Forward daemon stderr lines to the unified log.
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::new(stderr);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) if !l.trim().is_empty() => log::info!("[daemon] [stderr] {}", l.trim()),
+                    Err(_) => break,
+                    _ => {}
+                }
+            }
+        });
 
         // Create the BufReader ONCE here — all subsequent reads use this same
         // reader so buffered data is never lost between calls.
@@ -263,20 +274,9 @@ impl DaemonManager {
 
         // Wait for the ready handshake.
         if let Err(e) = wait_for_ready(&mut reader) {
-            // Read stderr log for more context
-            let stderr_content = std::fs::read_to_string(&stderr_path).unwrap_or_default();
-            let detail = if stderr_content.is_empty() {
-                e.to_string()
-            } else {
-                // Take last 500 chars to keep it readable
-                let tail = if stderr_content.len() > 500 {
-                    &stderr_content[stderr_content.len() - 500..]
-                } else {
-                    &stderr_content
-                };
-                format!("{e}\n--- daemon stderr ---\n{tail}")
-            };
-            return Err(AppError::Transcription(detail));
+            return Err(AppError::Transcription(
+                format!("{e} (check log.txt for [daemon] [stderr] entries)")
+            ));
         }
 
         *guard = Some(DaemonProcess {
