@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
-import { Layout, Menu, Typography } from 'antd';
+import { Layout, Menu, Modal, Typography } from 'antd';
 import {
   DashboardOutlined,
   HistoryOutlined,
@@ -17,6 +17,7 @@ import Models from './pages/Models';
 import Dictionary from './pages/Dictionary';
 import Enhancement from './pages/Enhancement';
 import Settings from './pages/Settings';
+import OnboardingWizard from './components/OnboardingWizard';
 import useAppStore from './stores/useAppStore';
 
 const { Sider, Content } = Layout;
@@ -60,7 +61,7 @@ function AppLayout() {
     <Layout style={{ height: '100vh' }}>
       <Sider width={200} theme="light" style={{ overflow: 'auto' }}>
         <div style={{ padding: '16px', textAlign: 'center' }}>
-          <Title level={4} style={{ margin: 0 }}>VoiceInk</Title>
+          <Title level={4} style={{ margin: 0 }}>语墨</Title>
         </div>
         <Menu
           mode="inline"
@@ -82,8 +83,50 @@ function AppLayout() {
   );
 }
 
+/** Check if a downloaded model is selected; if not, show warning and return false */
+function checkModelReady(): boolean {
+  const { settings, models, setActiveKey } = useAppStore.getState();
+  const modelId = typeof settings.selected_model_id === 'string' ? settings.selected_model_id : '';
+  if (!modelId) {
+    Modal.warning({
+      title: '请先选择模型',
+      content: '录音需要一个已下载的语音识别模型。',
+      okText: '前往模型页',
+      onOk: () => setActiveKey('/models'),
+    });
+    logEvent('App', 'recording_blocked', { reason: 'no_model_selected' });
+    return false;
+  }
+  const model = models.find(m => m.id === modelId);
+  if (model && !model.is_downloaded && ['local', 'mlxWhisper', 'mlxFunASR'].includes(model.provider)) {
+    Modal.warning({
+      title: '模型未下载',
+      content: `模型 "${model.name}" 尚未下载，请先下载。`,
+      okText: '前往模型页',
+      onOk: () => setActiveKey('/models'),
+    });
+    logEvent('App', 'recording_blocked', { reason: 'model_not_downloaded', model_id: modelId });
+    return false;
+  }
+  return true;
+}
+
 export default function App() {
   const pipelineRef = useRef('idle');
+  const { fetchSettings } = useAppStore();
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
+
+  // Check onboarding status on mount
+  useEffect(() => {
+    fetchSettings().then(() => {
+      const s = useAppStore.getState().settings;
+      if (s.onboarding_completed !== 'true') {
+        setShowOnboarding(true);
+      }
+      setOnboardingChecked(true);
+    });
+  }, [fetchSettings]);
 
   // Global hotkey listener — works on any page
   useEffect(() => {
@@ -93,6 +136,7 @@ export default function App() {
       if (s === 'recording') {
         await invoke('stop_recording').catch(() => {});
       } else if (s === 'idle') {
+        if (!checkModelReady()) return;
         await invoke('start_recording').catch(() => {});
       } else {
         // transcribing/enhancing/pasting — force cancel to recover
@@ -129,5 +173,14 @@ export default function App() {
     };
   }, []);
 
-  return <AppLayout />;
+  if (!onboardingChecked) return null; // Wait for settings to load
+
+  return (
+    <>
+      {showOnboarding && (
+        <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
+      )}
+      <AppLayout />
+    </>
+  );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Card, Alert, Button, Flex, Space, Tag, Typography, Row, Col, message } from 'antd';
+import { Card, Alert, Button, Flex, Modal, Space, Tag, Typography, Row, Col, message } from 'antd';
 import {
   AudioOutlined,
   CheckCircleOutlined,
@@ -135,6 +135,19 @@ export default function Dashboard() {
         loadData();
       }
     } else {
+      // Check model is selected and downloaded
+      const modelId = typeof settings.selected_model_id === 'string' ? settings.selected_model_id : '';
+      const model = modelId ? models.find(m => m.id === modelId) : null;
+      if (!modelId || (model && !model.is_downloaded && ['local', 'mlxWhisper', 'mlxFunASR'].includes(model.provider))) {
+        Modal.warning({
+          title: '请先选择模型',
+          content: '录音需要一个已下载的语音识别模型。',
+          okText: '前往模型页',
+          onOk: () => setActiveKey('/models'),
+        });
+        logEvent('Dashboard', 'recording_blocked', { reason: modelId ? 'model_not_downloaded' : 'no_model' });
+        return;
+      }
       try {
         await invoke('start_recording');
         setRecording(true);
