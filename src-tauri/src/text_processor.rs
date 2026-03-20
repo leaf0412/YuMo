@@ -6,15 +6,21 @@ use regex::RegexBuilder;
 pub fn apply_replacements(text: &str, replacements: &[(String, String)]) -> String {
     info!("[text_processor] apply_replacements text_length={} replacements_count={}", text.len(), replacements.len());
     let mut result = text.to_string();
+    let mut applied_count = 0;
     for (original, replacement) in replacements {
         let pattern = format!(r"\b{}\b", regex::escape(original));
         if let Ok(re) = RegexBuilder::new(&pattern)
             .case_insensitive(true)
             .build()
         {
+            let prev = result.clone();
             result = re.replace_all(&result, replacement.as_str()).to_string();
+            if result != prev {
+                applied_count += 1;
+            }
         }
     }
+    info!("[text_processor] [apply_replacements] input_len={} rules={} applied={}", text.len(), replacements.len(), applied_count);
     result
 }
 
@@ -41,6 +47,7 @@ pub fn capitalize_sentences(text: &str) -> String {
         }
     }
 
+    info!("[text_processor] [capitalize] input_len={} output_len={}", text.len(), result.len());
     result
 }
 
