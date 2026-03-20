@@ -9,7 +9,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons';
 import { listen } from '@tauri-apps/api/event';
-import { invoke } from './lib/logger';
+import { invoke, logEvent } from './lib/logger';
 import { broadcast } from './lib/broadcast';
 import Dashboard from './pages/Dashboard';
 import History from './pages/History';
@@ -46,6 +46,7 @@ function AppLayout() {
   const [mounted, setMounted] = useState<Set<string>>(() => new Set(['/']));
 
   const handleMenuClick = useCallback(({ key }: { key: string }) => {
+    logEvent('App', 'page_navigate', { to: key });
     setActiveKey(key);
     setMounted((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
   }, [setActiveKey]);
@@ -88,6 +89,7 @@ export default function App() {
   useEffect(() => {
     const unlistenToggle = listen('toggle-recording', async () => {
       const s = pipelineRef.current;
+      logEvent('App', 'hotkey_toggle', { current_state: s });
       if (s === 'recording') {
         await invoke('stop_recording').catch(() => {});
       } else if (s === 'idle') {
@@ -98,8 +100,10 @@ export default function App() {
       }
     });
     const unlistenState = listen<{ state: string }>('recording-state', (event) => {
-      pipelineRef.current = event.payload.state;
-      broadcast('pipeline-state', event.payload.state);
+      const { state } = event.payload;
+      logEvent('App', 'recording_state_changed', { state });
+      pipelineRef.current = state;
+      broadcast('pipeline-state', state);
     });
 
     // Double ESC to cancel recording
@@ -108,6 +112,7 @@ export default function App() {
       if (e.key === 'Escape' && pipelineRef.current !== 'idle') {
         const now = Date.now();
         if (now - lastEsc < 500) {
+          logEvent('App', 'hotkey_cancel', { current_state: pipelineRef.current });
           invoke('cancel_recording').catch(() => {});
           lastEsc = 0;
         } else {
