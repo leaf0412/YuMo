@@ -1,16 +1,18 @@
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use yumo_core::daemon::DaemonManager;
 use yumo_core::db;
 use yumo_core::state::{AppContext, AppPaths};
 use yumo_core::transcriber;
 
 // ---------------------------------------------------------------------------
-// Global AppContext (initialized once via `init`)
+// Global state (initialized once via `init`)
 // ---------------------------------------------------------------------------
 
 static APP_CTX: OnceLock<AppContext> = OnceLock::new();
+static DAEMON: OnceLock<Mutex<DaemonManager>> = OnceLock::new();
 
 fn ctx() -> Result<&'static AppContext> {
     APP_CTX
@@ -41,9 +43,15 @@ pub fn init(data_dir: String) -> Result<()> {
 
     let app_ctx = AppContext::new(conn, paths);
 
+    let daemon_script = std::path::PathBuf::from(&data_dir).join("mlx_funasr_daemon.py");
+    let daemon = DaemonManager::new(daemon_script, data_dir.clone().into());
+
     APP_CTX
         .set(app_ctx)
         .map_err(|_| Error::from_reason("AppContext already initialized"))?;
+    DAEMON
+        .set(Mutex::new(daemon))
+        .map_err(|_| Error::from_reason("Daemon already initialized"))?;
 
     Ok(())
 }
@@ -203,4 +211,77 @@ pub fn get_api_key(provider: String) -> Result<Option<String>> {
 pub fn delete_api_key(provider: String) -> Result<()> {
     yumo_core::platform::keychain::delete_key("com.voiceink.app", &provider)
         .map_err(|e| Error::from_reason(format!("delete_key: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Daemon management
+// ---------------------------------------------------------------------------
+
+fn daemon() -> Result<std::sync::MutexGuard<'static, DaemonManager>> {
+    DAEMON
+        .get()
+        .ok_or_else(|| Error::from_reason("Daemon not initialized"))?
+        .lock()
+        .map_err(|e| Error::from_reason(format!("Daemon lock: {e}")))
+}
+
+#[napi(object)]
+pub struct NapiDaemonStatus {
+    pub running: bool,
+    pub loaded_model: Option<String>,
+}
+
+#[napi]
+pub fn daemon_status() -> Result<NapiDaemonStatus> {
+    let d = daemon()?;
+    Ok(NapiDaemonStatus {
+        running: d.is_running(),
+        loaded_model: d.loaded_model(),
+    })
+}
+
+#[napi]
+pub fn daemon_start() -> Result<()> {
+    let d = daemon()?;
+    d.start().map_err(|e| Error::from_reason(format!("daemon start: {e}")))
+}
+
+#[napi]
+pub fn daemon_stop() -> Result<()> {
+    let d = daemon()?;
+    d.stop();
+    Ok(())
+}
+
+#[napi]
+pub fn daemon_load_model(model_repo: String) -> Result<()> {
+    let d = daemon()?;
+    if !d.is_running() {
+        d.start().map_err(|e| Error::from_reason(format!("daemon start: {e}")))?;
+    }
+    let cmd = serde_json::json!({"action": "load", "model": model_repo});
+    let resp = d.send_command(&cmd)
+        .map_err(|e| Error::from_reason(format!("daemon load: {e}")))?;
+    if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" {
+        d.set_loaded_model(Some(model_repo));
+        Ok(())
+    } else {
+        Err(Error::from_reason(resp.error.unwrap_or_else(|| format!("load failed: {}", resp.status))))
+    }
+}
+
+#[napi]
+pub fn daemon_unload_model() -> Result<()> {
+    let d = daemon()?;
+    let cmd = serde_json::json!({"action": "unload"});
+    d.send_command(&cmd)
+        .map_err(|e| Error::from_reason(format!("daemon unload: {e}")))?;
+    d.set_loaded_model(None);
+    Ok(())
+}
+
+#[napi]
+pub fn daemon_check_deps() -> Result<bool> {
+    let d = daemon()?;
+    Ok(d.has_python())
 }

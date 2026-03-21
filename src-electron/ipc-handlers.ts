@@ -30,6 +30,12 @@ type NapiAddon = {
   storeApiKey(provider: string, key: string): void;
   getApiKey(provider: string): string | null;
   deleteApiKey(provider: string): void;
+  daemonStatus(): { running: boolean; loadedModel: string | null };
+  daemonStart(): void;
+  daemonStop(): void;
+  daemonLoadModel(modelRepo: string): void;
+  daemonUnloadModel(): void;
+  daemonCheckDeps(): boolean;
 };
 
 function loadAddon(): NapiAddon {
@@ -161,7 +167,28 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("daemon-status", () => {
-    return { running: false, loaded_model: null };
+    const s = getAddon().daemonStatus();
+    return { running: s.running, loaded_model: s.loadedModel };
+  });
+
+  ipcMain.handle("daemon-start", () => {
+    getAddon().daemonStart();
+  });
+
+  ipcMain.handle("daemon-stop", () => {
+    getAddon().daemonStop();
+  });
+
+  ipcMain.handle("daemon-load-model", (_e, args?: { modelRepo?: string }) => {
+    if (args?.modelRepo) getAddon().daemonLoadModel(args.modelRepo);
+  });
+
+  ipcMain.handle("daemon-unload-model", () => {
+    getAddon().daemonUnloadModel();
+  });
+
+  ipcMain.handle("daemon-check-deps", () => {
+    return getAddon().daemonCheckDeps();
   });
 
   ipcMain.handle("detect-voiceink-legacy-path", () => null);
