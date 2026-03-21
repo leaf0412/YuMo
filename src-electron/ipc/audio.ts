@@ -1,4 +1,5 @@
 import { ipcMain, globalShortcut } from "electron";
+import log from "../logger";
 import { getAddon } from "../addon";
 import {
   showRecorder,
@@ -7,6 +8,8 @@ import {
   getRecorderWindow,
 } from "../windows";
 
+let lastEscTime = 0;
+
 export function registerAudioHandlers(): void {
   ipcMain.handle("list-audio-devices", async () => {
     return await getAddon().listAudioDevices();
@@ -14,13 +17,29 @@ export function registerAudioHandlers(): void {
 
   ipcMain.handle("start-recording", (_e, args?: { deviceId?: number }) => {
     const result = getAddon().startRecording(args?.deviceId ?? null);
-    // Show recorder overlay
     showRecorder();
-    // Register Escape as global shortcut for cancel during recording
+
+    // Register Escape: double-press within 500ms cancels recording
+    lastEscTime = 0;
     globalShortcut.register("Escape", () => {
-      emitToRenderers("escape-pressed", null);
+      const now = Date.now();
+      if (now - lastEscTime < 500) {
+        // Double-press: cancel recording
+        log.info("[audio] Escape double-press, cancelling recording");
+        globalShortcut.unregister("Escape");
+        getAddon().cancelRecording();
+        hideRecorder();
+        emitToRenderers("recording-state", { state: "idle" });
+        emitToRenderers("escape-hint", "cancelled");
+        lastEscTime = 0;
+      } else {
+        // First press: show hint
+        log.info("[audio] Escape pressed, waiting for double-press");
+        emitToRenderers("escape-hint", "pressAgain");
+        lastEscTime = now;
+      }
     });
-    // Emit state to both windows
+
     const state = JSON.parse(result);
     emitToRenderers("recording-state", state);
     return state;
@@ -32,7 +51,6 @@ export function registerAudioHandlers(): void {
     try {
       const resultJson = await getAddon().stopRecording();
       const result = JSON.parse(resultJson);
-      // Hide recorder overlay
       hideRecorder();
       emitToRenderers("recording-state", { state: "idle" });
       emitToRenderers("transcription-result", result);

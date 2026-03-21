@@ -77,20 +77,29 @@ export default function RecorderFloat() {
     return cleanup;
   }, [loadSprite]);
 
-  // Listen for ESC events to show hint in recorder window
+  // Listen for ESC hints from both BroadcastChannel (Tauri) and IPC (Electron)
   useEffect(() => {
-    let lastEsc = 0;
-    // Listen for escape hints broadcast from main window (App.tsx)
-    const cleanup = onBroadcast('escape-hint', (payload) => {
-      const hint = payload as EscHintType;
+    const handleHint = (hint: EscHintType) => {
       setEscHintType(hint);
       if (hint === 'pressAgain') {
         if (escHintTimer.current) clearTimeout(escHintTimer.current);
         escHintTimer.current = window.setTimeout(() => setEscHintType(null), 2000);
       }
+    };
+
+    // BroadcastChannel: from App.tsx (same-origin, works in both Tauri and Electron)
+    const cleanupBroadcast = onBroadcast('escape-hint', (payload) => {
+      handleHint(payload as EscHintType);
     });
+
+    // IPC: from Electron main process (audio.ts sends escape-hint directly)
+    const unlistenIpc = listen<string>('escape-hint', (event) => {
+      handleHint(event.payload as EscHintType);
+    });
+
     return () => {
-      cleanup();
+      cleanupBroadcast();
+      unlistenIpc.then(fn => fn());
       if (escHintTimer.current) clearTimeout(escHintTimer.current);
     };
   }, []);
