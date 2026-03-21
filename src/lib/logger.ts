@@ -21,6 +21,17 @@ function sendToBackend(level: 'info' | 'error', message: string) {
 // Public: drop-in replacement for tauri invoke — auto-logs everything
 // ---------------------------------------------------------------------------
 
+const MAX_LOG_LEN = 200;
+
+/** Summarise a result for logging: arrays show count, objects are truncated. */
+function summariseResult(result: unknown): string {
+  if (result == null || typeof result !== 'object') return '';
+  if (Array.isArray(result)) return ` => Array(${result.length})`;
+  const json = JSON.stringify(result);
+  if (json.length <= MAX_LOG_LEN) return ` => ${json}`;
+  return ` => ${json.slice(0, MAX_LOG_LEN)}…`;
+}
+
 /** Drop-in replacement for `invoke` from `@tauri-apps/api/core`.
  *  Automatically logs command name, arguments, success, and errors
  *  to both console and backend log.txt. */
@@ -38,7 +49,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
 
   try {
     const result = await tauriInvoke<T>(cmd, args);
-    const resultStr = result && typeof result === 'object' ? ` => ${JSON.stringify(result)}` : '';
+    const resultStr = summariseResult(result);
     console.log(`${tag} ok${resultStr}`);
     sendToBackend('info', `${tag} ok${resultStr}`);
     return result;

@@ -39,7 +39,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const permPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Model
-  const { models, fetchModels, fetchSettings, updateSetting } = useAppStore();
+  const { models, fetchModels, updateSetting } = useAppStore();
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null);
@@ -53,6 +53,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const recommendedModels = models.filter(m => RECOMMENDED_IDS.includes(m.id));
 
   // --- Auto-detect already completed steps on mount ---
+  // Settings already loaded by App.tsx; only fetch models here.
   useEffect(() => {
     (async () => {
       const perms = await invoke<{ microphone: boolean; accessibility: boolean }>('check_permissions').catch(() => null);
@@ -61,7 +62,6 @@ export default function OnboardingWizard({ onComplete }: Props) {
         setAccOk(perms.accessibility);
       }
       await fetchModels();
-      await fetchSettings();
       const s = useAppStore.getState();
       const modelId = typeof s.settings.selected_model_id === 'string' ? s.settings.selected_model_id : '';
       const model = modelId ? s.models.find(m => m.id === modelId) : null;
@@ -76,7 +76,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
       }
       setReady(true);
     })();
-  }, [fetchModels, fetchSettings]);
+  }, [fetchModels]);
 
   // --- Permission helpers ---
   const checkPermissions = useCallback(async () => {
