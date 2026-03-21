@@ -9,6 +9,9 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
+  // Use relative paths so Electron can load assets via file:// protocol
+  base: "./",
+
   // Multi-page build: main window + recorder float window
   build: {
     rollupOptions: {

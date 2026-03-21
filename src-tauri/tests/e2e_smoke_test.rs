@@ -1,4 +1,4 @@
-use yumo_lib::{db, text_processor, enhancer, pipeline, transcriber, recorder, audio_ctrl};
+use yumo_lib::{db, text_processor, enhancer, pipeline, transcriber, platform::recorder, platform::audio_ctrl};
 use tempfile::TempDir;
 
 #[test]
@@ -12,7 +12,7 @@ fn test_full_app_lifecycle() {
     assert!(!models.is_empty());
 
     // 3. List audio devices
-    let devices = recorder::list_input_devices();
+    let devices = recorder::list_input_devices().unwrap();
     assert!(!devices.is_empty());
 
     // 4. Add vocabulary
@@ -43,7 +43,7 @@ fn test_full_app_lifecycle() {
     assert_eq!(state, pipeline::PipelineState::Recording);
 
     // 10. Audio control
-    let _muted = audio_ctrl::is_system_muted();
+    let _muted = audio_ctrl::is_system_muted().unwrap();
 
     // 11. Enhancer prompt building
     let vocab = vec!["Kubernetes".to_string()];
@@ -52,7 +52,7 @@ fn test_full_app_lifecycle() {
     assert!(user.contains("Kubernetes"));
 
     // 12. Insert transcription to DB
-    let t_id = db::insert_transcription(&conn, "test transcription", Some("enhanced"), 2.5, "ggml-base", 2).unwrap();
+    let t_id = db::insert_transcription(&conn, "test transcription", Some("enhanced"), 2.5, "ggml-base", 2, None).unwrap();
     let result = db::get_transcriptions(&conn, None, None, 20).unwrap();
     assert_eq!(result.items.len(), 1);
 

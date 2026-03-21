@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../lib/logger';
 
 export function useTauriCommand<T>(command: string) {
   const [data, setData] = useState<T | null>(null);

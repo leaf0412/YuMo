@@ -3,7 +3,7 @@ import { initReactI18next } from 'react-i18next';
 import zhCN from './locales/zh-CN.json';
 import en from './locales/en.json';
 import { getResolvedLocale } from './utils';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../lib/logger';
 
 export async function initI18n(): Promise<void> {
   let uiLocale: string | undefined;

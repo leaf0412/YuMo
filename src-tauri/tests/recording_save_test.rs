@@ -1,6 +1,5 @@
-use std::path::PathBuf;
 use yumo_lib::state::AppPaths;
-use yumo_lib::recorder::AudioData;
+use yumo_lib::platform::AudioData;
 
 // ---------------------------------------------------------------------------
 // AppPaths: recordings_dir
@@ -44,7 +43,7 @@ fn test_save_recording_creates_wav_file() {
         channels: 1,
     };
 
-    let path = yumo_lib::recorder::save_recording(&audio, &dir).unwrap();
+    let path = yumo_lib::audio_io::save_recording(&audio, &dir).unwrap();
 
     assert!(path.exists());
     assert!(path.extension().unwrap() == "wav");
@@ -64,7 +63,7 @@ fn test_save_recording_creates_dir_if_missing() {
         channels: 1,
     };
 
-    let path = yumo_lib::recorder::save_recording(&audio, &dir).unwrap();
+    let path = yumo_lib::audio_io::save_recording(&audio, &dir).unwrap();
     assert!(path.exists());
 }
 
@@ -79,9 +78,9 @@ fn test_save_recording_unique_filenames() {
         channels: 1,
     };
 
-    let path1 = yumo_lib::recorder::save_recording(&audio, &dir).unwrap();
+    let path1 = yumo_lib::audio_io::save_recording(&audio, &dir).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(10));
-    let path2 = yumo_lib::recorder::save_recording(&audio, &dir).unwrap();
+    let path2 = yumo_lib::audio_io::save_recording(&audio, &dir).unwrap();
 
     assert_ne!(path1, path2);
 }
@@ -97,7 +96,7 @@ fn test_save_recording_filename_format() {
         channels: 1,
     };
 
-    let path = yumo_lib::recorder::save_recording(&audio, &dir).unwrap();
+    let path = yumo_lib::audio_io::save_recording(&audio, &dir).unwrap();
     let name = path.file_stem().unwrap().to_str().unwrap();
     // Should start with "recording_" followed by a timestamp
     assert!(name.starts_with("recording_"), "filename should start with recording_, got: {}", name);

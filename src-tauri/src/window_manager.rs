@@ -160,7 +160,7 @@ impl WindowManager {
     // -----------------------------------------------------------------------
 
     fn load_layout(&self) -> WindowLayout {
-        let state = match self.app.try_state::<crate::state::AppState>() {
+        let state = match self.app.try_state::<crate::state::AppContext>() {
             Some(s) => s,
             None => return WindowLayout::new(),
         };
@@ -180,7 +180,7 @@ impl WindowManager {
     }
 
     fn save_layout(&self, layout: &WindowLayout) {
-        let state = match self.app.try_state::<crate::state::AppState>() {
+        let state = match self.app.try_state::<crate::state::AppContext>() {
             Some(s) => s,
             None => return,
         };

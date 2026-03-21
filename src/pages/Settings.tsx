@@ -4,14 +4,14 @@ import {
   message, Popconfirm, InputNumber,
 } from 'antd';
 import {
-  AudioOutlined, FilterOutlined, ThunderboltOutlined, CopyOutlined,
+  AudioOutlined, ThunderboltOutlined, CopyOutlined,
   FontSizeOutlined, DesktopOutlined, KeyOutlined, AppstoreOutlined,
   HistoryOutlined, SettingOutlined, ClearOutlined, ImportOutlined,
   PictureOutlined, FolderOpenOutlined, FileZipOutlined,
   SafetyCertificateOutlined, CheckCircleOutlined, CloseCircleOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { emit } from '@tauri-apps/api/event';
+import { emit } from '../lib/events';
 import i18n from '../i18n';
 import { getResolvedLocale, type UiLocale } from '../i18n/utils';
 import { invoke, formatError, logEvent } from '../lib/logger';
@@ -41,7 +41,6 @@ interface AppSettings {
   language?: string;
   sound_enabled?: boolean;
   custom_sound_file?: string;
-  noise_reduction?: boolean;
   vad_enabled?: boolean;
   vad_sensitivity?: number;
   vad_silence_timeout?: number;
@@ -428,11 +427,6 @@ export default function Settings() {
           )}
         </Flex>
       ),
-    },
-    {
-      key: 'noise',
-      label: <Space><FilterOutlined />{t('settings.sectionNoise')}</Space>,
-      children: settingRow(t('settings.enableNoise'), <Switch checked={settings.noise_reduction} onChange={(v) => updateSetting('noise_reduction', v)} />),
     },
     {
       key: 'vad',

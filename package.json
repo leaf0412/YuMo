@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.3.0",
   "type": "module",
+  "main": "dist-electron/main/index.mjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -13,7 +14,11 @@
     "package:deploy": "npm run package && npm run deploy",
     "release": "sh -c './scripts/bump-version.sh $VERSION && git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml && git commit -m \"release: v$VERSION\" && git tag -a v$VERSION -m v$VERSION && git push origin main && git push origin v$VERSION'",
     "demo:record": "bash scripts/demo/record.sh",
-    "demo:gif": "bash scripts/demo/postprocess.sh scripts/demo/output/raw.mp4 scripts/demo/output"
+    "demo:gif": "bash scripts/demo/postprocess.sh scripts/demo/output/raw.mp4 scripts/demo/output",
+    "electron:build-main": "esbuild src-electron/main.ts --bundle --platform=node --outfile=dist-electron/main/index.mjs --external:electron --format=esm && esbuild src-electron/preload.ts --bundle --platform=node --outfile=dist-electron/preload/preload.cjs --external:electron --format=cjs",
+    "electron:dev": "npm run electron:build-main && npx electron dist-electron/main/index.mjs",
+    "electron:build": "vite build && npm run electron:build-main",
+    "electron:package": "npm run electron:build && electron-builder"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
@@ -22,6 +27,7 @@
     "@tauri-apps/plugin-global-shortcut": "^2.3.1",
     "@tauri-apps/plugin-opener": "^2",
     "antd": "^6.3.3",
+    "electron-log": "^5.4.3",
     "i18next": "^25.8.20",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -39,6 +45,9 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "electron": "^28.3.3",
+    "electron-builder": "^25.0.0",
+    "esbuild": "^0.25.0",
     "jsdom": "^29.0.0",
     "tsx": "^4.21.0",
     "typescript": "~5.8.3",

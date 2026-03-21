@@ -9,10 +9,7 @@ fn test_app_paths_defaults() {
 
     assert_eq!(paths.data_dir, home.join(".voiceink"));
     assert_eq!(paths.models_dir, home.join(".voiceink/models"));
-    assert_eq!(
-        paths.sprites_dir,
-        home.join("Library/Application Support/VoiceInk/SpriteSheets")
-    );
+    assert_eq!(paths.sprites_dir, home.join(".voiceink/sprites"));
 }
 
 #[test]

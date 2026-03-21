@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../lib/events';
 import { Card, Flex, Typography, Row, Col, Segmented, Spin, Empty, Tooltip } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import {

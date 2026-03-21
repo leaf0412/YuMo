@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../lib/events';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { invoke } from '../lib/logger';
@@ -77,23 +77,29 @@ export default function RecorderFloat() {
     return cleanup;
   }, [loadSprite]);
 
-  // Listen for ESC events to show hint in recorder window
+  // Listen for ESC hints from both BroadcastChannel (Tauri) and IPC (Electron)
   useEffect(() => {
-    let lastEsc = 0;
-    const unlisten = listen('escape-pressed', () => {
-      const now = Date.now();
-      if (now - lastEsc < 500) {
-        setEscHintType('cancelled');
-        lastEsc = 0;
-      } else {
-        lastEsc = now;
-        setEscHintType('pressAgain');
+    const handleHint = (hint: EscHintType) => {
+      setEscHintType(hint);
+      if (hint === 'pressAgain') {
         if (escHintTimer.current) clearTimeout(escHintTimer.current);
         escHintTimer.current = window.setTimeout(() => setEscHintType(null), 2000);
       }
+    };
+
+    // BroadcastChannel: from App.tsx (same-origin, works in both Tauri and Electron)
+    const cleanupBroadcast = onBroadcast('escape-hint', (payload) => {
+      handleHint(payload as EscHintType);
     });
+
+    // IPC: from Electron main process (audio.ts sends escape-hint directly)
+    const unlistenIpc = listen<string>('escape-hint', (event) => {
+      handleHint(event.payload as EscHintType);
+    });
+
     return () => {
-      unlisten.then(fn => fn());
+      cleanupBroadcast();
+      unlistenIpc.then(fn => fn());
       if (escHintTimer.current) clearTimeout(escHintTimer.current);
     };
   }, []);
@@ -161,6 +167,7 @@ export default function RecorderFloat() {
 
   const hasSprite = spriteManifest && spriteImageSrc;
   const isRecording = state === PIPELINE_RECORDING;
+  const isPreparing = isRecording && duration < 1;
   const color = PIPELINE_COLORS[state];
   const animation = PIPELINE_ANIMATIONS[state];
 
@@ -171,10 +178,13 @@ export default function RecorderFloat() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
+        position: 'relative',
         width: '100%',
         height: '100%',
         userSelect: 'none',
         cursor: 'grab',
+        // @ts-expect-error Electron uses this for window dragging
+        WebkitAppRegion: 'drag',
       }}
     >
       {hasSprite ? (
@@ -221,8 +231,8 @@ export default function RecorderFloat() {
           background: color,
           animation,
         }} />
-        <span>{PIPELINE_LABEL_KEYS[state] ? t(PIPELINE_LABEL_KEYS[state]) : ''}</span>
-        {isRecording && (
+        <span>{isPreparing ? t('recorder.preparing') : (PIPELINE_LABEL_KEYS[state] ? t(PIPELINE_LABEL_KEYS[state]) : '')}</span>
+        {isRecording && !isPreparing && (
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(duration)}</span>
         )}
         {/* Cancel button — no drag region so it's clickable */}
@@ -235,6 +245,8 @@ export default function RecorderFloat() {
           style={{
             cursor: 'pointer',
             pointerEvents: 'auto',
+            // @ts-expect-error Electron: make button clickable (not draggable)
+            WebkitAppRegion: 'no-drag',
             marginLeft: 4,
             opacity: 0.7,
             fontSize: 14,
@@ -248,14 +260,20 @@ export default function RecorderFloat() {
 
       {escHintType && (
         <div style={{
-          marginTop: 4,
-          padding: '2px 10px',
-          borderRadius: 10,
-          background: escHintType === 'cancelled' ? 'rgba(255,77,79,0.85)' : 'rgba(0,0,0,0.6)',
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          padding: '6px 16px',
+          borderRadius: 12,
+          background: escHintType === 'cancelled' ? 'rgba(255,77,79,0.9)' : 'rgba(0,0,0,0.75)',
           color: '#fff',
-          fontSize: 11,
+          fontSize: 13,
+          fontWeight: 500,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
           pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+          zIndex: 10,
           transition: 'opacity 0.2s',
         }}>
           {escHintType === 'cancelled' ? t('recorder.cancelledHint') : t('recorder.escHint')}

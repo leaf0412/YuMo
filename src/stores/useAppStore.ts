@@ -52,6 +52,16 @@ interface AppState {
   setDownloadingModelId: (id: string | null) => void;
 }
 
+/** Dedup guard: skip invoke if called again within the cooldown window. */
+const inflight = new Map<string, Promise<void>>();
+function dedup(key: string, fn: () => Promise<void>): Promise<void> {
+  const existing = inflight.get(key);
+  if (existing) return existing;
+  const p = fn().finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
 const useAppStore = create<AppState>((set, get) => ({
   settings: {},
   models: [],
@@ -61,7 +71,7 @@ const useAppStore = create<AppState>((set, get) => ({
   activeKey: '/',
   setActiveKey: (key) => set({ activeKey: key }),
 
-  fetchSettings: async () => {
+  fetchSettings: () => dedup('settings', async () => {
     try {
       const result = await invoke<AppSettings>('get_settings');
       set({ settings: result });
@@ -69,21 +79,21 @@ const useAppStore = create<AppState>((set, get) => ({
         set({ uiLocale: result.ui_locale });
       }
     } catch { /* logged */ }
-  },
+  }),
 
-  fetchModels: async () => {
+  fetchModels: () => dedup('models', async () => {
     try {
       const result = await invoke<ModelInfo[]>('list_available_models');
       set({ models: result });
     } catch { /* logged */ }
-  },
+  }),
 
-  fetchDaemonStatus: async () => {
+  fetchDaemonStatus: () => dedup('daemon', async () => {
     try {
       const status = await invoke<DaemonStatus>('daemon_status');
       set({ daemonStatus: status });
     } catch { /* logged */ }
-  },
+  }),
 
   updateSetting: async (key: string, value: string) => {
     await invoke('update_setting', { key, value });

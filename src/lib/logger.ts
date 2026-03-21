@@ -8,18 +8,57 @@
  * Every invoke call is automatically logged (command, args, result/error)
  * to both the browser console AND the backend log.txt file.
  */
-import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+// ---------------------------------------------------------------------------
+// Platform-aware invoke: Tauri or Electron IPC
+// ---------------------------------------------------------------------------
+
+type ElectronAPI = {
+  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+};
+
+function isTauri(): boolean {
+  return '__TAURI_INTERNALS__' in window;
+}
+
+function getElectronAPI(): ElectronAPI | undefined {
+  return (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
+}
+
+async function platformInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<T>(cmd, args);
+  }
+  const api = getElectronAPI();
+  if (api) {
+    const channel = cmd.replace(/_/g, '-');
+    const result = await api.invoke(channel, args);
+    return result as T;
+  }
+  throw new Error(`No backend available for invoke("${cmd}")`);
+}
 
 // ---------------------------------------------------------------------------
 // Low-level: send a log line to backend log.txt (fire-and-forget)
 // ---------------------------------------------------------------------------
 function sendToBackend(level: 'info' | 'error', message: string) {
-  tauriInvoke('frontend_log', { level, message }).catch(() => {});
+  platformInvoke('frontend_log', { level, message }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
 // Public: drop-in replacement for tauri invoke — auto-logs everything
 // ---------------------------------------------------------------------------
+
+const MAX_LOG_LEN = 200;
+
+/** Summarise a result for logging: arrays show count, objects are truncated. */
+function summariseResult(result: unknown): string {
+  if (result == null || typeof result !== 'object') return '';
+  if (Array.isArray(result)) return ` => Array(${result.length})`;
+  const json = JSON.stringify(result);
+  if (json.length <= MAX_LOG_LEN) return ` => ${json}`;
+  return ` => ${json.slice(0, MAX_LOG_LEN)}…`;
+}
 
 /** Drop-in replacement for `invoke` from `@tauri-apps/api/core`.
  *  Automatically logs command name, arguments, success, and errors
@@ -27,7 +66,7 @@ function sendToBackend(level: 'info' | 'error', message: string) {
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   // Don't log the logging command itself to avoid infinite recursion
   if (cmd === 'frontend_log') {
-    return tauriInvoke<T>(cmd, args);
+    return platformInvoke<T>(cmd, args);
   }
 
   const argsStr = args ? ` ${JSON.stringify(args)}` : '';
@@ -37,8 +76,8 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   sendToBackend('info', `${tag}${argsStr}`);
 
   try {
-    const result = await tauriInvoke<T>(cmd, args);
-    const resultStr = result && typeof result === 'object' ? ` => ${JSON.stringify(result)}` : '';
+    const result = await platformInvoke<T>(cmd, args);
+    const resultStr = summariseResult(result);
     console.log(`${tag} ok${resultStr}`);
     sendToBackend('info', `${tag} ok${resultStr}`);
     return result;

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../lib/logger';
 
 export type UiLocale = 'system' | 'zh-CN' | 'en';
 export type ResolvedLocale = 'zh-CN' | 'en';

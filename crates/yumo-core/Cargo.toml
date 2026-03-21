@@ -1,0 +1,44 @@
+[package]
+name = "yumo-core"
+version = "0.3.0"
+edition = "2021"
+description = "语墨核心库 - 业务逻辑与平台抽象"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+log = "0.4"
+regex = "1"
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
+reqwest = { version = "0.12", features = ["stream", "json", "multipart"] }
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+whisper-rs = "0.16"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+hound = "3"
+uuid = { version = "1", features = ["v4"] }
+csv = "1"
+
+# 跨平台依赖
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+arboard = "3"
+cpal = "0.15"       # Windows/Linux 录音 + 音频设备枚举（macOS 保持 CoreAudio 原生）
+
+[target.'cfg(target_os = "macos")'.dependencies]
+coreaudio-sys = "0.2"
+cocoa = "0.26"
+objc = "0.2"
+core-graphics = "0.24"
+security-framework = "2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+enigo = "0.2"       # 按键模拟（Ctrl+V）
+
+[target.'cfg(target_os = "linux")'.dependencies]
+enigo = "0.2"       # 按键模拟（Ctrl+V）
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["full", "test-util"] }

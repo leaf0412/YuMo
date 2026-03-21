@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "src-tauri",
+    "crates/yumo-core",
+    "napi",
+]
+resolver = "2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "z"

@@ -7,7 +7,7 @@ import {
 import {
   CheckCircleOutlined, CloudOutlined, ImportOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../lib/events';
 import { invoke, formatError, logEvent } from '../lib/logger';
 import useAppStore from '../stores/useAppStore';
 const { Title, Text } = Typography;

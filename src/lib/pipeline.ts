@@ -6,6 +6,7 @@
 
 export const PIPELINE_IDLE = 'idle' as const;
 export const PIPELINE_RECORDING = 'recording' as const;
+export const PIPELINE_PROCESSING = 'processing' as const;
 export const PIPELINE_TRANSCRIBING = 'transcribing' as const;
 export const PIPELINE_ENHANCING = 'enhancing' as const;
 export const PIPELINE_PASTING = 'pasting' as const;
@@ -13,6 +14,7 @@ export const PIPELINE_PASTING = 'pasting' as const;
 export type PipelineState =
   | typeof PIPELINE_IDLE
   | typeof PIPELINE_RECORDING
+  | typeof PIPELINE_PROCESSING
   | typeof PIPELINE_TRANSCRIBING
   | typeof PIPELINE_ENHANCING
   | typeof PIPELINE_PASTING;
@@ -26,6 +28,7 @@ export const CMD_GET_PIPELINE_STATE = 'get_pipeline_state';
 
 export const PIPELINE_LABELS: Record<PipelineState, string> = {
   [PIPELINE_RECORDING]: '录音中',
+  [PIPELINE_PROCESSING]: '处理中...',
   [PIPELINE_TRANSCRIBING]: '转录中...',
   [PIPELINE_ENHANCING]: '增强中...',
   [PIPELINE_PASTING]: '粘贴中...',
@@ -35,6 +38,7 @@ export const PIPELINE_LABELS: Record<PipelineState, string> = {
 /** i18n keys for pipeline state labels — use with t() */
 export const PIPELINE_LABEL_KEYS: Record<PipelineState, string> = {
   [PIPELINE_RECORDING]: 'pipeline.recording',
+  [PIPELINE_PROCESSING]: 'pipeline.processing',
   [PIPELINE_TRANSCRIBING]: 'pipeline.transcribing',
   [PIPELINE_ENHANCING]: 'pipeline.enhancing',
   [PIPELINE_PASTING]: 'pipeline.pasting',
@@ -48,6 +52,7 @@ export const COLOR_PROCESSING = '#1890ff';
 
 export const PIPELINE_COLORS: Record<PipelineState, string> = {
   [PIPELINE_RECORDING]: COLOR_ACTIVE,
+  [PIPELINE_PROCESSING]: COLOR_PROCESSING,
   [PIPELINE_TRANSCRIBING]: COLOR_PROCESSING,
   [PIPELINE_ENHANCING]: COLOR_PROCESSING,
   [PIPELINE_PASTING]: COLOR_PROCESSING,
@@ -56,6 +61,7 @@ export const PIPELINE_COLORS: Record<PipelineState, string> = {
 
 export const PIPELINE_ANIMATIONS: Record<PipelineState, string> = {
   [PIPELINE_RECORDING]: 'pulse 1.5s infinite',
+  [PIPELINE_PROCESSING]: 'none',
   [PIPELINE_TRANSCRIBING]: 'none',
   [PIPELINE_ENHANCING]: 'none',
   [PIPELINE_PASTING]: 'none',
@@ -69,6 +75,7 @@ export function parsePipelineState(raw: string | undefined | null): PipelineStat
   const valid: ReadonlySet<string> = new Set([
     PIPELINE_IDLE,
     PIPELINE_RECORDING,
+    PIPELINE_PROCESSING,
     PIPELINE_TRANSCRIBING,
     PIPELINE_ENHANCING,
     PIPELINE_PASTING,

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Input, Button, Flex, Space, Tag, Typography, Popconfirm, message, Card } from 'antd';
 import { CopyOutlined, DeleteOutlined, ClearOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
-import { emit } from '@tauri-apps/api/event';
+import { emit } from '../lib/events';
 import { useTranslation } from 'react-i18next';
 import { invoke, formatError, logEvent } from '../lib/logger';
 const { Text, Paragraph } = Typography;

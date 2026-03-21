@@ -1,0 +1,15 @@
+{
+  "name": "yumo-napi",
+  "version": "0.3.0",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "yumo-napi",
+    "triples": {
+      "defaults": false,
+      "additional": [
+        "x86_64-unknown-linux-gnu"
+      ]
+    }
+  }
+}
