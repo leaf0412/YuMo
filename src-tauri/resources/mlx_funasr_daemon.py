@@ -429,7 +429,7 @@ def _transcribe_funasr(model, audio_path, language=None, max_tokens=500, tempera
 
 
 def _funasr_generate_text(model, audio_path, language, sf, np, max_tokens=500, temperature=0.0):
-    """Generate raw text from FunASR model, passing audio array directly."""
+    """Generate raw text from FunASR model, with automatic chunking for long audio."""
     audio_data, sample_rate = sf.read(audio_path, dtype='float32')
     log(f"Total audio duration: {len(audio_data) / sample_rate:.2f}s, sample_rate: {sample_rate}")
 
@@ -445,22 +445,63 @@ def _funasr_generate_text(model, audio_path, language, sf, np, max_tokens=500, t
         audio_data = resample_audio(audio_data, sample_rate, target_sr)
         sample_rate = target_sr
 
+    duration_secs = len(audio_data) / sample_rate
+    chunk_secs = 30  # FunASR works best with ≤30s audio
+
+    if duration_secs <= chunk_secs + 5:
+        # Short audio: process as single chunk (with padding)
+        text = _funasr_generate_single_chunk(model, audio_data, sample_rate, language, np, max_tokens, temperature)
+    else:
+        # Long audio: split into chunks and concatenate results
+        log(f"Long audio ({duration_secs:.1f}s), splitting into ~{chunk_secs}s chunks")
+        texts = []
+        chunk_samples = chunk_secs * sample_rate
+        overlap_samples = int(0.5 * sample_rate)  # 0.5s overlap for continuity
+        offset = 0
+        chunk_idx = 0
+
+        while offset < len(audio_data):
+            end = min(offset + chunk_samples, len(audio_data))
+            chunk = audio_data[offset:end]
+            chunk_duration = len(chunk) / sample_rate
+            log(f"Chunk {chunk_idx}: offset={offset/sample_rate:.1f}s duration={chunk_duration:.1f}s")
+
+            # Skip very short trailing chunks (< 0.5s)
+            if chunk_duration < 0.5:
+                break
+
+            chunk_text = _funasr_generate_single_chunk(
+                model, chunk, sample_rate, language, np, max_tokens, temperature
+            )
+            if chunk_text:
+                texts.append(chunk_text)
+                log(f"Chunk {chunk_idx} result: '{chunk_text[:50]}...' ({len(chunk_text)} chars)" if len(chunk_text) > 50 else f"Chunk {chunk_idx} result: '{chunk_text}'")
+
+            offset = end - overlap_samples if end < len(audio_data) else end
+            chunk_idx += 1
+
+        text = "".join(texts)
+        log(f"Chunked transcription complete: {chunk_idx} chunks, {len(text)} chars total")
+
+    return text
+
+
+def _funasr_generate_single_chunk(model, audio_data, sample_rate, language, np, max_tokens, temperature):
+    """Transcribe a single audio chunk (≤30s recommended)."""
     # Append 1s silence padding to prevent truncation
     padding_samples = int(sample_rate * 1.0)
     silence = np.zeros(padding_samples, dtype=audio_data.dtype)
-    audio_data = np.concatenate([audio_data, silence])
-    log(f"Padded audio duration: {len(audio_data) / sample_rate:.2f}s (+1.0s padding)")
+    padded = np.concatenate([audio_data, silence])
 
     lang_param = _build_funasr_lang_param(language)
 
     old_stdout = sys.stdout
     sys.stdout = sys.stderr
     try:
-        # Pass numpy array directly to model.generate() — no temp file needed
-        result = _run_funasr_streaming(model, audio_data, lang_param, max_tokens=max_tokens, temperature=temperature)
+        result = _run_funasr_streaming(model, padded, lang_param, max_tokens=max_tokens, temperature=temperature)
     finally:
         sys.stdout = old_stdout
-        del audio_data
+        del padded
 
     text = result.text if hasattr(result, 'text') else str(result)
     _log_funasr_result(result)
