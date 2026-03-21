@@ -1,4 +1,6 @@
 import { app, BrowserWindow } from "electron";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { registerAllHandlers } from "./ipc/index";
 import { createMainWindow, createRecorderWindow } from "./windows";
 import { createTray } from "./tray";
@@ -10,6 +12,7 @@ import { getAddon } from "./addon";
 // -------------------------------------------------------------------------
 
 app.whenReady().then(async () => {
+  syncResources();
   registerAllHandlers();
   createMainWindow();
   await createRecorderWindow();
@@ -96,5 +99,58 @@ async function warmupDaemon(): Promise<void> {
     console.log(`[warmup] model loaded: ${model.model_repo}`);
   } catch (err) {
     console.error("[warmup] failed (non-fatal):", err);
+  }
+}
+
+// -------------------------------------------------------------------------
+// Resource syncing — mirrors Tauri lib.rs lines 81-128
+// -------------------------------------------------------------------------
+
+function syncResources(): void {
+  const dataDir = path.join(app.getPath("home"), ".voiceink");
+  fs.mkdirSync(dataDir, { recursive: true });
+
+  // Resource locations: production (resourcesPath) or dev (src-tauri/resources/)
+  const prodDir = path.join(process.resourcesPath ?? "", "resources");
+  const devDir = path.join(__dirname, "../../src-tauri/resources");
+  const resDir = fs.existsSync(prodDir) ? prodDir : devDir;
+
+  const filesToSync = [
+    { name: "mlx_funasr_daemon.py", executable: false },
+  ];
+
+  // Sync denoiser models to ~/.voiceink/denoiser/
+  const denoiserDir = path.join(dataDir, "denoiser");
+  fs.mkdirSync(denoiserDir, { recursive: true });
+  const denoiserFiles = ["dtln_1.onnx", "dtln_2.onnx"];
+
+  for (const { name, executable } of filesToSync) {
+    syncFile(resDir, dataDir, name, executable);
+  }
+  for (const name of denoiserFiles) {
+    syncFile(path.join(resDir, "denoiser"), denoiserDir, name, false);
+  }
+}
+
+function syncFile(
+  srcDir: string,
+  destDir: string,
+  name: string,
+  executable: boolean,
+): void {
+  const src = path.join(srcDir, name);
+  const dest = path.join(destDir, name);
+  if (!fs.existsSync(src)) {
+    console.log(`[sync] ${name} not found at ${src}`);
+    return;
+  }
+  const srcSize = fs.statSync(src).size;
+  const destSize = fs.existsSync(dest) ? fs.statSync(dest).size : 0;
+  if (!fs.existsSync(dest) || srcSize !== destSize) {
+    fs.copyFileSync(src, dest);
+    if (executable && process.platform !== "win32") {
+      fs.chmodSync(dest, 0o755);
+    }
+    console.log(`[sync] ${name} synced (${srcSize} bytes)`);
   }
 }
