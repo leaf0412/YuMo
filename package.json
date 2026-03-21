@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.3.0",
   "type": "module",
+  "main": "dist-electron/main/index.mjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

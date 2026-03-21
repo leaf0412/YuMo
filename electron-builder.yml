@@ -5,21 +5,32 @@ directories:
   output: release
 files:
   - dist-electron/**/*
+  - dist/**/*
 extraResources:
   - from: napi/
     to: napi/
     filter:
       - "*.node"
+  - from: src-tauri/resources/
+    to: resources/
+    filter:
+      - "mlx_funasr_daemon.py"
+      - "denoiser/**/*"
 mac:
   target:
     - dmg
   artifactName: ${productName}-${version}-mac.${ext}
   category: public.app-category.utilities
+  icon: src-tauri/icons/icon.icns
 linux:
   target:
     - AppImage
     - deb
   artifactName: ${productName}-${version}-linux.${ext}
   category: Utility
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-win.${ext}
 publish:
   provider: github
