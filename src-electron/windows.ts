@@ -86,17 +86,20 @@ export function createRecorderWindow(): BrowserWindow {
     y,
     frame: false,
     transparent: true,
+    backgroundColor: "#00000000",  // fully transparent
     alwaysOnTop: true,
     resizable: false,
     show: false,          // hidden by default, shown during recording
     skipTaskbar: true,
     hasShadow: false,
+    focusable: false,     // don't steal focus from the text input
     webPreferences: {
       preload: join(__dirname, "../preload/preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+  console.log(`[windows] recorder window created at (${x}, ${y})`);
 
   if (process.env.ELECTRON_RENDERER_URL) {
     recorderWindow.loadURL(process.env.ELECTRON_RENDERER_URL + "/recorder.html");
@@ -119,7 +122,8 @@ export function showRecorder(): void {
   if (!recorderWindow || recorderWindow.isDestroyed()) {
     createRecorderWindow();
   }
-  recorderWindow?.show();
+  recorderWindow?.showInactive(); // show without stealing focus
+  console.log("[windows] recorder shown");
 }
 
 export function hideRecorder(): void {
