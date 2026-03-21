@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { ipcMain, globalShortcut } from "electron";
 import { getAddon } from "../addon";
 import {
   showRecorder,
@@ -16,6 +16,10 @@ export function registerAudioHandlers(): void {
     const result = getAddon().startRecording(args?.deviceId ?? null);
     // Show recorder overlay
     showRecorder();
+    // Register Escape as global shortcut for cancel during recording
+    globalShortcut.register("Escape", () => {
+      emitToRenderers("escape-pressed", null);
+    });
     // Emit state to both windows
     const state = JSON.parse(result);
     emitToRenderers("recording-state", state);
@@ -23,6 +27,7 @@ export function registerAudioHandlers(): void {
   });
 
   ipcMain.handle("stop-recording", async () => {
+    globalShortcut.unregister("Escape");
     emitToRenderers("recording-state", { state: "processing" });
     try {
       const resultJson = await getAddon().stopRecording();
@@ -40,6 +45,7 @@ export function registerAudioHandlers(): void {
   });
 
   ipcMain.handle("cancel-recording", () => {
+    globalShortcut.unregister("Escape");
     getAddon().cancelRecording();
     hideRecorder();
     emitToRenderers("recording-state", { state: "idle" });
