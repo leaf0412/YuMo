@@ -172,7 +172,9 @@ pub async fn stop_recording(
             .unwrap_or(false)
     };
 
-    let audio_data = if noise_reduction_enabled {
+    let audio_samples = audio_data.pcm_samples.len();
+    let audio_secs = audio_samples as f64 / audio_data.sample_rate.max(1) as f64;
+    let audio_data = if noise_reduction_enabled && audio_secs >= 1.0 {
         info!("[pipeline] noise reduction enabled, applying DTLN denoiser...");
         let denoise_start = std::time::Instant::now();
 

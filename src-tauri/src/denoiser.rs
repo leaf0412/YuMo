@@ -107,15 +107,8 @@ impl Denoiser for DtlnDenoiser {
         // Prepend warm-up segment so the LSTM hidden states are
         // pre-conditioned before processing the real audio start.
         // We mirror-repeat the beginning of the audio as warm-up material.
-        // For short recordings (< 2s), scale down warm-up to avoid over-suppression.
-        let max_warm_up = WARM_UP_FRAMES * FRAME_SHIFT;
-        let warm_up_samples = if input_len < 32000 {
-            // Scale: 0 at 0 samples, ramp up to max at 32000 (2s)
-            (max_warm_up * input_len) / 32000
-        } else {
-            max_warm_up
-        };
-        let warm_up_src_len = input_len.min(warm_up_samples.max(1));
+        let warm_up_samples = WARM_UP_FRAMES * FRAME_SHIFT;
+        let warm_up_src_len = warm_up_samples.min(input_len);
         let mut warm_up = Vec::with_capacity(warm_up_samples);
         while warm_up.len() < warm_up_samples {
             let remaining = warm_up_samples - warm_up.len();
@@ -129,7 +122,7 @@ impl Denoiser for DtlnDenoiser {
 
         info!(
             "[denoiser] warm-up: {} samples prepended ({} frames)",
-            warm_up_samples, warm_up_samples / FRAME_SHIFT.max(1)
+            warm_up_samples, WARM_UP_FRAMES
         );
 
         // Pad so we have at least one full frame and exact overlap-add alignment
