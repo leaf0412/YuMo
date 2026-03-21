@@ -16,18 +16,23 @@ type ElectronAPI = {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
 };
 
-const isTauri = '__TAURI_INTERNALS__' in window;
-const electronAPI = !isTauri ? (window as unknown as { electronAPI?: ElectronAPI }).electronAPI : undefined;
+function isTauri(): boolean {
+  return '__TAURI_INTERNALS__' in window;
+}
+
+function getElectronAPI(): ElectronAPI | undefined {
+  return (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
+}
 
 async function platformInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (isTauri) {
+  if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<T>(cmd, args);
   }
-  if (electronAPI) {
-    // Electron IPC: convert snake_case command to kebab-case channel
+  const api = getElectronAPI();
+  if (api) {
     const channel = cmd.replace(/_/g, '-');
-    const result = await electronAPI.invoke(channel, args);
+    const result = await api.invoke(channel, args);
     return result as T;
   }
   throw new Error(`No backend available for invoke("${cmd}")`);

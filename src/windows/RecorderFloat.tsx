@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { listen } from '../../lib/events';
+import { listen } from '../lib/events';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { invoke } from '../lib/logger';

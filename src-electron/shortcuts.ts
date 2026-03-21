@@ -18,10 +18,12 @@ export function registerGlobalShortcut(shortcut: string): boolean {
 
   try {
     const success = globalShortcut.register(electronShortcut, () => {
+      console.log("[shortcuts] hotkey triggered, sending toggle-recording");
       // Emit toggle-recording to both windows
       for (const win of [getMainWindow(), getRecorderWindow()]) {
         if (win && !win.isDestroyed()) {
           win.webContents.send("toggle-recording");
+          console.log(`[shortcuts] sent to window: ${win.getTitle()}`);
         }
       }
     });
