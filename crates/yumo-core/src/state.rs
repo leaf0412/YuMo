@@ -75,8 +75,8 @@ impl AppPaths {
 
 /// Core application context (platform-agnostic).
 ///
-/// The `daemon` field is managed separately by the Tauri shell (`src-tauri`)
-/// until `daemon.rs` is migrated into yumo-core.
+/// The `daemon` (DaemonManager) is managed as a separate Tauri State
+/// to avoid circular locking with the process mutex.
 pub struct AppContext {
     pub db: Mutex<Connection>,
     pub pipeline_state: Mutex<PipelineState>,

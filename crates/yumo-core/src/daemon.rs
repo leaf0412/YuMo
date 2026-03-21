@@ -3,12 +3,19 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use tauri::Emitter;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{AppError, AppResult};
+
+// ---------------------------------------------------------------------------
+// Generic event callback — replaces tauri::Emitter
+// ---------------------------------------------------------------------------
+
+/// Generic event callback for emitting status events to the frontend.
+/// Signature: (event_name, payload_json).
+pub type DaemonEventCallback = Box<dyn Fn(&str, &serde_json::Value) + Send + Sync>;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -205,12 +212,12 @@ impl DaemonManager {
     }
 
     /// Bootstrap venv if needed (blocking — call from spawn_blocking).
-    pub fn ensure_python_static(app: Option<tauri::AppHandle>) -> AppResult<()> {
+    pub fn ensure_python_static(cb: Option<&DaemonEventCallback>) -> AppResult<()> {
         if has_working_python() {
             return Ok(());
         }
         log::info!("[daemon] ensure_python: bootstrapping venv");
-        bootstrap_venv(app)?;
+        bootstrap_venv(cb)?;
         Ok(())
     }
 
@@ -528,19 +535,16 @@ impl Drop for DaemonManager {
 // DaemonClient trait implementation
 // ---------------------------------------------------------------------------
 
-impl yumo_core::daemon_client::DaemonClient for DaemonManager {
+impl crate::daemon_client::DaemonClient for DaemonManager {
     fn send_command_async(
         &self,
         cmd: &serde_json::Value,
         timeout: std::time::Duration,
-    ) -> impl std::future::Future<Output = Result<yumo_core::daemon_client::DaemonResponse, crate::error::AppError>> + Send {
-        // Delegate to the existing async method, converting the response type.
-        let status_str = cmd.get("action").and_then(|a| a.as_str()).unwrap_or("unknown").to_string();
-        let _ = status_str;
-        let fut = self.send_command_async(cmd, timeout);
+    ) -> impl std::future::Future<Output = Result<crate::daemon_client::DaemonResponse, AppError>> + Send {
+        let fut = DaemonManager::send_command_async(self, cmd, timeout);
         async move {
             let resp = fut.await?;
-            Ok(yumo_core::daemon_client::DaemonResponse {
+            Ok(crate::daemon_client::DaemonResponse {
                 status: resp.status,
                 text: resp.text,
                 error: resp.error,
@@ -619,7 +623,7 @@ fn python_has_mlx(python: &str) -> bool {
 }
 
 /// Collect candidate Python paths, matching VoiceInk's search order:
-/// asdf → mise → miniforge → mambaforge → homebrew → system → local.
+/// asdf -> mise -> miniforge -> mambaforge -> homebrew -> system -> local.
 fn python_candidates() -> Vec<String> {
     let mut candidates = Vec::new();
 
@@ -724,6 +728,7 @@ fn venv_python_path() -> String {
 }
 
 /// Find any system python3 (doesn't need mlx_audio).
+#[allow(dead_code)]
 fn find_any_python() -> Option<String> {
     for candidate in python_candidates() {
         if std::path::Path::new(&candidate).exists() {
@@ -854,7 +859,7 @@ fn run_and_stream_stderr(cmd: &mut Command, tag: &str) -> AppResult<()> {
 /// Create a venv at ~/.voiceink/venv and install mlx-audio-plus using `uv`.
 /// `uv` is auto-downloaded on first use if not present.
 /// Returns the venv python path on success.
-fn bootstrap_venv(app: Option<tauri::AppHandle>) -> AppResult<String> {
+fn bootstrap_venv(cb: Option<&DaemonEventCallback>) -> AppResult<String> {
     let start = std::time::Instant::now();
     let uv = find_uv()?;
     log::info!("[daemon] [bootstrap] using uv: {:?}", uv);
@@ -866,8 +871,8 @@ fn bootstrap_venv(app: Option<tauri::AppHandle>) -> AppResult<String> {
 
     // Step 1: Create venv
     log::info!("[daemon] [bootstrap] creating venv at {} python=3.12", venv_dir_str);
-    if let Some(ref app) = app {
-        let _ = app.emit("daemon-setup-status", serde_json::json!({
+    if let Some(cb) = cb {
+        cb("daemon-setup-status", &serde_json::json!({
             "stage": "creating_venv"
         }));
     }
@@ -881,8 +886,8 @@ fn bootstrap_venv(app: Option<tauri::AppHandle>) -> AppResult<String> {
 
     // Step 2: Install deps
     log::info!("[daemon] [bootstrap] venv created, installing deps: mlx-audio-plus, soundfile");
-    if let Some(ref app) = app {
-        let _ = app.emit("daemon-setup-status", serde_json::json!({
+    if let Some(cb) = cb {
+        cb("daemon-setup-status", &serde_json::json!({
             "stage": "installing_deps",
             "message": "正在安装 Python 依赖，首次需要几分钟..."
         }));

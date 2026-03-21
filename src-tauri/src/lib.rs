@@ -1,7 +1,7 @@
 pub use yumo_core::audio_ctrl;
 pub use yumo_core::cloud;
 pub mod commands;
-pub mod daemon;
+pub use yumo_core::daemon;
 pub use yumo_core::db;
 pub use yumo_core::denoiser;
 pub use yumo_core::downloader;

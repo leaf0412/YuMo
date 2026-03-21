@@ -1178,15 +1178,20 @@ pub async fn daemon_load_model(
     daemon: State<'_, DaemonManager>,
     model_repo: String,
 ) -> Result<(), AppError> {
+    use crate::daemon::DaemonEventCallback;
+
     if !daemon.is_running() {
         // Emit setup stages so frontend can show progress
         let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "checking_python"}));
 
         if !daemon.has_python() {
-            // Run bootstrap in a blocking thread so we don't freeze the async runtime
-            // bootstrap_venv internally emits "creating_venv" and "installing_deps" stages
+            // Build a callback that bridges to tauri::Emitter
             let app_for_setup = app.clone();
-            tokio::task::spawn_blocking(move || crate::daemon::DaemonManager::ensure_python_static(Some(app_for_setup)))
+            let setup_cb: DaemonEventCallback = Box::new(move |event_name, payload| {
+                use tauri::Emitter;
+                let _ = app_for_setup.emit(event_name, payload.clone());
+            });
+            tokio::task::spawn_blocking(move || DaemonManager::ensure_python_static(Some(&setup_cb)))
                 .await
                 .map_err(|e| AppError::Transcription(format!("setup failed: {e}")))?
                 .map_err(|e| {
