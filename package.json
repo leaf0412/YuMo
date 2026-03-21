@@ -11,7 +11,9 @@
     "package": "CMAKE_OSX_DEPLOYMENT_TARGET=11.0 MACOSX_DEPLOYMENT_TARGET=11.0 tauri build",
     "deploy": "./scripts/deploy.sh",
     "package:deploy": "npm run package && npm run deploy",
-    "release": "sh -c './scripts/bump-version.sh $VERSION && git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml && git commit -m \"release: v$VERSION\" && git tag -a v$VERSION -m v$VERSION && git push origin main && git push origin v$VERSION'"
+    "release": "sh -c './scripts/bump-version.sh $VERSION && git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml && git commit -m \"release: v$VERSION\" && git tag -a v$VERSION -m v$VERSION && git push origin main && git push origin v$VERSION'",
+    "demo:record": "bash scripts/demo/record.sh",
+    "demo:gif": "bash scripts/demo/postprocess.sh scripts/demo/output/raw.mp4 scripts/demo/output"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
@@ -38,8 +40,10 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "jsdom": "^29.0.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.0",
+    "webdriverio": "^9.26.1"
   }
 }
