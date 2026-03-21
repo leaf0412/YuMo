@@ -63,6 +63,18 @@ fn test_denoiser_enabled_no_model_fallback() {
 }
 
 #[test]
+fn test_denoiser_enabled_no_model_dir() {
+    let config = denoiser::DenoiserConfig {
+        enabled: true,
+        model_dir: None,
+    };
+    let input = vec![0.3f32; 800];
+    let output = denoiser::process_or_passthrough(&config, &input, 16000).unwrap();
+    assert_eq!(output.len(), input.len());
+    assert_eq!(output, input);
+}
+
+#[test]
 fn test_dtln_denoiser_loads_and_processes() {
     let dir = match model_dir() {
         Some(d) => d,
