@@ -172,6 +172,7 @@ export default function RecorderFloat() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
+        position: 'relative',
         width: '100%',
         height: '100%',
         userSelect: 'none',
@@ -253,14 +254,20 @@ export default function RecorderFloat() {
 
       {escHintType && (
         <div style={{
-          marginTop: 4,
-          padding: '2px 10px',
-          borderRadius: 10,
-          background: escHintType === 'cancelled' ? 'rgba(255,77,79,0.85)' : 'rgba(0,0,0,0.6)',
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          padding: '6px 16px',
+          borderRadius: 12,
+          background: escHintType === 'cancelled' ? 'rgba(255,77,79,0.9)' : 'rgba(0,0,0,0.75)',
           color: '#fff',
-          fontSize: 11,
+          fontSize: 13,
+          fontWeight: 500,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
           pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+          zIndex: 10,
           transition: 'opacity 0.2s',
         }}>
           {escHintType === 'cancelled' ? t('recorder.cancelledHint') : t('recorder.escHint')}
