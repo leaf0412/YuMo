@@ -1,4 +1,4 @@
-use yumo_lib::downloader;
+use yumo_core::downloader;
 
 #[tokio::test]
 async fn test_download_small_file() {

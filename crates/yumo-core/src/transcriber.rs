@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::daemon_client::DaemonClient;
 use crate::error::AppError;
 
 // ---------------------------------------------------------------------------
@@ -393,8 +394,8 @@ pub fn load_model(path: &Path) -> Result<whisper_rs::WhisperContext, AppError> {
 
 /// Transcribe audio via the MLX FunASR daemon (async, non-blocking).
 /// Writes samples to a temp WAV file and sends the path to the daemon.
-pub async fn transcribe_via_daemon(
-    daemon: &crate::daemon::DaemonManager,
+pub async fn transcribe_via_daemon<D: DaemonClient>(
+    daemon: &D,
     samples: &[f32],
     sample_rate: u32,
     language: &str,

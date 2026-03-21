@@ -1,4 +1,4 @@
-use yumo_lib::transcriber;
+use yumo_core::transcriber;
 
 #[test]
 fn test_predefined_models_list() {

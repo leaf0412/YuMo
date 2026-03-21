@@ -1,4 +1,4 @@
-use yumo_lib::transcriber::{
+use yumo_core::transcriber::{
     self, ModelProvider,
 };
 

@@ -1,11 +1,11 @@
 pub mod audio_ctrl;
-pub mod cloud;
+pub use yumo_core::cloud;
 pub mod commands;
 pub mod daemon;
 pub mod db;
 pub mod denoiser;
-pub mod downloader;
-pub mod enhancer;
+pub use yumo_core::downloader;
+pub use yumo_core::enhancer;
 pub use yumo_core::error;
 pub use yumo_core::mask;
 pub use yumo_core::pipeline;
@@ -17,7 +17,7 @@ pub mod recorder;
 pub mod state;
 pub use yumo_core::text_processor;
 pub mod tray;
-pub mod transcriber;
+pub use yumo_core::transcriber;
 pub use yumo_core::vad;
 pub mod window_manager;
 

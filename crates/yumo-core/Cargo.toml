@@ -12,6 +12,12 @@ log = "0.4"
 regex = "1"
 rusqlite = { version = "0.31", features = ["bundled", "backup"] }
 reqwest = { version = "0.12", features = ["stream", "json", "multipart"] }
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+whisper-rs = "0.16"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+hound = "3"
 
 [dev-dependencies]
 tempfile = "3"

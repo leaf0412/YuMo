@@ -525,6 +525,36 @@ impl Drop for DaemonManager {
 }
 
 // ---------------------------------------------------------------------------
+// DaemonClient trait implementation
+// ---------------------------------------------------------------------------
+
+impl yumo_core::daemon_client::DaemonClient for DaemonManager {
+    fn send_command_async(
+        &self,
+        cmd: &serde_json::Value,
+        timeout: std::time::Duration,
+    ) -> impl std::future::Future<Output = Result<yumo_core::daemon_client::DaemonResponse, crate::error::AppError>> + Send {
+        // Delegate to the existing async method, converting the response type.
+        let status_str = cmd.get("action").and_then(|a| a.as_str()).unwrap_or("unknown").to_string();
+        let _ = status_str;
+        let fut = self.send_command_async(cmd, timeout);
+        async move {
+            let resp = fut.await?;
+            Ok(yumo_core::daemon_client::DaemonResponse {
+                status: resp.status,
+                text: resp.text,
+                error: resp.error,
+                extra: resp.extra,
+            })
+        }
+    }
+
+    fn check_and_restart_if_bloated(&self) {
+        DaemonManager::check_and_restart_if_bloated(self);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

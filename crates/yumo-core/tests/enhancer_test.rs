@@ -1,4 +1,4 @@
-use yumo_lib::enhancer;
+use yumo_core::enhancer;
 
 #[test]
 fn test_build_prompt_with_template() {

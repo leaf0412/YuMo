@@ -1,4 +1,4 @@
-use yumo_lib::cloud;
+use yumo_core::cloud;
 
 #[test]
 fn test_build_openai_multipart_request() {
