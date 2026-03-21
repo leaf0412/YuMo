@@ -470,9 +470,11 @@ def _funasr_generate_text(model, audio_path, language, sf, np, max_tokens=500, t
             if chunk_duration < 0.5:
                 break
 
+            import re as _re
             chunk_text = _funasr_generate_single_chunk(
                 model, chunk, sample_rate, language, np, max_tokens, temperature
             )
+            chunk_text = _clean_funasr_text(chunk_text, _re)  # clean per-chunk
             if chunk_text:
                 texts.append(chunk_text)
                 log(f"Chunk {chunk_idx} result: '{chunk_text[:50]}...' ({len(chunk_text)} chars)" if len(chunk_text) > 50 else f"Chunk {chunk_idx} result: '{chunk_text}'")
@@ -643,9 +645,11 @@ def _clean_funasr_text(text, re):
     if not text:
         return text
     text = text.replace('/sil', '')
-    text = re.sub(r'<\d*>', '', text)
-    text = re.sub(r'(.)\1{3,}$', '', text)
-    text = re.sub(r'\s*[<>]+\s*', '', text)
+    text = re.sub(r'<\d*>', '', text)           # timestamp tokens like <123>
+    text = re.sub(r'<[a-zA-Z_]+>', '', text)    # special tokens like <noise>, <eos>, <blank>
+    text = re.sub(r'\(+\)+', '', text)           # noise markers like (()), ((()))
+    text = re.sub(r'(.)\1{3,}$', '', text)      # trailing repetitions
+    text = re.sub(r'\s*[<>]+\s*', '', text)      # stray angle brackets
     return text.strip()
 
 
