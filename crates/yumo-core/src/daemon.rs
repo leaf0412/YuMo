@@ -63,7 +63,8 @@ struct DaemonProcess {
 /// 8 GB — generous enough for large models, catches genuine leaks.
 const DAEMON_RSS_LIMIT: u64 = 8 * 1024 * 1024 * 1024;
 
-/// Query RSS of a process by pid (macOS only, uses `ps`).
+/// Query RSS of a process by pid (Unix only, uses `ps`).
+#[cfg(unix)]
 fn get_process_rss(pid: u32) -> Option<u64> {
     let output = Command::new("ps")
         .args(["-o", "rss=", "-p", &pid.to_string()])
@@ -75,6 +76,12 @@ fn get_process_rss(pid: u32) -> Option<u64> {
     // ps reports RSS in kilobytes
     let kb: u64 = text.trim().parse().ok()?;
     Some(kb * 1024)
+}
+
+/// Stub for Windows — RSS check not yet implemented.
+#[cfg(not(unix))]
+fn get_process_rss(_pid: u32) -> Option<u64> {
+    None
 }
 
 impl DaemonProcess {
@@ -562,18 +569,10 @@ impl crate::daemon_client::DaemonClient for DaemonManager {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Quick check: is there any python (venv or system) that has mlx_audio?
+/// Quick check: does the app-managed venv have mlx_audio with sufficient version?
 fn has_working_python() -> bool {
     let venv = venv_python_path();
-    if std::path::Path::new(&venv).exists() && python_has_mlx(&venv) {
-        return true;
-    }
-    for candidate in python_candidates() {
-        if std::path::Path::new(&candidate).exists() && python_has_mlx(&candidate) {
-            return true;
-        }
-    }
-    false
+    std::path::Path::new(&venv).exists() && python_has_mlx(&venv)
 }
 
 /// Block on the reader until `{"status":"ready"}` arrives.
