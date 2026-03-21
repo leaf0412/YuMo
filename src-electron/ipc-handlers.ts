@@ -191,6 +191,12 @@ export function registerIpcHandlers(): void {
     return getAddon().daemonCheckDeps();
   });
 
+  ipcMain.handle("select-model", (_e, args?: { modelId?: string }) => {
+    if (args?.modelId) {
+      getAddon().updateSetting("selected_model_id", JSON.stringify(args.modelId));
+    }
+  });
+
   ipcMain.handle("detect-voiceink-legacy-path", () => null);
 
   ipcMain.handle("list-sprites", () => []);
