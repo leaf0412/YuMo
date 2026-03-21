@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "src-tauri",
+    "crates/yumo-core",
+]
+resolver = "2"
