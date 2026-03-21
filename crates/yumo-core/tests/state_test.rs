@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use serde_json::Value;
-use yumo_lib::state::AppPaths;
+use yumo_core::state::AppPaths;
 
 #[test]
 fn test_app_paths_defaults() {

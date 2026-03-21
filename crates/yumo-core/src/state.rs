@@ -73,23 +73,25 @@ impl AppPaths {
     }
 }
 
-pub struct AppState {
+/// Core application context (platform-agnostic).
+///
+/// The `daemon` field is managed separately by the Tauri shell (`src-tauri`)
+/// until `daemon.rs` is migrated into yumo-core.
+pub struct AppContext {
     pub db: Mutex<Connection>,
     pub pipeline_state: Mutex<PipelineState>,
     pub recording_handle: Mutex<Option<RecordingHandle>>,
     pub paths: AppPaths,
-    pub daemon: crate::daemon::DaemonManager,
     pub denoiser: Mutex<Option<DtlnDenoiser>>,
 }
 
-impl AppState {
-    pub fn new(conn: Connection, paths: AppPaths, daemon: crate::daemon::DaemonManager) -> Self {
+impl AppContext {
+    pub fn new(conn: Connection, paths: AppPaths) -> Self {
         Self {
             db: Mutex::new(conn),
             pipeline_state: Mutex::new(PipelineState::Idle),
             recording_handle: Mutex::new(None),
             paths,
-            daemon,
             denoiser: Mutex::new(None),
         }
     }

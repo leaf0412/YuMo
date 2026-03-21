@@ -12,6 +12,7 @@ pub mod downloader;
 pub mod vad;
 pub mod db;
 pub mod denoiser;
+pub mod state;
 
 #[cfg(target_os = "macos")]
 pub mod recorder;

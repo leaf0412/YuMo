@@ -10,7 +10,8 @@ use crate::mask;
 use crate::hotkey;
 use crate::keychain;
 use crate::pipeline::PipelineState;
-use crate::state::AppState;
+use crate::state::AppContext;
+use crate::daemon::DaemonManager;
 use crate::denoiser::Denoiser;
 use crate::{audio_ctrl, denoiser, paster, permissions, recorder, text_processor, transcriber};
 
@@ -33,7 +34,8 @@ pub fn frontend_log(level: String, message: String) {
 #[tauri::command]
 pub async fn start_recording(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, AppContext>,
+    daemon: State<'_, DaemonManager>,
     device_id: Option<u32>,
 ) -> Result<(), AppError> {
     info!("[pipeline] start_recording called, device_id={:?}", device_id);
@@ -137,7 +139,8 @@ pub async fn start_recording(
 #[tauri::command]
 pub async fn stop_recording(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, AppContext>,
+    daemon: State<'_, DaemonManager>,
 ) -> Result<(), AppError> {
     info!("[pipeline] stop_recording called");
 
@@ -316,9 +319,9 @@ pub async fn stop_recording(
     let transcribe_result = match model_info.map(|m| &m.provider) {
         Some(transcriber::ModelProvider::MlxFunASR) => {
             // Auto-start daemon if not running
-            if !state.daemon.is_running() {
+            if !daemon.is_running() {
                 info!("[pipeline] daemon not running, starting...");
-                if let Err(e) = state.daemon.start() {
+                if let Err(e) = daemon.start() {
                     error!("[pipeline] daemon start failed: {}", e);
                     let mut pipeline = state
                         .pipeline_state
@@ -332,14 +335,14 @@ pub async fn stop_recording(
             }
             // Auto-load model if not loaded
             let model_repo = model_info.and_then(|m| m.model_repo.clone());
-            let loaded = state.daemon.loaded_model();
+            let loaded = daemon.loaded_model();
             if model_repo.is_some() && loaded.as_ref() != model_repo.as_ref() {
                 let repo = model_repo.as_ref().unwrap();
                 info!("[pipeline] loading MLX model: {}", repo);
                 let cmd = serde_json::json!({"action": "load", "model": repo});
-                match state.daemon.send_command(&cmd) {
+                match daemon.send_command(&cmd) {
                     Ok(resp) if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" => {
-                        state.daemon.set_loaded_model(model_repo.clone());
+                        daemon.set_loaded_model(model_repo.clone());
                         info!("[pipeline] MLX model loaded");
                     }
                     Ok(resp) => {
@@ -367,7 +370,7 @@ pub async fn stop_recording(
             }
             info!("[pipeline] transcribing via MLX daemon (language={})...", language);
             transcriber::transcribe_via_daemon(
-                &state.daemon,
+                &*daemon,
                 &audio_data.pcm_samples,
                 audio_data.sample_rate,
                 &language,
@@ -573,7 +576,7 @@ pub async fn stop_recording(
 #[tauri::command]
 pub fn cancel_recording(
     app: AppHandle,
-    state: State<AppState>,
+    state: State<AppContext>,
 ) -> Result<(), AppError> {
     info!("[cmd] cancel_recording");
     let handle = state
@@ -615,7 +618,7 @@ pub fn cancel_recording(
 }
 
 #[tauri::command]
-pub fn get_pipeline_state(state: State<AppState>) -> Result<serde_json::Value, AppError> {
+pub fn get_pipeline_state(state: State<AppContext>) -> Result<serde_json::Value, AppError> {
     let pipeline = state
         .pipeline_state
         .lock()
@@ -632,7 +635,7 @@ pub fn get_pipeline_state(state: State<AppState>) -> Result<serde_json::Value, A
 
 #[tauri::command]
 pub fn get_statistics(
-    state: State<AppState>,
+    state: State<AppContext>,
     days: Option<i64>,
 ) -> Result<db::Statistics, AppError> {
     info!("[cmd] get_statistics days={:?}", days);
@@ -645,7 +648,7 @@ pub fn get_statistics(
 
 #[tauri::command]
 pub fn import_voiceink_legacy(
-    state: State<AppState>,
+    state: State<AppContext>,
     store_path: String,
 ) -> Result<db::ImportResult, AppError> {
     info!("[cmd] import_voiceink_legacy store_path={}", store_path);
@@ -686,7 +689,7 @@ pub fn detect_voiceink_legacy_path() -> Option<String> {
 #[tauri::command]
 pub async fn import_voiceink_from_dialog(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, AppContext>,
 ) -> Result<db::ImportResult, AppError> {
     use tauri_plugin_dialog::DialogExt;
 
@@ -754,7 +757,7 @@ pub fn request_permission(permission_type: String) {
 }
 
 #[tauri::command]
-pub fn list_available_models(state: State<AppState>) -> Vec<transcriber::ModelInfo> {
+pub fn list_available_models(state: State<AppContext>) -> Vec<transcriber::ModelInfo> {
     info!("[cmd] list_available_models");
     transcriber::all_models(&state.paths.models_dir)
 }
@@ -762,7 +765,7 @@ pub fn list_available_models(state: State<AppState>) -> Vec<transcriber::ModelIn
 #[tauri::command]
 pub async fn download_model(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, AppContext>,
     model_id: String,
 ) -> Result<(), AppError> {
     info!("[cmd] download_model: {}", model_id);
@@ -800,7 +803,7 @@ pub async fn download_model(
 }
 
 #[tauri::command]
-pub fn delete_model(state: State<AppState>, model_id: String) -> Result<(), AppError> {
+pub fn delete_model(state: State<AppContext>, daemon: State<DaemonManager>, model_id: String) -> Result<(), AppError> {
     info!("[cmd] delete_model id={}", model_id);
     let all = transcriber::all_models(&state.paths.models_dir);
     let model_info = all.iter().find(|m| m.id == model_id);
@@ -818,10 +821,10 @@ pub fn delete_model(state: State<AppState>, model_id: String) -> Result<(), AppE
                     }
                 }
                 // If this model is currently loaded, unload it
-                if state.daemon.loaded_model().as_deref() == model.model_repo.as_deref() {
+                if daemon.loaded_model().as_deref() == model.model_repo.as_deref() {
                     let cmd = serde_json::json!({"action": "unload"});
-                    let _ = state.daemon.send_command(&cmd);
-                    state.daemon.set_loaded_model(None);
+                    let _ = daemon.send_command(&cmd);
+                    daemon.set_loaded_model(None);
                 }
             }
             _ => {
@@ -848,7 +851,7 @@ pub fn delete_model(state: State<AppState>, model_id: String) -> Result<(), AppE
 }
 
 #[tauri::command]
-pub async fn import_model(app: AppHandle, state: State<'_, AppState>) -> Result<bool, AppError> {
+pub async fn import_model(app: AppHandle, state: State<'_, AppContext>) -> Result<bool, AppError> {
     use tauri_plugin_dialog::DialogExt;
 
     let file_path = app
@@ -882,7 +885,7 @@ pub async fn import_model(app: AppHandle, state: State<'_, AppState>) -> Result<
 
 #[tauri::command]
 pub fn get_transcriptions(
-    state: State<AppState>,
+    state: State<AppContext>,
     cursor: Option<String>,
     query: Option<String>,
     limit: Option<usize>,
@@ -898,13 +901,13 @@ pub fn get_recording(recording_path: String) -> Result<String, AppError> {
 }
 
 #[tauri::command]
-pub fn delete_transcription(state: State<AppState>, id: String) -> Result<(), AppError> {
+pub fn delete_transcription(state: State<AppContext>, id: String) -> Result<(), AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::delete_transcription(&conn, &id)
 }
 
 #[tauri::command]
-pub fn delete_all_transcriptions(state: State<AppState>) -> Result<(), AppError> {
+pub fn delete_all_transcriptions(state: State<AppContext>) -> Result<(), AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::delete_all_transcriptions(&conn)
 }
@@ -914,19 +917,19 @@ pub fn delete_all_transcriptions(state: State<AppState>) -> Result<(), AppError>
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn get_vocabulary(state: State<AppState>) -> Result<Vec<VocabularyWord>, AppError> {
+pub fn get_vocabulary(state: State<AppContext>) -> Result<Vec<VocabularyWord>, AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::get_vocabulary(&conn)
 }
 
 #[tauri::command]
-pub fn add_vocabulary(state: State<AppState>, word: String) -> Result<String, AppError> {
+pub fn add_vocabulary(state: State<AppContext>, word: String) -> Result<String, AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::add_vocabulary(&conn, &word)
 }
 
 #[tauri::command]
-pub fn delete_vocabulary(state: State<AppState>, id: String) -> Result<(), AppError> {
+pub fn delete_vocabulary(state: State<AppContext>, id: String) -> Result<(), AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::delete_vocabulary(&conn, &id)
 }
@@ -936,14 +939,14 @@ pub fn delete_vocabulary(state: State<AppState>, id: String) -> Result<(), AppEr
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn get_replacements(state: State<AppState>) -> Result<Vec<Replacement>, AppError> {
+pub fn get_replacements(state: State<AppContext>) -> Result<Vec<Replacement>, AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::get_replacements(&conn)
 }
 
 #[tauri::command]
 pub fn set_replacement(
-    state: State<AppState>,
+    state: State<AppContext>,
     original: String,
     replacement: String,
 ) -> Result<String, AppError> {
@@ -952,7 +955,7 @@ pub fn set_replacement(
 }
 
 #[tauri::command]
-pub fn delete_replacement(state: State<AppState>, id: String) -> Result<(), AppError> {
+pub fn delete_replacement(state: State<AppContext>, id: String) -> Result<(), AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::delete_replacement(&conn, &id)
 }
@@ -962,14 +965,14 @@ pub fn delete_replacement(state: State<AppState>, id: String) -> Result<(), AppE
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn get_settings(state: State<AppState>) -> Result<HashMap<String, Value>, AppError> {
+pub fn get_settings(state: State<AppContext>) -> Result<HashMap<String, Value>, AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::get_all_settings(&conn)
 }
 
 #[tauri::command]
 pub fn update_setting(
-    state: State<AppState>,
+    state: State<AppContext>,
     key: String,
     value: Value,
 ) -> Result<(), AppError> {
@@ -982,14 +985,14 @@ pub fn update_setting(
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn list_prompts(state: State<AppState>) -> Result<Vec<Prompt>, AppError> {
+pub fn list_prompts(state: State<AppContext>) -> Result<Vec<Prompt>, AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::list_prompts(&conn)
 }
 
 #[tauri::command]
 pub fn add_prompt(
-    state: State<AppState>,
+    state: State<AppContext>,
     name: String,
     system_msg: String,
     user_msg: String,
@@ -1000,7 +1003,7 @@ pub fn add_prompt(
 
 #[tauri::command]
 pub fn update_prompt(
-    state: State<AppState>,
+    state: State<AppContext>,
     id: String,
     name: String,
     system_msg: String,
@@ -1011,7 +1014,7 @@ pub fn update_prompt(
 }
 
 #[tauri::command]
-pub fn delete_prompt(state: State<AppState>, id: String) -> Result<(), AppError> {
+pub fn delete_prompt(state: State<AppContext>, id: String) -> Result<(), AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::delete_prompt(&conn, &id)
 }
@@ -1021,13 +1024,13 @@ pub fn delete_prompt(state: State<AppState>, id: String) -> Result<(), AppError>
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn select_prompt(state: State<AppState>, id: String) -> Result<(), AppError> {
+pub fn select_prompt(state: State<AppContext>, id: String) -> Result<(), AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::update_setting(&conn, "selected_prompt_id", &Value::String(id))
 }
 
 #[tauri::command]
-pub fn select_model(state: State<AppState>, model_id: String) -> Result<(), AppError> {
+pub fn select_model(state: State<AppContext>, model_id: String) -> Result<(), AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     db::update_setting(&conn, "selected_model_id", &Value::String(model_id))
 }
@@ -1059,7 +1062,7 @@ pub fn delete_api_key(provider: String) -> Result<(), AppError> {
 #[tauri::command]
 pub fn register_hotkey(
     app: AppHandle,
-    state: State<AppState>,
+    state: State<AppContext>,
     shortcut: String,
 ) -> Result<(), AppError> {
     info!("[hotkey] register_hotkey called: {:?}", shortcut);
@@ -1095,7 +1098,7 @@ pub fn unregister_hotkey(app: AppHandle) -> Result<(), AppError> {
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn import_dictionary_csv(state: State<AppState>, path: String, dict_type: String) -> Result<(), AppError> {
+pub fn import_dictionary_csv(state: State<AppContext>, path: String, dict_type: String) -> Result<(), AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     let path = std::path::Path::new(&path);
     match dict_type.as_str() {
@@ -1106,7 +1109,7 @@ pub fn import_dictionary_csv(state: State<AppState>, path: String, dict_type: St
 }
 
 #[tauri::command]
-pub fn export_dictionary_csv(state: State<AppState>, path: String, dict_type: String) -> Result<(), AppError> {
+pub fn export_dictionary_csv(state: State<AppContext>, path: String, dict_type: String) -> Result<(), AppError> {
     let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
     let path = std::path::Path::new(&path);
     match dict_type.as_str() {
@@ -1121,18 +1124,18 @@ pub fn export_dictionary_csv(state: State<AppState>, path: String, dict_type: St
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn daemon_start(state: State<AppState>) -> Result<(), AppError> {
-    state.daemon.start()
+pub fn daemon_start(daemon: State<DaemonManager>) -> Result<(), AppError> {
+    daemon.start()
 }
 
 #[tauri::command]
-pub fn daemon_stop(state: State<AppState>) -> Result<(), AppError> {
-    state.daemon.stop();
+pub fn daemon_stop(daemon: State<DaemonManager>) -> Result<(), AppError> {
+    daemon.stop();
     Ok(())
 }
 
 #[tauri::command]
-pub fn daemon_status(state: State<AppState>) -> Result<serde_json::Value, AppError> {
+pub fn daemon_status(daemon: State<DaemonManager>) -> Result<serde_json::Value, AppError> {
     use std::sync::LazyLock;
     use std::sync::Mutex;
     use std::time::Instant;
@@ -1140,8 +1143,8 @@ pub fn daemon_status(state: State<AppState>) -> Result<serde_json::Value, AppErr
     static LAST_LOG: LazyLock<Mutex<(Instant, bool, Option<String>)>> =
         LazyLock::new(|| Mutex::new((Instant::now(), false, None)));
 
-    let running = state.daemon.is_running();
-    let loaded = state.daemon.loaded_model();
+    let running = daemon.is_running();
+    let loaded = daemon.loaded_model();
 
     // Only log on state change or every 30 seconds
     if let Ok(mut last) = LAST_LOG.lock() {
@@ -1160,26 +1163,26 @@ pub fn daemon_status(state: State<AppState>) -> Result<serde_json::Value, AppErr
 }
 
 #[tauri::command]
-pub fn daemon_check_deps(state: State<AppState>) -> Result<serde_json::Value, AppError> {
-    if !state.daemon.is_running() {
-        state.daemon.start()?;
+pub fn daemon_check_deps(daemon: State<DaemonManager>) -> Result<serde_json::Value, AppError> {
+    if !daemon.is_running() {
+        daemon.start()?;
     }
     let cmd = serde_json::json!({"action": "check_dependencies"});
-    let resp = state.daemon.send_command(&cmd)?;
+    let resp = daemon.send_command(&cmd)?;
     Ok(serde_json::to_value(resp).unwrap_or_default())
 }
 
 #[tauri::command]
 pub async fn daemon_load_model(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    daemon: State<'_, DaemonManager>,
     model_repo: String,
 ) -> Result<(), AppError> {
-    if !state.daemon.is_running() {
+    if !daemon.is_running() {
         // Emit setup stages so frontend can show progress
         let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "checking_python"}));
 
-        if !state.daemon.has_python() {
+        if !daemon.has_python() {
             // Run bootstrap in a blocking thread so we don't freeze the async runtime
             // bootstrap_venv internally emits "creating_venv" and "installing_deps" stages
             let app_for_setup = app.clone();
@@ -1193,12 +1196,12 @@ pub async fn daemon_load_model(
         }
 
         let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "starting_daemon"}));
-        state.daemon.start()?;
+        daemon.start()?;
         let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "ready"}));
     }
     let cmd = serde_json::json!({"action": "load", "model": model_repo});
     let timeout = std::time::Duration::from_secs(600);
-    let rx = state.daemon.send_command_streaming(&cmd, timeout)?;
+    let rx = daemon.send_command_streaming(&cmd, timeout)?;
 
     // Read responses on a blocking thread, emit progress events
     let repo_clone = model_repo.clone();
@@ -1248,7 +1251,7 @@ pub async fn daemon_load_model(
     .map_err(|e| AppError::Transcription(format!("spawn_blocking: {e}")))??;
 
     if final_resp.status == "success" || final_resp.status == "loaded" {
-        state.daemon.set_loaded_model(Some(model_repo));
+        daemon.set_loaded_model(Some(model_repo));
         Ok(())
     } else {
         Err(AppError::Transcription(
@@ -1258,10 +1261,10 @@ pub async fn daemon_load_model(
 }
 
 #[tauri::command]
-pub fn daemon_unload_model(state: State<AppState>) -> Result<(), AppError> {
+pub fn daemon_unload_model(daemon: State<DaemonManager>) -> Result<(), AppError> {
     let cmd = serde_json::json!({"action": "unload"});
-    state.daemon.send_command(&cmd)?;
-    state.daemon.set_loaded_model(None);
+    daemon.send_command(&cmd)?;
+    daemon.set_loaded_model(None);
     Ok(())
 }
 
@@ -1271,7 +1274,7 @@ pub fn daemon_unload_model(state: State<AppState>) -> Result<(), AppError> {
 
 /// List all available sprite sheet manifests.
 #[tauri::command]
-pub fn list_sprites(state: State<AppState>) -> Result<Vec<Value>, AppError> {
+pub fn list_sprites(state: State<AppContext>) -> Result<Vec<Value>, AppError> {
     let base = &state.paths.sprites_dir;
     if !base.exists() {
         return Ok(vec![]);
@@ -1296,7 +1299,7 @@ pub fn list_sprites(state: State<AppState>) -> Result<Vec<Value>, AppError> {
 
 /// Read a sprite sheet image file as base64 data URI.
 #[tauri::command]
-pub fn get_sprite_image(state: State<AppState>, dir_id: String, file_name: String) -> Result<String, AppError> {
+pub fn get_sprite_image(state: State<AppContext>, dir_id: String, file_name: String) -> Result<String, AppError> {
     let path = state.paths.sprites_dir.join(&dir_id).join(&file_name);
     if !path.exists() {
         // Try processed version
@@ -1346,7 +1349,7 @@ pub fn base64_encode(data: &[u8]) -> String {
 /// Import a sprite from a folder selected via file dialog.
 /// The folder must contain a manifest.json and the sprite image referenced within.
 #[tauri::command]
-pub async fn import_sprite_folder(app: AppHandle, state: State<'_, AppState>) -> Result<Value, AppError> {
+pub async fn import_sprite_folder(app: AppHandle, state: State<'_, AppContext>) -> Result<Value, AppError> {
     use tauri_plugin_dialog::DialogExt;
 
     let dir = app
@@ -1406,7 +1409,7 @@ pub async fn import_sprite_folder(app: AppHandle, state: State<'_, AppState>) ->
 
 /// Import a sprite from a .zip archive selected via file dialog.
 #[tauri::command]
-pub async fn import_sprite_zip(app: AppHandle, state: State<'_, AppState>) -> Result<Value, AppError> {
+pub async fn import_sprite_zip(app: AppHandle, state: State<'_, AppContext>) -> Result<Value, AppError> {
     use tauri_plugin_dialog::DialogExt;
 
     let file = app
@@ -1499,7 +1502,7 @@ fn find_manifest_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
 
 /// Delete a sprite sheet by its directory ID.
 #[tauri::command]
-pub fn delete_sprite(state: State<AppState>, dir_id: String) -> Result<(), AppError> {
+pub fn delete_sprite(state: State<AppContext>, dir_id: String) -> Result<(), AppError> {
     let dir = state.paths.sprites_dir.join(&dir_id);
     if dir.exists() && dir.is_dir() {
         std::fs::remove_dir_all(&dir)?;
@@ -1518,7 +1521,7 @@ pub fn delete_sprite(state: State<AppState>, dir_id: String) -> Result<(), AppEr
 /// Process a sprite sheet image: remove background color and save as sprite_processed.png.
 #[tauri::command]
 pub fn process_sprite_background(
-    state: State<AppState>,
+    state: State<AppContext>,
     dir_id: String,
     threshold: f64,
 ) -> Result<(), AppError> {

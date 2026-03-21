@@ -14,7 +14,7 @@ pub use yumo_core::permissions;
 pub use yumo_core::pipeline;
 pub mod hotkey;
 pub use yumo_core::recorder;
-pub mod state;
+pub use yumo_core::state;
 pub use yumo_core::text_processor;
 pub mod tray;
 pub use yumo_core::transcriber;
@@ -79,13 +79,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
-        .manage(state::AppState::new(conn, paths, daemon))
+        .manage(state::AppContext::new(conn, paths))
+        .manage(daemon)
         .setup(move |app| {
             // Sync bundled resources (daemon script + uv) to ~/.voiceink/
             // Uses Tauri's resource_dir() which works in both dev and production builds.
             {
                 use tauri::Manager;
-                let app_state = app.handle().state::<state::AppState>();
+                let app_state = app.handle().state::<state::AppContext>();
                 let data_dir = &app_state.paths.data_dir;
 
                 // Try Tauri resource resolver first (production), fall back to CARGO_MANIFEST_DIR (dev)
@@ -190,7 +191,7 @@ pub fn run() {
             // Pre-warm MLX daemon in background if a downloaded MLX model is selected
             {
                 use tauri::Manager;
-                let app_state = app.handle().state::<state::AppState>();
+                let app_state = app.handle().state::<state::AppContext>();
                 let selected_model = saved_settings
                     .get("selected_model_id")
                     .and_then(|v| v.as_str())
@@ -214,15 +215,15 @@ pub fn run() {
                 if let Some(repo) = warmup_repo {
                     let handle = app.handle().clone();
                     std::thread::spawn(move || {
-                        let state = handle.state::<state::AppState>();
+                        let daemon = handle.state::<daemon::DaemonManager>();
                         info!("[warmup] starting daemon for MLX model: {}", repo);
-                        match state.daemon.start() {
+                        match daemon.start() {
                             Ok(()) => {
                                 info!("[warmup] daemon started, loading model...");
                                 let cmd = serde_json::json!({"action": "load", "model": &repo});
-                                match state.daemon.send_command(&cmd) {
+                                match daemon.send_command(&cmd) {
                                     Ok(resp) if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" => {
-                                        state.daemon.set_loaded_model(Some(repo.clone()));
+                                        daemon.set_loaded_model(Some(repo.clone()));
                                         info!("[warmup] model loaded: {}", repo);
                                         let _ = handle.emit("daemon-status-changed", ());
                                     }
