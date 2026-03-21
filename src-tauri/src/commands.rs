@@ -521,6 +521,15 @@ pub async fn stop_recording(
     }
     info!("[pipeline] saved to DB");
 
+    // 9.1 Save transcription text alongside the WAV file
+    if let Some(ref wav_path) = recording_path {
+        let txt_path = std::path::Path::new(wav_path).with_extension("txt");
+        match std::fs::write(&txt_path, final_text) {
+            Ok(_) => info!("[pipeline] transcription saved: {}", txt_path.display()),
+            Err(e) => error!("[pipeline] failed to save transcription txt: {}", e),
+        }
+    }
+
     // 10. Unmute system audio
     if settings_map
         .get("system_mute_enabled")
