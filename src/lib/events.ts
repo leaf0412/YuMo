@@ -1,10 +1,12 @@
 /**
  * Platform-aware event system — works with both Tauri and Electron.
  *
+ * Handler receives Tauri-style event: { payload: T }
  * Usage:
  *   import { listen, emit } from '../lib/events';
- *   const unlisten = await listen('event-name', (payload) => { ... });
- *   emit('event-name', { data: 'value' });
+ *   const unlisten = await listen<MyType>('event-name', (event) => {
+ *     console.log(event.payload);
+ *   });
  */
 
 type ElectronAPI = {
@@ -22,18 +24,21 @@ function getElectronAPI(): ElectronAPI | undefined {
 
 type UnlistenFn = () => void;
 
+/** Tauri-compatible event shape */
+interface AppEvent<T> {
+  payload: T;
+}
+
 // Local event bus for Electron (in-renderer emit/listen)
-const electronListeners = new Map<string, Set<(payload: unknown) => void>>();
+const electronListeners = new Map<string, Set<(event: AppEvent<unknown>) => void>>();
 
 export async function listen<T = unknown>(
   event: string,
-  handler: (payload: T) => void,
+  handler: (event: AppEvent<T>) => void,
 ): Promise<UnlistenFn> {
   if (isTauri()) {
     const { listen: tauriListen } = await import('@tauri-apps/api/event');
-    // Tauri passes { event, payload, ... } — forward the full object
-    // Existing code accesses handler(e).payload so we pass the event as-is
-    const unlisten = await tauriListen<T>(event, (e) => handler(e as unknown as T));
+    const unlisten = await tauriListen<T>(event, (e) => handler({ payload: e.payload }));
     return unlisten;
   }
 
@@ -41,17 +46,15 @@ export async function listen<T = unknown>(
   if (!electronListeners.has(event)) {
     electronListeners.set(event, new Set());
   }
-  const wrapped = (payload: unknown) => handler({ payload } as unknown as T);
+  const wrapped = (evt: AppEvent<unknown>) => handler(evt as AppEvent<T>);
   electronListeners.get(event)!.add(wrapped);
 
   // Also listen for main process → renderer IPC events via preload
   let unlistenIpc: (() => void) | undefined;
   const api = getElectronAPI();
-  console.log(`[events] listen("${event}") electronAPI=${!!api} isTauri=${isTauri()}`);
   if (api) {
     unlistenIpc = api.on(event, (...args: unknown[]) => {
-      // Wrap in { payload } to match Tauri event shape that existing code expects
-      handler({ payload: args[0] ?? null } as unknown as T);
+      handler({ payload: (args[0] ?? null) as T });
     });
   }
 
@@ -73,7 +76,7 @@ export async function emit(event: string, payload?: unknown): Promise<void> {
   if (listeners) {
     for (const handler of listeners) {
       try {
-        handler(payload);
+        handler({ payload });
       } catch (e) {
         console.error(`[events] handler error for "${event}":`, e);
       }
