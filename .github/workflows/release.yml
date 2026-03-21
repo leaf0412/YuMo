@@ -48,6 +48,7 @@ jobs:
             cmake \
             build-essential \
             libdbus-1-dev \
+            libxdo-dev \
             pkg-config
 
       - name: Install CMake (Windows)
@@ -132,6 +133,7 @@ jobs:
             cmake \
             build-essential \
             libdbus-1-dev \
+            libxdo-dev \
             pkg-config
 
       - name: Setup Node.js
