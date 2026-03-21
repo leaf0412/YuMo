@@ -4,9 +4,12 @@
  *
  * Log file: ~/.voiceink/log.txt (same location as Tauri version)
  */
-import log from "electron-log/main";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { app } from "electron";
+
+const require = createRequire(import.meta.url);
+const log = require("electron-log/main");
 
 // Configure log file path to match Tauri's log location
 const logPath = join(app.getPath("home"), ".voiceink", "log.txt");
