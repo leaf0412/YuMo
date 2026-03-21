@@ -611,15 +611,31 @@ fn wait_for_ready(reader: &mut BufReader<ChildStdout>) -> AppResult<()> {
     }
 }
 
-/// Check if a Python interpreter has mlx_audio installed.
+/// Minimum required mlx_audio version (Qwen3-ASR support requires ≥0.3.0)
+const MIN_MLX_AUDIO_VERSION: &str = "0.3.0";
+
+/// Check if a Python interpreter has mlx_audio installed with sufficient version.
 fn python_has_mlx(python: &str) -> bool {
-    Command::new(python)
-        .args(["-c", "import mlx_audio"])
-        .stdout(Stdio::null())
+    let output = Command::new(python)
+        .args(["-c", &format!(
+            "import mlx_audio; v = mlx_audio.__version__; parts = [int(x) for x in v.split('.')[:3]]; min_parts = [int(x) for x in '{}'.split('.')]; ok = parts >= min_parts; print(f'{{v}} {{\"ok\" if ok else \"old\"}}')",
+            MIN_MLX_AUDIO_VERSION
+        )])
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let is_ok = stdout.trim().ends_with("ok");
+            if !is_ok {
+                log::info!("[daemon] mlx_audio version too old: {} (need ≥{})", stdout.trim(), MIN_MLX_AUDIO_VERSION);
+            }
+            is_ok
+        }
+        _ => false,
+    }
 }
 
 /// Collect candidate Python paths, matching VoiceInk's search order:
@@ -896,7 +912,7 @@ fn bootstrap_venv(cb: Option<&DaemonEventCallback>) -> AppResult<String> {
         Command::new(&uv).args([
             "pip", "install",
             "--python", &format!("{}/bin/python3", venv_dir_str),
-            "mlx-audio-plus", "soundfile",
+            "--upgrade", "mlx-audio-plus", "soundfile",
         ]),
         "uv-pip",
     ).map_err(|e| {
