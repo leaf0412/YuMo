@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use crate::denoiser::DtlnDenoiser;
 use crate::pipeline::PipelineState;
-use crate::recorder::RecordingHandle;
+use crate::platform::RecordingHandle;
 
 /// All configurable paths with defaults.
 /// Each can be overridden via DB setting `path_<name>`.

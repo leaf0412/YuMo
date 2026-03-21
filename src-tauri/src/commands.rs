@@ -13,7 +13,7 @@ use crate::pipeline::PipelineState;
 use crate::state::AppContext;
 use crate::daemon::DaemonManager;
 use crate::denoiser::Denoiser;
-use crate::{audio_ctrl, denoiser, paster, permissions, recorder, text_processor, transcriber};
+use crate::{audio_ctrl, audio_io, denoiser, paster, permissions, platform, text_processor, transcriber};
 
 // ---------------------------------------------------------------------------
 // Frontend log bridge — writes frontend logs to the same log.txt
@@ -68,7 +68,7 @@ pub async fn start_recording(
     }
 
     // 3. Enumerate devices and resolve target device
-    let devices = recorder::list_input_devices();
+    let devices = platform::recorder::list_input_devices()?;
     info!("[pipeline] found {} input devices", devices.len());
     if devices.is_empty() {
         error!("[pipeline] no input devices found");
@@ -90,7 +90,7 @@ pub async fn start_recording(
     info!("[pipeline] using device_id={}", dev_id);
 
     info!("[pipeline] calling recorder::start_recording...");
-    let (handle, _level_rx) = recorder::start_recording(dev_id).map_err(|e| {
+    let (handle, _level_rx) = platform::recorder::start_recording(dev_id).map_err(|e| {
         error!("[pipeline] recorder::start_recording failed: {}", e);
         AppError::Recording(e.to_string())
     })?;
@@ -161,7 +161,7 @@ pub async fn stop_recording(
 
     // 2. Stop recording
     info!("[pipeline] stopping recorder...");
-    let audio_data = recorder::stop_recording(handle).map_err(|e| {
+    let audio_data = platform::recorder::stop_recording(handle).map_err(|e| {
         error!("[pipeline] recorder::stop_recording failed: {}", e);
         AppError::Recording(e.to_string())
     })?;
@@ -202,7 +202,7 @@ pub async fn stop_recording(
                             "[pipeline] noise reduction complete in {:.1}ms",
                             denoise_start.elapsed().as_secs_f64() * 1000.0
                         );
-                        recorder::AudioData {
+                        platform::AudioData {
                             pcm_samples: denoised,
                             sample_rate: audio_data.sample_rate,
                             channels: audio_data.channels,
@@ -241,7 +241,7 @@ pub async fn stop_recording(
     info!("[pipeline] audio duration: {:.2}s", audio_duration_secs);
 
     // 2.5 Save recording WAV file
-    let recording_path = match recorder::save_recording(&audio_data, &state.paths.recordings_dir) {
+    let recording_path = match audio_io::save_recording(&audio_data, &state.paths.recordings_dir) {
         Ok(path) => {
             info!("[pipeline] recording saved: {}", path.display());
             Some(path.to_string_lossy().to_string())
@@ -585,7 +585,7 @@ pub fn cancel_recording(
         .map_err(|e| AppError::Recording(e.to_string()))?
         .take();
     if let Some(h) = handle {
-        let _ = recorder::cancel_recording(h);
+        let _ = platform::recorder::cancel_recording(h);
     }
 
     {
@@ -735,9 +735,9 @@ pub async fn import_voiceink_from_dialog(
 }
 
 #[tauri::command]
-pub fn list_audio_devices() -> Vec<recorder::AudioInputDevice> {
+pub fn list_audio_devices() -> Result<Vec<platform::AudioInputDevice>, AppError> {
     info!("[cmd] list_audio_devices");
-    recorder::list_input_devices()
+    platform::recorder::list_input_devices()
 }
 
 #[tauri::command]
@@ -897,7 +897,7 @@ pub fn get_transcriptions(
 #[tauri::command]
 pub fn get_recording(recording_path: String) -> Result<String, AppError> {
     let path = std::path::Path::new(&recording_path);
-    recorder::read_recording_as_data_uri(path)
+    audio_io::read_recording_as_data_uri(path)
 }
 
 #[tauri::command]

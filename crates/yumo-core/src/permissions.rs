@@ -24,7 +24,7 @@ fn microphone_status() -> i64 {
 
 pub fn check_microphone() -> bool {
     let status = microphone_status();
-    let devices = crate::recorder::list_input_devices();
+    let devices = crate::platform::recorder::list_input_devices().unwrap_or_default();
     let result = if status == 3 {
         true
     } else if status == 2 {
