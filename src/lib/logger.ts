@@ -8,13 +8,36 @@
  * Every invoke call is automatically logged (command, args, result/error)
  * to both the browser console AND the backend log.txt file.
  */
-import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+// ---------------------------------------------------------------------------
+// Platform-aware invoke: Tauri or Electron IPC
+// ---------------------------------------------------------------------------
+
+type ElectronAPI = {
+  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+};
+
+const isTauri = '__TAURI_INTERNALS__' in window;
+const electronAPI = !isTauri ? (window as unknown as { electronAPI?: ElectronAPI }).electronAPI : undefined;
+
+async function platformInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (isTauri) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<T>(cmd, args);
+  }
+  if (electronAPI) {
+    // Electron IPC: convert snake_case command to kebab-case channel
+    const channel = cmd.replace(/_/g, '-');
+    const result = await electronAPI.invoke(channel, args);
+    return result as T;
+  }
+  throw new Error(`No backend available for invoke("${cmd}")`);
+}
 
 // ---------------------------------------------------------------------------
 // Low-level: send a log line to backend log.txt (fire-and-forget)
 // ---------------------------------------------------------------------------
 function sendToBackend(level: 'info' | 'error', message: string) {
-  tauriInvoke('frontend_log', { level, message }).catch(() => {});
+  platformInvoke('frontend_log', { level, message }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -38,7 +61,7 @@ function summariseResult(result: unknown): string {
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   // Don't log the logging command itself to avoid infinite recursion
   if (cmd === 'frontend_log') {
-    return tauriInvoke<T>(cmd, args);
+    return platformInvoke<T>(cmd, args);
   }
 
   const argsStr = args ? ` ${JSON.stringify(args)}` : '';
@@ -48,7 +71,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   sendToBackend('info', `${tag}${argsStr}`);
 
   try {
-    const result = await tauriInvoke<T>(cmd, args);
+    const result = await platformInvoke<T>(cmd, args);
     const resultStr = summariseResult(result);
     console.log(`${tag} ok${resultStr}`);
     sendToBackend('info', `${tag} ok${resultStr}`);

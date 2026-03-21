@@ -10,6 +10,11 @@ extraResources:
     to: napi/
     filter:
       - "*.node"
+mac:
+  target:
+    - dmg
+  artifactName: ${productName}-${version}-mac.${ext}
+  category: public.app-category.utilities
 linux:
   target:
     - AppImage

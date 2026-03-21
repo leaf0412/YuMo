@@ -39,3 +39,6 @@ scripts/demo/output/raw.*
 # Demo audio assets (large binary)
 scripts/demo/assets/*.wav
 !scripts/demo/assets/.gitkeep
+napi/yumo-napi.darwin-arm64.node
+dist-electron/
+target/
