@@ -529,6 +529,7 @@ def _stream_with_repetition_check(model, audio_input, params, STTOutput):
     max_length = 50000   # hard cap: no transcription should exceed this
     timeout_sec = 120    # 2 min timeout for generation
     start_time = time.time()
+    final_result = None   # capture non-string result (e.g. STTOutput) if yielded
 
     for chunk in model.generate(audio_input, **params):
         if time.time() - start_time > timeout_sec:
@@ -552,10 +553,26 @@ def _stream_with_repetition_check(model, audio_input, params, STTOutput):
                 repeat_count = 0
                 last_char = chunk
         else:
-            return chunk
+            # model.generate() may yield a final STTOutput object after all string chunks.
+            # Capture it but don't return yet — there may be more string chunks.
+            final_result = chunk
+            log(f"Received non-string chunk: {type(chunk).__name__}")
 
-    full_text = "".join(chunks)
-    return STTOutput(text=full_text, language=None, task="transcribe", duration=0, tokens=[])
+    # If we collected string chunks, use them (they are the actual transcription)
+    if chunks:
+        full_text = "".join(chunks)
+        return STTOutput(text=full_text, language=None, task="transcribe", duration=0, tokens=[])
+
+    # If no string chunks but we got a final STTOutput, use it
+    if final_result is not None:
+        if hasattr(final_result, 'text') and final_result.text:
+            log(f"Using final result text: {len(final_result.text)} chars")
+            return final_result
+        log(f"Final result has no usable text, type={type(final_result).__name__}")
+
+    # Fallback: empty result
+    log("No transcription output produced")
+    return STTOutput(text="", language=None, task="transcribe", duration=0, tokens=[])
 
 
 def _safe_unlink(path):
