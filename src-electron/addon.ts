@@ -65,10 +65,10 @@ export type NapiAddon = {
 
   // Daemon
   daemonStatus(): { running: boolean; loadedModel: string | null };
-  daemonStart(): void;
+  daemonStart(): Promise<void>;
   daemonStop(): void;
-  daemonLoadModel(modelRepo: string): void;
-  daemonUnloadModel(): void;
+  daemonLoadModel(modelRepo: string): Promise<void>;
+  daemonUnloadModel(): Promise<void>;
   daemonCheckDeps(): boolean;
 
   // Recording pipeline

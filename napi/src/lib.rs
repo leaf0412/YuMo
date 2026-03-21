@@ -373,9 +373,11 @@ pub fn daemon_status() -> Result<NapiDaemonStatus> {
 }
 
 #[napi]
-pub fn daemon_start() -> Result<()> {
-    let d = daemon()?;
-    d.start().map_err(|e| Error::from_reason(format!("daemon start: {e}")))
+pub async fn daemon_start() -> Result<()> {
+    tokio::task::spawn_blocking(|| {
+        let d = daemon()?;
+        d.start().map_err(|e| Error::from_reason(format!("daemon start: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
@@ -386,30 +388,35 @@ pub fn daemon_stop() -> Result<()> {
 }
 
 #[napi]
-pub fn daemon_load_model(model_repo: String) -> Result<()> {
-    let d = daemon()?;
-    if !d.is_running() {
-        d.start().map_err(|e| Error::from_reason(format!("daemon start: {e}")))?;
-    }
-    let cmd = serde_json::json!({"action": "load", "model": model_repo});
-    let resp = d.send_command(&cmd)
-        .map_err(|e| Error::from_reason(format!("daemon load: {e}")))?;
-    if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" {
-        d.set_loaded_model(Some(model_repo));
-        Ok(())
-    } else {
-        Err(Error::from_reason(resp.error.unwrap_or_else(|| format!("load failed: {}", resp.status))))
-    }
+pub async fn daemon_load_model(model_repo: String) -> Result<()> {
+    let repo = model_repo.clone();
+    tokio::task::spawn_blocking(move || {
+        let d = daemon()?;
+        if !d.is_running() {
+            d.start().map_err(|e| Error::from_reason(format!("daemon start: {e}")))?;
+        }
+        let cmd = serde_json::json!({"action": "load", "model": repo});
+        let resp = d.send_command(&cmd)
+            .map_err(|e| Error::from_reason(format!("daemon load: {e}")))?;
+        if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" {
+            d.set_loaded_model(Some(model_repo));
+            Ok(())
+        } else {
+            Err(Error::from_reason(resp.error.unwrap_or_else(|| format!("load failed: {}", resp.status))))
+        }
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn daemon_unload_model() -> Result<()> {
-    let d = daemon()?;
-    let cmd = serde_json::json!({"action": "unload"});
-    d.send_command(&cmd)
-        .map_err(|e| Error::from_reason(format!("daemon unload: {e}")))?;
-    d.set_loaded_model(None);
-    Ok(())
+pub async fn daemon_unload_model() -> Result<()> {
+    tokio::task::spawn_blocking(|| {
+        let d = daemon()?;
+        let cmd = serde_json::json!({"action": "unload"});
+        d.send_command(&cmd)
+            .map_err(|e| Error::from_reason(format!("daemon unload: {e}")))?;
+        d.set_loaded_model(None);
+        Ok(())
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]

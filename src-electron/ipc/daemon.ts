@@ -7,20 +7,20 @@ export function registerDaemonHandlers(): void {
     return { running: s.running, loaded_model: s.loadedModel };
   });
 
-  ipcMain.handle("daemon-start", () => {
-    getAddon().daemonStart();
+  ipcMain.handle("daemon-start", async () => {
+    await getAddon().daemonStart();
   });
 
   ipcMain.handle("daemon-stop", () => {
     getAddon().daemonStop();
   });
 
-  ipcMain.handle("daemon-load-model", (_e, args?: { modelRepo?: string }) => {
-    if (args?.modelRepo) getAddon().daemonLoadModel(args.modelRepo);
+  ipcMain.handle("daemon-load-model", async (_e, args?: { modelRepo?: string }) => {
+    if (args?.modelRepo) await getAddon().daemonLoadModel(args.modelRepo);
   });
 
-  ipcMain.handle("daemon-unload-model", () => {
-    getAddon().daemonUnloadModel();
+  ipcMain.handle("daemon-unload-model", async () => {
+    await getAddon().daemonUnloadModel();
   });
 
   ipcMain.handle("daemon-check-deps", () => {
