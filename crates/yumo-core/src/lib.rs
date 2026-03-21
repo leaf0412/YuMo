@@ -18,11 +18,3 @@ pub mod denoiser;
 pub mod state;
 
 pub mod audio_io;
-#[cfg(target_os = "macos")]
-pub mod audio_ctrl;
-#[cfg(target_os = "macos")]
-pub mod paster;
-#[cfg(target_os = "macos")]
-pub mod permissions;
-#[cfg(target_os = "macos")]
-pub mod keychain;

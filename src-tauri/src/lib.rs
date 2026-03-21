@@ -1,4 +1,3 @@
-pub use yumo_core::audio_ctrl;
 pub use yumo_core::cloud;
 pub mod commands;
 pub use yumo_core::daemon;
@@ -7,10 +6,7 @@ pub use yumo_core::denoiser;
 pub use yumo_core::downloader;
 pub use yumo_core::enhancer;
 pub use yumo_core::error;
-pub use yumo_core::keychain;
 pub use yumo_core::mask;
-pub use yumo_core::paster;
-pub use yumo_core::permissions;
 pub use yumo_core::pipeline;
 pub mod hotkey;
 pub use yumo_core::audio_io;

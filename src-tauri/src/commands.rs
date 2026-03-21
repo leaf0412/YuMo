@@ -8,12 +8,12 @@ use crate::db::{self, PaginatedResult, Prompt, Replacement, VocabularyWord};
 use crate::error::AppError;
 use crate::mask;
 use crate::hotkey;
-use crate::keychain;
 use crate::pipeline::PipelineState;
 use crate::state::AppContext;
 use crate::daemon::DaemonManager;
 use crate::denoiser::Denoiser;
-use crate::{audio_ctrl, audio_io, denoiser, paster, permissions, platform, text_processor, transcriber};
+use crate::{audio_io, denoiser, platform, text_processor, transcriber};
+use crate::platform::{audio_ctrl, keychain, paster, permissions};
 
 // ---------------------------------------------------------------------------
 // Frontend log bridge — writes frontend logs to the same log.txt
@@ -64,7 +64,7 @@ pub async fn start_recording(
         .unwrap_or(false);
     if mute {
         info!("[pipeline] muting system audio");
-        audio_ctrl::set_system_muted(true);
+        let _ = audio_ctrl::set_system_muted(true);
     }
 
     // 3. Enumerate devices and resolve target device
@@ -541,7 +541,7 @@ pub async fn stop_recording(
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
     {
-        audio_ctrl::set_system_muted(false);
+        let _ = audio_ctrl::set_system_muted(false);
         info!("[pipeline] unmuted system audio");
     }
 
@@ -604,7 +604,7 @@ pub fn cancel_recording(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false)
             {
-                audio_ctrl::set_system_muted(false);
+                let _ = audio_ctrl::set_system_muted(false);
             }
         }
     }
@@ -741,7 +741,7 @@ pub fn list_audio_devices() -> Result<Vec<platform::AudioInputDevice>, AppError>
 }
 
 #[tauri::command]
-pub fn check_permissions() -> permissions::PermissionStatus {
+pub fn check_permissions() -> platform::PermissionStatus {
     info!("[cmd] check_permissions");
     permissions::check_all()
 }
