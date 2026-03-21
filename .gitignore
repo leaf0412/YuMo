@@ -42,3 +42,4 @@ scripts/demo/assets/*.wav
 napi/yumo-napi.darwin-arm64.node
 dist-electron/
 target/
+release/
