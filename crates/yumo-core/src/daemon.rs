@@ -691,47 +691,25 @@ fn python_candidates() -> Vec<String> {
     candidates
 }
 
-/// Locate a Python 3 interpreter that has mlx_audio installed.
-/// If none found, auto-bootstrap a venv under ~/.voiceink/venv and install deps.
+/// Locate Python for the daemon — always uses the app-managed venv at ~/.voiceink/venv.
+/// If the venv doesn't exist or has outdated deps, auto-bootstrap it.
+/// Never uses system Python to avoid version conflicts and ensure reproducibility.
 fn find_python() -> AppResult<String> {
-    // 1. Check app-managed venv first (fastest path on repeat launches)
     let venv_python = venv_python_path();
+
+    // Fast path: venv exists and has correct mlx_audio version
     if std::path::Path::new(&venv_python).exists() && python_has_mlx(&venv_python) {
         log::info!("[daemon] using app venv python: {}", venv_python);
         return Ok(venv_python);
     }
 
-    // 2. Check system pythons
-    for candidate in python_candidates() {
-        if std::path::Path::new(&candidate).exists() {
-            let has_mlx = python_has_mlx(&candidate);
-            log::info!("[daemon] python candidate: {} (mlx_audio={})", candidate, has_mlx);
-            if has_mlx {
-                return Ok(candidate);
-            }
-        }
+    // Venv missing or outdated — bootstrap it
+    if std::path::Path::new(&venv_python).exists() {
+        log::info!("[daemon] venv python exists but mlx_audio outdated, upgrading...");
+    } else {
+        log::info!("[daemon] venv not found, bootstrapping...");
     }
-
-    // 3. No python with mlx_audio found — auto-bootstrap venv
-    log::info!("[daemon] no python with mlx_audio found, bootstrapping venv...");
-    if let Ok(python) = bootstrap_venv(None) {
-        return Ok(python);
-    }
-
-    // 4. Fallback: any working python3 (will fail later with clearer error)
-    let candidates = python_candidates();
-    let candidates_count = candidates.len();
-    for candidate in candidates {
-        if std::path::Path::new(&candidate).exists() {
-            log::warn!("[daemon] [find_python] fallback python={} (no mlx_audio)", candidate);
-            return Ok(candidate);
-        }
-    }
-
-    log::error!("[daemon] [find_python] FAILED no python found, candidates_checked={}", candidates_count);
-    Err(AppError::NotFound(
-        "python3 not found; install Python 3 via Homebrew or python.org".into(),
-    ))
+    bootstrap_venv(None)
 }
 
 /// Path to the app-managed venv python binary.
