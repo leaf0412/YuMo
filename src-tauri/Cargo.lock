@@ -6740,6 +6740,7 @@ dependencies = [
  "hound",
  "image",
  "log",
+ "ndarray",
  "objc",
  "ort",
  "regex",
