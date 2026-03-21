@@ -9,17 +9,14 @@ import { getAddon } from "./addon";
 // App lifecycle
 // -------------------------------------------------------------------------
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerAllHandlers();
   createMainWindow();
-  createRecorderWindow(); // pre-create hidden, ready for recording
+  await createRecorderWindow();
   createTray();
 
-  // Restore saved hotkey from settings
-  restoreSavedHotkey();
-
-  // Pre-warm daemon + load selected model in background (prevents first-recording cold start)
-  warmupDaemon();
+  await restoreSavedHotkey();
+  warmupDaemon(); // fire-and-forget, don't block startup
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -38,51 +35,6 @@ app.on("window-all-closed", () => {
 // Hotkey restoration
 // -------------------------------------------------------------------------
 
-// -------------------------------------------------------------------------
-// Daemon warmup — start daemon + load selected model in background
-// -------------------------------------------------------------------------
-
-async function warmupDaemon(): Promise<void> {
-  try {
-    const settingsJson = await getAddon().getAllSettings();
-    const settings = JSON.parse(settingsJson);
-    const modelId = settings.selected_model_id;
-    if (!modelId) {
-      console.log("[main] no selected model, skipping daemon warmup");
-      return;
-    }
-
-    // Find model info to get repo name and provider
-    const modelsJson = await getAddon().listAvailableModels();
-    const models = JSON.parse(modelsJson);
-    const model = models.find((m: { id: string }) => m.id === modelId);
-    if (!model?.model_repo) {
-      console.log(`[main] model ${modelId} has no repo, skipping daemon warmup`);
-      return;
-    }
-
-    // MLX models (MlxFunASR, MlxWhisper) need daemon
-    // Serde serializes Rust enum variants as camelCase
-    const mlxProviders = ["MlxFunASR", "MlxWhisper", "mlxFunASR", "mlxWhisper"];
-    if (!mlxProviders.includes(model.provider)) {
-      console.log(`[main] model ${modelId} provider=${model.provider}, no daemon needed`);
-      return;
-    }
-
-    console.log(`[main] warming up daemon + loading model: ${model.model_repo}`);
-    await getAddon().daemonStart();
-    console.log("[main] daemon started");
-    await getAddon().daemonLoadModel(model.model_repo);
-    console.log(`[main] model loaded: ${model.model_repo}`);
-  } catch (err) {
-    console.error("[main] daemon warmup failed (non-fatal):", err);
-  }
-}
-
-// -------------------------------------------------------------------------
-// Hotkey restoration
-// -------------------------------------------------------------------------
-
 async function restoreSavedHotkey(): Promise<void> {
   try {
     const settingsJson = await getAddon().getAllSettings();
@@ -96,5 +48,53 @@ async function restoreSavedHotkey(): Promise<void> {
     }
   } catch (err) {
     console.error("[main] failed to restore hotkey:", err);
+  }
+}
+
+// -------------------------------------------------------------------------
+// Daemon warmup — mirrors Tauri lib.rs lines 165-212
+// -------------------------------------------------------------------------
+
+async function warmupDaemon(): Promise<void> {
+  try {
+    const settingsJson = await getAddon().getAllSettings();
+    const settings = JSON.parse(settingsJson);
+    const modelId = settings.selected_model_id;
+    if (!modelId) {
+      console.log("[warmup] no selected model, skipping");
+      return;
+    }
+
+    const modelsJson = await getAddon().listAvailableModels();
+    const models = JSON.parse(modelsJson) as Array<{
+      id: string;
+      provider: string;
+      model_repo?: string;
+      downloaded?: boolean;
+    }>;
+    const model = models.find((m) => m.id === modelId);
+    if (!model?.model_repo) {
+      console.log(`[warmup] model ${modelId} not found or no repo, skipping`);
+      return;
+    }
+
+    // Only MLX models need daemon — match regardless of case
+    if (!model.provider?.toLowerCase().includes("mlx")) {
+      console.log(`[warmup] model ${modelId} provider=${model.provider}, no daemon needed`);
+      return;
+    }
+
+    if (model.downloaded === false) {
+      console.log(`[warmup] model ${modelId} not downloaded, skipping`);
+      return;
+    }
+
+    console.log(`[warmup] starting daemon for: ${model.model_repo}`);
+    await getAddon().daemonStart();
+    console.log("[warmup] daemon started, loading model...");
+    await getAddon().daemonLoadModel(model.model_repo);
+    console.log(`[warmup] model loaded: ${model.model_repo}`);
+  } catch (err) {
+    console.error("[warmup] failed (non-fatal):", err);
   }
 }
