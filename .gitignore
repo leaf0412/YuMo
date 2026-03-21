@@ -28,3 +28,14 @@ _docs/
 *.njsproj
 *.sln
 *.sw?
+
+# Demo recording output
+scripts/demo/output/*.mp4
+scripts/demo/output/*.gif
+scripts/demo/output/*.json
+scripts/demo/output/raw.*
+!scripts/demo/output/.gitkeep
+
+# Demo audio assets (large binary)
+scripts/demo/assets/*.wav
+!scripts/demo/assets/.gitkeep
