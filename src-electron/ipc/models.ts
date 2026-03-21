@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { ipcMain, dialog } from "electron";
 import { getAddon } from "../addon";
 
 export function registerModelsHandlers(): void {
@@ -12,16 +12,35 @@ export function registerModelsHandlers(): void {
     }
   });
 
-  // --- Model download/delete/import (not available in Electron yet) ---
-  ipcMain.handle("download-model", () => {
-    return null;
+  ipcMain.handle("download-model", async (_e, args?: { modelId?: string }) => {
+    if (!args?.modelId) return;
+    await getAddon().downloadModel(args.modelId);
   });
 
-  ipcMain.handle("delete-model", () => {
-    return null;
+  ipcMain.handle("delete-model", (_e, args?: { modelId?: string }) => {
+    if (args?.modelId) {
+      getAddon().deleteModel(args.modelId);
+    }
   });
 
-  ipcMain.handle("import-model", () => {
-    return null;
+  ipcMain.handle("import-model", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "Select Whisper Model",
+      filters: [{ name: "Whisper Model", extensions: ["bin"] }],
+      properties: ["openFile"],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return false;
+    }
+    // Copy file to models directory
+    const src = result.filePaths[0];
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { app } = await import("electron");
+    const modelsDir = path.join(app.getPath("home"), ".voiceink", "models");
+    fs.mkdirSync(modelsDir, { recursive: true });
+    const dest = path.join(modelsDir, path.basename(src));
+    fs.copyFileSync(src, dest);
+    return true;
   });
 }

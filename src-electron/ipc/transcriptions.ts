@@ -22,9 +22,15 @@ export function registerTranscriptionsHandlers(): void {
     getAddon().deleteAllTranscriptions();
   });
 
-  ipcMain.handle("get-recording", () => {
-    return null;
-  });
+  ipcMain.handle(
+    "get-recording",
+    (_e, args?: { recordingPath?: string }) => {
+      if (args?.recordingPath) {
+        return getAddon().getRecording(args.recordingPath);
+      }
+      return null;
+    },
+  );
 
   // --- Statistics ---
   ipcMain.handle("get-statistics", (_e, args?: { days?: number }) => {

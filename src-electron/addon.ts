@@ -70,6 +70,30 @@ export type NapiAddon = {
   daemonLoadModel(modelRepo: string): void;
   daemonUnloadModel(): void;
   daemonCheckDeps(): boolean;
+
+  // Recording pipeline
+  startRecording(deviceId: number | null): string;
+  stopRecording(): Promise<string>;
+  cancelRecording(): void;
+  getPipelineState(): string;
+
+  // Recording playback
+  getRecording(recordingPath: string): string;
+
+  // Model download/delete
+  downloadModel(modelId: string): Promise<void>;
+  deleteModel(modelId: string): void;
+
+  // Sprites
+  listSprites(): string;
+  getSpriteImage(dirId: string, fileName: string): string;
+  importSpriteFolder(path: string): string;
+  importSpriteZip(zipPath: string): string;
+  deleteSprite(dirId: string): void;
+
+  // Legacy import
+  detectVoiceinkLegacyPath(): string | null;
+  importVoiceinkLegacy(storePath: string): string;
 };
 
 // ---------------------------------------------------------------------------

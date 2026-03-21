@@ -1,21 +1,56 @@
 import { ipcMain } from "electron";
 import { getAddon } from "../addon";
+import {
+  showRecorder,
+  hideRecorder,
+  getMainWindow,
+  getRecorderWindow,
+} from "../windows";
 
 export function registerAudioHandlers(): void {
   ipcMain.handle("list-audio-devices", () => {
     return getAddon().listAudioDevices();
   });
 
-  // --- Recording pipeline (not available in Electron yet) ---
-  ipcMain.handle("start-recording", () => {
-    return null;
+  ipcMain.handle("start-recording", (_e, args?: { deviceId?: number }) => {
+    const result = getAddon().startRecording(args?.deviceId ?? null);
+    // Show recorder overlay
+    showRecorder();
+    // Emit state to both windows
+    const state = JSON.parse(result);
+    emitToRenderers("recording-state", state);
+    return state;
   });
 
-  ipcMain.handle("stop-recording", () => {
-    return null;
+  ipcMain.handle("stop-recording", async () => {
+    emitToRenderers("recording-state", { state: "processing" });
+    try {
+      const resultJson = await getAddon().stopRecording();
+      const result = JSON.parse(resultJson);
+      // Hide recorder overlay
+      hideRecorder();
+      emitToRenderers("recording-state", { state: "idle" });
+      emitToRenderers("transcription-result", result);
+      return result;
+    } catch (err) {
+      hideRecorder();
+      emitToRenderers("recording-state", { state: "idle" });
+      throw err;
+    }
   });
 
   ipcMain.handle("cancel-recording", () => {
-    return null;
+    getAddon().cancelRecording();
+    hideRecorder();
+    emitToRenderers("recording-state", { state: "idle" });
   });
+}
+
+/** Send an event to all renderer windows (main + recorder). */
+function emitToRenderers(channel: string, data: unknown): void {
+  for (const win of [getMainWindow(), getRecorderWindow()]) {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(channel, data);
+    }
+  }
 }
