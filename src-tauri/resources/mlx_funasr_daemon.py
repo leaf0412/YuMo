@@ -213,11 +213,19 @@ def load_model(model_repo, language=None):
     model_type = detect_model_type(model_repo)
 
     # Force offline mode during loading to prevent network timeout from
-    # transformers/huggingface_hub making API calls (model is already cached)
+    # transformers/huggingface_hub making API calls (model is already cached).
+    # BUT: if model is not cached locally, allow network access for first download.
+    model_is_cached = _is_model_cached(model_repo)
     old_hf_offline = os.environ.get("HF_HUB_OFFLINE")
     old_tf_offline = os.environ.get("TRANSFORMERS_OFFLINE")
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    if model_is_cached:
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        log(f"Model cached locally, using offline mode")
+    else:
+        os.environ.pop("HF_HUB_OFFLINE", None)
+        os.environ.pop("TRANSFORMERS_OFFLINE", None)
+        log(f"Model not cached, allowing network access for download")
 
     # Redirect stdout to stderr during loading to prevent JSON pollution
     old_stdout = sys.stdout
@@ -566,6 +574,27 @@ def _funasr_generate_single_chunk(model, audio_data, sample_rate, language, np, 
     text = result.text if hasattr(result, 'text') else str(result)
     _log_funasr_result(result)
     return text
+
+
+def _is_model_cached(model_repo):
+    """Check if a HuggingFace model is already cached locally."""
+    try:
+        from huggingface_hub import scan_cache_dir
+        cache_info = scan_cache_dir()
+        for repo in cache_info.repos:
+            if repo.repo_id == model_repo:
+                return True
+    except Exception:
+        pass
+
+    # Also check custom models dir (~/.voiceink/models/)
+    home = os.path.expanduser("~")
+    custom_dir = os.path.join(home, ".voiceink", "models",
+                              f"models--{model_repo.replace('/', '--')}")
+    if os.path.isdir(custom_dir):
+        return True
+
+    return False
 
 
 def _detect_language_from_text(text):
