@@ -703,23 +703,73 @@ fn find_any_python() -> Option<String> {
     None
 }
 
-/// Find the bundled `uv` binary (shipped in app resources).
-fn find_uv() -> Option<PathBuf> {
-    // In release: next to the daemon script in data_dir
+/// Find or download the `uv` binary.
+/// Checks ~/.voiceink/uv first, then system PATH, then auto-downloads.
+fn find_uv() -> AppResult<PathBuf> {
     let data_uv = dirs::home_dir()
         .unwrap_or_default()
         .join(".voiceink/uv");
     if data_uv.exists() {
-        return Some(data_uv);
+        return Ok(data_uv);
     }
     // System uv as fallback
     if let Ok(output) = Command::new("which").arg("uv").output() {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !path.is_empty() && std::path::Path::new(&path).exists() {
-            return Some(PathBuf::from(path));
+            return Ok(PathBuf::from(path));
         }
     }
-    None
+    // Auto-download uv to ~/.voiceink/uv
+    log::info!("[daemon] uv not found, downloading...");
+    download_uv(&data_uv)?;
+    Ok(data_uv)
+}
+
+/// Download the `uv` binary via the official install script.
+fn download_uv(dest: &std::path::Path) -> AppResult<()> {
+    let parent = dest.parent().unwrap_or(std::path::Path::new("."));
+    std::fs::create_dir_all(parent)
+        .map_err(|e| AppError::Io(format!("create dir failed: {e}")))?;
+
+    // Use the official standalone installer, extract to a temp location then move
+    let tmp_dir = parent.join(".uv_install_tmp");
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    std::fs::create_dir_all(&tmp_dir)
+        .map_err(|e| AppError::Io(format!("create tmp dir failed: {e}")))?;
+
+    let status = Command::new("sh")
+        .args(["-c", &format!(
+            "curl -fsSL https://astral.sh/uv/install.sh | CARGO_HOME='{}' sh",
+            tmp_dir.to_string_lossy()
+        )])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .status()
+        .map_err(|e| AppError::Io(format!("uv download failed: {e}")))?;
+
+    if !status.success() {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err(AppError::Io("uv install script failed".into()));
+    }
+
+    // The installer puts uv at CARGO_HOME/bin/uv
+    let installed = tmp_dir.join("bin/uv");
+    if installed.exists() {
+        std::fs::copy(&installed, dest)
+            .map_err(|e| AppError::Io(format!("copy uv binary failed: {e}")))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755));
+        }
+        log::info!("[daemon] uv downloaded to {:?}", dest);
+    } else {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err(AppError::Io("uv binary not found after install".into()));
+    }
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    Ok(())
 }
 
 /// Run a command, streaming its stderr to log.txt line by line.
@@ -772,14 +822,11 @@ fn run_and_stream_stderr(cmd: &mut Command, tag: &str) -> AppResult<()> {
 }
 
 /// Create a venv at ~/.voiceink/venv and install mlx-audio-plus using `uv`.
-/// `uv` is bundled with the app — it auto-downloads Python if needed and
-/// installs packages 10-100x faster than pip.
+/// `uv` is auto-downloaded on first use if not present.
 /// Returns the venv python path on success.
 fn bootstrap_venv(app: Option<tauri::AppHandle>) -> AppResult<String> {
     let start = std::time::Instant::now();
-    let uv = find_uv().ok_or_else(|| {
-        AppError::NotFound("uv binary not found; app resources may be corrupted".into())
-    })?;
+    let uv = find_uv()?;
     log::info!("[daemon] [bootstrap] using uv: {:?}", uv);
 
     let venv_dir = dirs::home_dir()

@@ -127,7 +127,6 @@ pub fn run() {
                 };
 
                 sync_file("mlx_funasr_daemon.py", false);
-                sync_file("uv", true);
 
                 // Sync DTLN denoiser models to ~/.voiceink/denoiser/
                 let denoiser_dir = &app_state.paths.denoiser_dir;
