@@ -1,6 +1,6 @@
 [package]
 name = "yumo-core"
-version = "0.3.0"
+version = "0.5.0"
 edition = "2021"
 description = "语墨核心库 - 业务逻辑与平台抽象"
 
