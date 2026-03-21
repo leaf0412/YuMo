@@ -1,5 +1,5 @@
-use yumo_lib::denoiser;
-use yumo_lib::denoiser::Denoiser;
+use yumo_core::denoiser;
+use yumo_core::denoiser::Denoiser;
 
 /// Helper: resolve the DTLN model directory from the project resources.
 fn model_dir() -> Option<String> {

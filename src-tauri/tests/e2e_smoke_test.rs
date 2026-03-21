@@ -52,7 +52,7 @@ fn test_full_app_lifecycle() {
     assert!(user.contains("Kubernetes"));
 
     // 12. Insert transcription to DB
-    let t_id = db::insert_transcription(&conn, "test transcription", Some("enhanced"), 2.5, "ggml-base", 2).unwrap();
+    let t_id = db::insert_transcription(&conn, "test transcription", Some("enhanced"), 2.5, "ggml-base", 2, None).unwrap();
     let result = db::get_transcriptions(&conn, None, None, 20).unwrap();
     assert_eq!(result.items.len(), 1);
 

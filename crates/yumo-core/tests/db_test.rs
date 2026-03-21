@@ -1,7 +1,6 @@
 use tempfile::TempDir;
 
-// The lib is named yumo_lib in Cargo.toml
-use yumo_lib::db;
+use yumo_core::db;
 
 #[test]
 fn test_init_creates_all_tables() {

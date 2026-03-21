@@ -18,6 +18,11 @@ whisper-rs = "0.16"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 hound = "3"
+uuid = { version = "1", features = ["v4"] }
+ndarray = "0.17"
+ort = "2.0.0-rc.12"
+rustfft = "6"
+csv = "1"
 
 [dev-dependencies]
 tempfile = "3"
