@@ -62,7 +62,8 @@ async function warmupDaemon(): Promise<void> {
     }
 
     // MLX models (MlxFunASR, MlxWhisper) need daemon
-    const mlxProviders = ["MlxFunASR", "MlxWhisper"];
+    // Serde serializes Rust enum variants as camelCase
+    const mlxProviders = ["MlxFunASR", "MlxWhisper", "mlxFunASR", "mlxWhisper"];
     if (!mlxProviders.includes(model.provider)) {
       console.log(`[main] model ${modelId} provider=${model.provider}, no daemon needed`);
       return;
