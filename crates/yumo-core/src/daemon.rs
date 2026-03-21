@@ -569,10 +569,38 @@ impl crate::daemon_client::DaemonClient for DaemonManager {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Quick check: does the app-managed venv have mlx_audio with sufficient version?
+/// Quick check: does the app-managed venv have the required packages?
+/// On macOS: checks for mlx_audio. On other platforms: checks for transformers.
 fn has_working_python() -> bool {
     let venv = venv_python_path();
-    std::path::Path::new(&venv).exists() && python_has_mlx(&venv)
+    std::path::Path::new(&venv).exists() && python_has_deps(&venv)
+}
+
+/// Check if a Python interpreter has the platform-appropriate deps installed.
+#[cfg(target_os = "macos")]
+fn python_has_deps(python: &str) -> bool {
+    python_has_mlx(python)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn python_has_deps(python: &str) -> bool {
+    python_has_transformers(python)
+}
+
+/// Check if a Python interpreter has `transformers` installed (for Windows/Linux).
+#[cfg(not(target_os = "macos"))]
+fn python_has_transformers(python: &str) -> bool {
+    let output = std::process::Command::new(python)
+        .args(["-c", "import transformers; print('ok')"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout).trim() == "ok"
+        }
+        _ => false,
+    }
 }
 
 /// Block on the reader until `{"status":"ready"}` arrives.
@@ -696,15 +724,15 @@ fn python_candidates() -> Vec<String> {
 fn find_python() -> AppResult<String> {
     let venv_python = venv_python_path();
 
-    // Fast path: venv exists and has correct mlx_audio version
-    if std::path::Path::new(&venv_python).exists() && python_has_mlx(&venv_python) {
+    // Fast path: venv exists and has correct deps
+    if std::path::Path::new(&venv_python).exists() && python_has_deps(&venv_python) {
         log::info!("[daemon] using app venv python: {}", venv_python);
         return Ok(venv_python);
     }
 
     // Venv missing or outdated — bootstrap it
     if std::path::Path::new(&venv_python).exists() {
-        log::info!("[daemon] venv python exists but mlx_audio outdated, upgrading...");
+        log::info!("[daemon] venv python exists but deps outdated, upgrading...");
     } else {
         log::info!("[daemon] venv not found, bootstrapping...");
     }
@@ -713,11 +741,16 @@ fn find_python() -> AppResult<String> {
 
 /// Path to the app-managed venv python binary.
 fn venv_python_path() -> String {
-    dirs::home_dir()
+    let venv_dir = dirs::home_dir()
         .unwrap_or_default()
-        .join(".voiceink/venv/bin/python3")
-        .to_string_lossy()
-        .to_string()
+        .join(".voiceink/venv");
+    if cfg!(target_os = "windows") {
+        venv_dir.join("Scripts/python.exe")
+    } else {
+        venv_dir.join("bin/python3")
+    }
+    .to_string_lossy()
+    .to_string()
 }
 
 /// Find any system python3 (doesn't need mlx_audio).
@@ -877,20 +910,34 @@ fn bootstrap_venv(cb: Option<&DaemonEventCallback>) -> AppResult<String> {
         e
     })?;
 
-    // Step 2: Install deps
-    log::info!("[daemon] [bootstrap] venv created, installing deps: mlx-audio-plus, soundfile");
+    // Step 2: Install deps (platform-specific)
+    #[cfg(target_os = "macos")]
+    let pip_deps: &[&str] = &[
+        "--upgrade", "mlx-audio", "mlx-audio-plus", "soundfile", "httpx[socks]",
+    ];
+    #[cfg(not(target_os = "macos"))]
+    let pip_deps: &[&str] = &[
+        "--upgrade", "transformers", "torch", "soundfile", "httpx[socks]", "accelerate",
+    ];
+
+    log::info!("[daemon] [bootstrap] venv created, installing deps: {:?}", pip_deps);
     if let Some(cb) = cb {
         cb("daemon-setup-status", &serde_json::json!({
             "stage": "installing_deps",
             "message": "正在安装 Python 依赖，首次需要几分钟..."
         }));
     }
+
+    let python_bin = if cfg!(target_os = "windows") {
+        format!("{}/Scripts/python.exe", venv_dir_str)
+    } else {
+        format!("{}/bin/python3", venv_dir_str)
+    };
+    let mut pip_args: Vec<&str> = vec!["pip", "install", "--python", &python_bin];
+    pip_args.extend_from_slice(pip_deps);
+
     run_and_stream_stderr(
-        Command::new(&uv).args([
-            "pip", "install",
-            "--python", &format!("{}/bin/python3", venv_dir_str),
-            "--upgrade", "mlx-audio", "mlx-audio-plus", "soundfile", "httpx[socks]",
-        ]),
+        Command::new(&uv).args(&pip_args),
         "uv-pip",
     ).map_err(|e| {
         log::error!("[daemon] [bootstrap] FAILED stage=pip_install elapsed_ms={}", start.elapsed().as_millis());

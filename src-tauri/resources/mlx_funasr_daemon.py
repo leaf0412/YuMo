@@ -42,9 +42,21 @@ def send_response(response):
     print(json.dumps(response, ensure_ascii=False), flush=True)
 
 
+def _has_mlx():
+    """Check if MLX framework is available (macOS Apple Silicon only)."""
+    try:
+        import mlx.core
+        return True
+    except ImportError:
+        return False
+
+
 def check_dependencies():
     """Check if required Python packages are installed."""
-    required = ["mlx", "mlx_audio"]
+    if _has_mlx():
+        required = ["mlx", "mlx_audio"]
+    else:
+        required = ["transformers", "torch"]
     installed = []
     missing = []
 
@@ -250,9 +262,17 @@ def load_model(model_repo, language=None):
             model = stt_load_model(model_repo)
             model._daemon_model_type = "glmasr"
         elif model_type == "qwen3_asr":
-            from mlx_audio.stt.utils import load_model as stt_load_model
-            model = stt_load_model(model_repo)
-            model._daemon_model_type = "qwen3_asr"
+            if _has_mlx():
+                # macOS: use mlx_audio (GPU accelerated via Apple Silicon)
+                from mlx_audio.stt.utils import load_model as stt_load_model
+                model = stt_load_model(model_repo)
+                model._daemon_model_type = "qwen3_asr"
+            else:
+                # Windows/Linux: use HuggingFace transformers
+                model = _load_qwen3_hf(model_repo)
+        elif not _has_mlx() and "qwen3" in model_repo.lower():
+            # Fallback: repo name suggests Qwen3-ASR but config model_type not detected
+            model = _load_qwen3_hf(model_repo)
         else:
             from mlx_audio.stt.models.funasr import Model
             model = Model.from_pretrained(model_repo)
@@ -296,11 +316,12 @@ def transcribe(model, audio_path, language=None, max_tokens=None, temperature=No
         gc.collect()
         # Release MLX metal buffer cache back to the system to prevent
         # GPU memory from growing unboundedly across transcription calls.
-        try:
-            import mlx.core as mx
-            mx.metal.clear_cache()
-        except Exception:
-            pass
+        if _has_mlx():
+            try:
+                import mlx.core as mx
+                mx.metal.clear_cache()
+            except Exception:
+                pass
 
 
 def _transcribe_vibevoice(model, audio_path, language=None, temperature=0.0):
@@ -357,6 +378,59 @@ def _transcribe_glmasr(model, audio_path, language=None, temperature=0.0):
     return text
 
 
+def _load_qwen3_hf(model_repo):
+    """Load Qwen3-ASR using HuggingFace transformers (for Windows/Linux)."""
+    from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+    import torch
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    log(f"Loading Qwen3-ASR via transformers: {model_repo} device={device} dtype={dtype}")
+
+    processor = AutoProcessor.from_pretrained(model_repo, trust_remote_code=True)
+    model = AutoModelForSpeechSeq2Seq.from_pretrained(
+        model_repo, torch_dtype=dtype, trust_remote_code=True
+    ).to(device)
+    model._daemon_model_type = "qwen3_asr_hf"
+    model._processor = processor
+    model._device = device
+    model._dtype = dtype
+    log(f"Qwen3-ASR (transformers) loaded successfully on {device}")
+    return model
+
+
+def _transcribe_qwen3_hf(model, audio_path, language=None, max_tokens=8192, temperature=0.0):
+    """Transcribe using Qwen3-ASR with HuggingFace transformers (non-MLX)."""
+    import soundfile as sf
+    import torch
+
+    log(f"Qwen3-ASR (HF) transcribing: {audio_path}, language={language}")
+
+    audio_data, sample_rate = sf.read(audio_path, dtype='float32')
+    if len(audio_data.shape) > 1:
+        audio_data = audio_data.mean(axis=1)
+
+    processor = model._processor
+    device = model._device
+
+    inputs = processor(
+        audio_data, sampling_rate=sample_rate, return_tensors="pt"
+    ).to(device)
+
+    generate_kwargs = {"max_new_tokens": max_tokens}
+    if language and language not in ("auto", ""):
+        mapped = _QWEN3_LANG_MAP.get(language.lower(), language)
+        generate_kwargs["language"] = mapped
+
+    with torch.no_grad():
+        predicted_ids = model.generate(**inputs, **generate_kwargs)
+
+    text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+    text = text.strip() if text else ""
+    log(f"Qwen3-ASR (HF) result: '{text[:80]}...' (length: {len(text)})" if len(text) > 80 else f"Qwen3-ASR (HF) result: '{text}' (length: {len(text)})")
+    return text
+
+
 _QWEN3_LANG_MAP = {
     "zh": "Chinese", "en": "English", "ja": "Japanese", "ko": "Korean",
     "fr": "French", "de": "German", "es": "Spanish", "pt": "Portuguese",
@@ -370,6 +444,10 @@ _QWEN3_LANG_MAP = {
 
 def _transcribe_qwen3_asr(model, audio_path, language=None, max_tokens=8192, temperature=0.0):
     """Transcribe using Qwen3-ASR model, with VAD chunking for long audio."""
+    # Dispatch to HF transformers backend if loaded that way
+    if getattr(model, '_daemon_model_type', '') == "qwen3_asr_hf":
+        return _transcribe_qwen3_hf(model, audio_path, language, max_tokens, temperature)
+
     import soundfile as sf
     import numpy as np
     import re as _re
@@ -904,11 +982,12 @@ def main():
                     model = None
                     model_repo = None
                     gc.collect()
-                    try:
-                        import mlx.core as mx
-                        mx.metal.clear_cache()
-                    except Exception:
-                        pass
+                    if _has_mlx():
+                        try:
+                            import mlx.core as mx
+                            mx.metal.clear_cache()
+                        except Exception:
+                            pass
 
                 # Download if not available
                 if not check_model_downloaded(new_repo):
@@ -957,12 +1036,13 @@ def main():
             model = None
             model_repo = None
             gc.collect()
-            try:
-                import mlx.core as mx
-                mx.metal.clear_cache()
-            except Exception:
-                pass
-            log("Model unloaded (memory freed, metal cache cleared)")
+            if _has_mlx():
+                try:
+                    import mlx.core as mx
+                    mx.metal.clear_cache()
+                except Exception:
+                    pass
+            log("Model unloaded (memory freed)")
             send_response({"status": "unloaded"})
 
         elif action == "quit":

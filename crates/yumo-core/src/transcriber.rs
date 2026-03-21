@@ -16,6 +16,8 @@ pub enum ModelProvider {
     Local,
     MlxWhisper,
     MlxFunASR,
+    /// Qwen3-ASR: runs via daemon on all platforms (MLX on macOS, transformers on Windows/Linux)
+    Qwen3ASR,
     Groq,
     Deepgram,
     ElevenLabs,
@@ -26,7 +28,7 @@ pub enum ModelProvider {
 
 impl ModelProvider {
     pub fn is_local(&self) -> bool {
-        matches!(self, Self::Local | Self::MlxWhisper | Self::MlxFunASR)
+        matches!(self, Self::Local | Self::MlxWhisper | Self::MlxFunASR | Self::Qwen3ASR)
     }
 
     pub fn is_cloud(&self) -> bool {
@@ -37,7 +39,7 @@ impl ModelProvider {
     }
 
     pub fn needs_daemon(&self) -> bool {
-        matches!(self, Self::MlxWhisper | Self::MlxFunASR)
+        matches!(self, Self::MlxWhisper | Self::MlxFunASR | Self::Qwen3ASR)
     }
 }
 
@@ -220,14 +222,23 @@ pub fn all_predefined_models() -> Vec<ModelInfo> {
             url: "", provider: ModelProvider::MlxFunASR,
             repo: Some("mlx-community/Fun-ASR-MLT-Nano-2512-bf16"),
             desc: Some("BF16 precision, higher quality"), speed: 7, accuracy: 8, recommended: false }.build(),
+        // ---- Qwen3-ASR (macOS MLX variants) ----
+        #[cfg(target_os = "macos")]
         M { id: "mlx-qwen3-asr-0.6b-bf16", name: "Qwen3-ASR 0.6B (BF16)", size_mb: 1200, langs: multilingual(),
-            url: "", provider: ModelProvider::MlxFunASR,
+            url: "", provider: ModelProvider::Qwen3ASR,
             repo: Some("mlx-community/Qwen3-ASR-0.6B-bf16"),
-            desc: Some("Qwen3 architecture, 30+ languages"), speed: 8, accuracy: 8, recommended: false }.build(),
+            desc: Some("Qwen3 architecture, 30+ languages (MLX)"), speed: 8, accuracy: 8, recommended: false }.build(),
+        #[cfg(target_os = "macos")]
         M { id: "mlx-qwen3-asr-0.6b-8bit", name: "Qwen3-ASR 0.6B (8-bit)", size_mb: 700, langs: multilingual(),
-            url: "", provider: ModelProvider::MlxFunASR,
+            url: "", provider: ModelProvider::Qwen3ASR,
             repo: Some("mlx-community/Qwen3-ASR-0.6B-8bit"),
-            desc: Some("Qwen3 quantized, fast"), speed: 9, accuracy: 7, recommended: false }.build(),
+            desc: Some("Qwen3 quantized, fast (MLX)"), speed: 9, accuracy: 7, recommended: false }.build(),
+
+        // ---- Qwen3-ASR (cross-platform, HF transformers) ----
+        M { id: "qwen3-asr-0.6b", name: "Qwen3-ASR 0.6B", size_mb: 1200, langs: multilingual(),
+            url: "", provider: ModelProvider::Qwen3ASR,
+            repo: Some("Qwen/Qwen3-ASR"),
+            desc: Some("Qwen3 speech recognition, 30+ languages"), speed: 7, accuracy: 8, recommended: true }.build(),
 
         // ---- Cloud models ----
         M { id: "groq-whisper-large-v3", name: "Groq Whisper Large v3", size_mb: 0, langs: multilingual(),
@@ -316,10 +327,11 @@ pub fn all_models(models_dir: &Path) -> Vec<ModelInfo> {
     let dirs = model_search_dirs(models_dir);
     let mut models = all_predefined_models();
 
-    // Filter out MLX models on non-macOS platforms (they require Apple Silicon + MLX framework)
+    // Filter out MLX-only models on non-macOS platforms (they require Apple Silicon + MLX framework)
+    // Qwen3ASR is kept on all platforms — daemon uses transformers on Windows/Linux.
     #[cfg(not(target_os = "macos"))]
     {
-        models.retain(|m| !m.provider.needs_daemon());
+        models.retain(|m| !matches!(m.provider, ModelProvider::MlxWhisper | ModelProvider::MlxFunASR));
     }
 
     for model in &mut models {
@@ -327,7 +339,7 @@ pub fn all_models(models_dir: &Path) -> Vec<ModelInfo> {
             ModelProvider::Local => {
                 model.is_downloaded = find_model_file(&dirs, &model.id);
             }
-            ModelProvider::MlxWhisper | ModelProvider::MlxFunASR => {
+            ModelProvider::MlxWhisper | ModelProvider::MlxFunASR | ModelProvider::Qwen3ASR => {
                 if let Some(repo) = &model.model_repo {
                     model.is_downloaded = check_mlx_model_downloaded(repo);
                 }

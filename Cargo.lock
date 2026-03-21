@@ -7638,7 +7638,7 @@ dependencies = [
 
 [[package]]
 name = "yumo"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "cocoa",
  "dirs 5.0.1",
@@ -7664,7 +7664,7 @@ dependencies = [
 
 [[package]]
 name = "yumo-core"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "arboard",
  "chrono",
@@ -7695,7 +7695,7 @@ dependencies = [
 
 [[package]]
 name = "yumo-napi"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "dirs 5.0.1",
  "hound",
