@@ -35,7 +35,6 @@ pub fn frontend_log(level: String, message: String) {
 pub async fn start_recording(
     app: AppHandle,
     state: State<'_, AppContext>,
-    daemon: State<'_, DaemonManager>,
     device_id: Option<u32>,
 ) -> Result<(), AppError> {
     info!("[pipeline] start_recording called, device_id={:?}", device_id);
