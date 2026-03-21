@@ -39,10 +39,10 @@ export function registerSystemHandlers(): void {
   ipcMain.handle("detect-voiceink-legacy-path", () => null);
 
   ipcMain.handle("import-voiceink-legacy", () => {
-    throw new Error("Legacy import not available in Electron");
+    return null;
   });
 
   ipcMain.handle("import-voiceink-from-dialog", () => {
-    throw new Error("Legacy import not available in Electron");
+    return null;
   });
 }

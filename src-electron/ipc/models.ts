@@ -14,14 +14,14 @@ export function registerModelsHandlers(): void {
 
   // --- Model download/delete/import (not available in Electron yet) ---
   ipcMain.handle("download-model", () => {
-    throw new Error("Model download not available in Electron yet");
+    return null;
   });
 
   ipcMain.handle("delete-model", () => {
-    throw new Error("Model deletion not available in Electron yet");
+    return null;
   });
 
   ipcMain.handle("import-model", () => {
-    throw new Error("Model import not available in Electron yet");
+    return null;
   });
 }

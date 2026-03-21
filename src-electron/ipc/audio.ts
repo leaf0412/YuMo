@@ -8,14 +8,14 @@ export function registerAudioHandlers(): void {
 
   // --- Recording pipeline (not available in Electron yet) ---
   ipcMain.handle("start-recording", () => {
-    throw new Error("Recording not available in Electron yet");
+    return null;
   });
 
   ipcMain.handle("stop-recording", () => {
-    throw new Error("Recording not available in Electron yet");
+    return null;
   });
 
   ipcMain.handle("cancel-recording", () => {
-    throw new Error("Recording not available in Electron yet");
+    return null;
   });
 }

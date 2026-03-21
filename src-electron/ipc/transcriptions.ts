@@ -23,7 +23,7 @@ export function registerTranscriptionsHandlers(): void {
   });
 
   ipcMain.handle("get-recording", () => {
-    throw new Error("Recording playback not available in Electron yet");
+    return null;
   });
 
   // --- Statistics ---
