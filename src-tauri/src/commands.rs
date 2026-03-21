@@ -156,6 +156,21 @@ pub async fn stop_recording(
             })?
     };
 
+    // 1.5 Immediately update state so frontend knows we're processing
+    //     (prevents "not recording" errors on repeated hotkey presses)
+    {
+        let mut pipeline = state
+            .pipeline_state
+            .lock()
+            .map_err(|e| AppError::Recording(e.to_string()))?;
+        *pipeline = PipelineState::Transcribing;
+    }
+    let _ = app.emit(
+        "recording-state",
+        serde_json::json!({"state": "processing"}),
+    );
+    info!("[pipeline] state -> Processing (handle taken, stopping recorder)");
+
     let pipeline_start = std::time::Instant::now();
 
     // 2. Stop recording
