@@ -1,3 +1,4 @@
+import log from "./logger";
 import { app, BrowserWindow } from "electron";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -50,11 +51,11 @@ async function restoreSavedHotkey(): Promise<void> {
     if (typeof hotkey === "string" && hotkey.length > 0) {
       const success = registerGlobalShortcut(hotkey);
       if (success) {
-        console.log(`[main] restored hotkey: ${hotkey}`);
+        log.info(`[main] restored hotkey: ${hotkey}`);
       }
     }
   } catch (err) {
-    console.error("[main] failed to restore hotkey:", err);
+    log.error("[main] failed to restore hotkey:", err);
   }
 }
 
@@ -68,7 +69,7 @@ async function warmupDaemon(): Promise<void> {
     const settings = JSON.parse(settingsJson);
     const modelId = settings.selected_model_id;
     if (!modelId) {
-      console.log("[warmup] no selected model, skipping");
+      log.info("[warmup] no selected model, skipping");
       return;
     }
 
@@ -81,28 +82,28 @@ async function warmupDaemon(): Promise<void> {
     }>;
     const model = models.find((m) => m.id === modelId);
     if (!model?.model_repo) {
-      console.log(`[warmup] model ${modelId} not found or no repo, skipping`);
+      log.info(`[warmup] model ${modelId} not found or no repo, skipping`);
       return;
     }
 
     // Only MLX models need daemon — match regardless of case
     if (!model.provider?.toLowerCase().includes("mlx")) {
-      console.log(`[warmup] model ${modelId} provider=${model.provider}, no daemon needed`);
+      log.info(`[warmup] model ${modelId} provider=${model.provider}, no daemon needed`);
       return;
     }
 
     if (model.downloaded === false) {
-      console.log(`[warmup] model ${modelId} not downloaded, skipping`);
+      log.info(`[warmup] model ${modelId} not downloaded, skipping`);
       return;
     }
 
-    console.log(`[warmup] starting daemon for: ${model.model_repo}`);
+    log.info(`[warmup] starting daemon for: ${model.model_repo}`);
     await getAddon().daemonStart();
-    console.log("[warmup] daemon started, loading model...");
+    log.info("[warmup] daemon started, loading model...");
     await getAddon().daemonLoadModel(model.model_repo);
-    console.log(`[warmup] model loaded: ${model.model_repo}`);
+    log.info(`[warmup] model loaded: ${model.model_repo}`);
   } catch (err) {
-    console.error("[warmup] failed (non-fatal):", err);
+    log.error("[warmup] failed (non-fatal):", err);
   }
 }
 
@@ -145,7 +146,7 @@ function syncFile(
   const src = path.join(srcDir, name);
   const dest = path.join(destDir, name);
   if (!fs.existsSync(src)) {
-    console.log(`[sync] ${name} not found at ${src}`);
+    log.info(`[sync] ${name} not found at ${src}`);
     return;
   }
   const srcSize = fs.statSync(src).size;
@@ -155,6 +156,6 @@ function syncFile(
     if (executable && process.platform !== "win32") {
       fs.chmodSync(dest, 0o755);
     }
-    console.log(`[sync] ${name} synced (${srcSize} bytes)`);
+    log.info(`[sync] ${name} synced (${srcSize} bytes)`);
   }
 }

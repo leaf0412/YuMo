@@ -1,3 +1,4 @@
+import log from "./logger";
 /**
  * Global shortcut management for Electron.
  *
@@ -18,22 +19,22 @@ export function registerGlobalShortcut(shortcut: string): boolean {
 
   try {
     const success = globalShortcut.register(electronShortcut, () => {
-      console.log("[shortcuts] hotkey triggered, sending toggle-recording");
+      log.info("[shortcuts] hotkey triggered, sending toggle-recording");
       // Emit toggle-recording to both windows
       for (const win of [getMainWindow(), getRecorderWindow()]) {
         if (win && !win.isDestroyed()) {
           win.webContents.send("toggle-recording");
-          console.log(`[shortcuts] sent to window: ${win.getTitle()}`);
+          log.info(`[shortcuts] sent to window: ${win.getTitle()}`);
         }
       }
     });
 
     if (!success) {
-      console.error(`[shortcuts] failed to register: ${electronShortcut}`);
+      log.error(`[shortcuts] failed to register: ${electronShortcut}`);
     }
     return success;
   } catch (err) {
-    console.error(`[shortcuts] register error for "${electronShortcut}":`, err);
+    log.error(`[shortcuts] register error for "${electronShortcut}":`, err);
     return false;
   }
 }

@@ -27,6 +27,7 @@
     "@tauri-apps/plugin-global-shortcut": "^2.3.1",
     "@tauri-apps/plugin-opener": "^2",
     "antd": "^6.3.3",
+    "electron-log": "^5.4.3",
     "i18next": "^25.8.20",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -44,14 +45,14 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "electron": "^28.3.3",
+    "electron-builder": "^25.0.0",
+    "esbuild": "^0.25.0",
     "jsdom": "^29.0.0",
     "tsx": "^4.21.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
     "vitest": "^4.1.0",
-    "esbuild": "^0.25.0",
-    "electron": "^28.3.3",
-    "electron-builder": "^25.0.0",
     "webdriverio": "^9.26.1"
   }
 }

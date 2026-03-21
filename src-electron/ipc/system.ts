@@ -1,4 +1,5 @@
 import { ipcMain, app, dialog } from "electron";
+import log from "../logger";
 import { getAddon } from "../addon";
 import {
   registerGlobalShortcut,
@@ -45,8 +46,11 @@ export function registerSystemHandlers(): void {
     "frontend-log",
     (_e, args?: { level?: string; message?: string }) => {
       if (args?.message) {
-        const level = args.level === "error" ? "error" : "info";
-        console[level](`[frontend] ${args.message}`);
+        if (args.level === "error") {
+          log.error(`[frontend] ${args.message}`);
+        } else {
+          log.info(`[frontend] ${args.message}`);
+        }
       }
     },
   );

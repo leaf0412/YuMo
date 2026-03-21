@@ -1,3 +1,4 @@
+import log from "./logger";
 /**
  * Window management for Electron — mirrors Tauri's dual-window setup.
  *
@@ -103,7 +104,7 @@ export async function createRecorderWindow(): Promise<BrowserWindow> {
       nodeIntegration: false,
     },
   });
-  console.log(`[windows] recorder window created at (${x}, ${y})`);
+  log.info(`[windows] recorder window created at (${x}, ${y})`);
 
   if (process.env.ELECTRON_RENDERER_URL) {
     recorderWindow.loadURL(process.env.ELECTRON_RENDERER_URL + "/recorder.html");
@@ -136,7 +137,7 @@ export async function showRecorder(): Promise<void> {
     await createRecorderWindow();
   }
   recorderWindow?.showInactive();
-  console.log("[windows] recorder shown");
+  log.info("[windows] recorder shown");
 }
 
 export function hideRecorder(): void {
@@ -170,7 +171,7 @@ async function loadWindowPosition(label: string): Promise<WindowPos | null> {
     const layout = JSON.parse(layoutStr);
     const pos = layout?.positions?.[label];
     if (pos && typeof pos.x === "number") {
-      console.log(`[windows] restored position for '${label}': (${pos.x}, ${pos.y})`);
+      log.info(`[windows] restored position for '${label}': (${pos.x}, ${pos.y})`);
       return pos;
     }
   } catch {
@@ -188,8 +189,8 @@ async function saveWindowPosition(label: string, pos: WindowPos): Promise<void> 
     if (!layout.positions) layout.positions = {};
     layout.positions[label] = pos;
     await getAddon().updateSetting("window_layout", JSON.stringify(JSON.stringify(layout)));
-    console.log(`[windows] saved position for '${label}': (${pos.x}, ${pos.y})`);
+    log.info(`[windows] saved position for '${label}': (${pos.x}, ${pos.y})`);
   } catch (err) {
-    console.error(`[windows] failed to save position for '${label}':`, err);
+    log.error(`[windows] failed to save position for '${label}':`, err);
   }
 }
