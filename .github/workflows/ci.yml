@@ -37,11 +37,19 @@ jobs:
             cmake \
             build-essential
 
+      - name: Install CMake (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: lukka/get-cmake@latest
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -51,21 +59,36 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            crates/yumo-core
+            napi
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: pnpm install
 
       - name: Frontend build
-        run: npm run build
+        run: pnpm vite build
 
-      - name: Rust check (yumo-core, all platforms)
+      # Rust checks — all platforms
+      - name: Rust check (yumo-core)
         run: cargo check -p yumo-core
 
-      - name: Rust tests (yumo-core, platform-gated)
+      - name: Rust tests (yumo-core)
         run: cargo test -p yumo-core
 
-      - name: Rust check (yumo Tauri app, macOS only)
+      - name: Rust check (yumo-napi)
+        run: cargo check -p yumo-napi
+
+      # Tauri — macOS only (depends on cocoa/objc)
+      - name: Rust check (Tauri app)
         if: matrix.os == 'macos-latest'
-        working-directory: src-tauri
-        run: cargo check
+        run: cargo check -p yumo
+
+      - name: Rust tests (Tauri app)
+        if: matrix.os == 'macos-latest'
+        run: cargo test -p yumo
+
+      # Electron main process build
+      - name: Electron build check
+        run: pnpm electron:build-main
