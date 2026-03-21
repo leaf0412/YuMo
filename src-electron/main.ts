@@ -52,7 +52,7 @@ async function warmupDaemon(): Promise<void> {
       return;
     }
 
-    // Find model info to get repo name
+    // Find model info to get repo name and provider
     const modelsJson = await getAddon().listAvailableModels();
     const models = JSON.parse(modelsJson);
     const model = models.find((m: { id: string }) => m.id === modelId);
@@ -61,9 +61,10 @@ async function warmupDaemon(): Promise<void> {
       return;
     }
 
-    // Check if daemon needs python (MLX models only)
-    if (!model.needs_daemon) {
-      console.log(`[main] model ${modelId} doesn't need daemon, skipping warmup`);
+    // MLX models (MlxFunASR, MlxWhisper) need daemon
+    const mlxProviders = ["MlxFunASR", "MlxWhisper"];
+    if (!mlxProviders.includes(model.provider)) {
+      console.log(`[main] model ${modelId} provider=${model.provider}, no daemon needed`);
       return;
     }
 

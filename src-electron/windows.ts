@@ -68,13 +68,13 @@ export function createMainWindow(): BrowserWindow {
 // Recorder overlay window
 // ---------------------------------------------------------------------------
 
-export function createRecorderWindow(): BrowserWindow {
+export async function createRecorderWindow(): Promise<BrowserWindow> {
   if (recorderWindow && !recorderWindow.isDestroyed()) {
     return recorderWindow;
   }
 
   // Restore saved position from DB, or center below menu bar
-  const saved = loadWindowPosition("recorder");
+  const saved = await loadWindowPosition("recorder");
   const display = screen.getPrimaryDisplay();
   const sw = display.workAreaSize.width;
   const x = saved ? Math.round(saved.x) : Math.round((sw - 200) / 2);
@@ -131,11 +131,11 @@ export function createRecorderWindow(): BrowserWindow {
 // Window control API (used by IPC handlers)
 // ---------------------------------------------------------------------------
 
-export function showRecorder(): void {
+export async function showRecorder(): Promise<void> {
   if (!recorderWindow || recorderWindow.isDestroyed()) {
-    createRecorderWindow();
+    await createRecorderWindow();
   }
-  recorderWindow?.showInactive(); // show without stealing focus
+  recorderWindow?.showInactive();
   console.log("[windows] recorder shown");
 }
 
@@ -161,9 +161,9 @@ export function getRecorderWindow(): BrowserWindow | null {
 
 type WindowPos = { x: number; y: number; width: number; height: number };
 
-function loadWindowPosition(label: string): WindowPos | null {
+async function loadWindowPosition(label: string): Promise<WindowPos | null> {
   try {
-    const settingsJson = getAddon().getAllSettings();
+    const settingsJson = await getAddon().getAllSettings();
     const settings = JSON.parse(settingsJson);
     const layoutStr = settings.window_layout;
     if (typeof layoutStr !== "string") return null;
@@ -179,15 +179,15 @@ function loadWindowPosition(label: string): WindowPos | null {
   return null;
 }
 
-function saveWindowPosition(label: string, pos: WindowPos): void {
+async function saveWindowPosition(label: string, pos: WindowPos): Promise<void> {
   try {
-    const settingsJson = getAddon().getAllSettings();
+    const settingsJson = await getAddon().getAllSettings();
     const settings = JSON.parse(settingsJson);
     const layoutStr = settings.window_layout;
     const layout = typeof layoutStr === "string" ? JSON.parse(layoutStr) : { positions: {} };
     if (!layout.positions) layout.positions = {};
     layout.positions[label] = pos;
-    getAddon().updateSetting("window_layout", JSON.stringify(JSON.stringify(layout)));
+    await getAddon().updateSetting("window_layout", JSON.stringify(JSON.stringify(layout)));
     console.log(`[windows] saved position for '${label}': (${pos.x}, ${pos.y})`);
   } catch (err) {
     console.error(`[windows] failed to save position for '${label}':`, err);
