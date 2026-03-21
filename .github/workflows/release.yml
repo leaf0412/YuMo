@@ -82,7 +82,7 @@ jobs:
         run: chmod +x src-tauri/resources/uv || true
 
       - name: Build Tauri app
-        run: pnpm tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+        run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
 
       - name: Upload DMG (macOS)
         if: matrix.os == 'macos-latest'
