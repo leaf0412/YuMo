@@ -1,4 +1,4 @@
-use yumo_lib::text_processor;
+use yumo_core::text_processor;
 
 #[test]
 fn test_apply_replacements() {

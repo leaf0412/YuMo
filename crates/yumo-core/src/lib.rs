@@ -3,3 +3,5 @@
 pub mod error;
 pub mod mask;
 pub mod pipeline;
+pub mod text_processor;
+pub mod vad;

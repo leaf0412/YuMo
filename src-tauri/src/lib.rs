@@ -15,10 +15,10 @@ pub mod paster;
 pub mod permissions;
 pub mod recorder;
 pub mod state;
-pub mod text_processor;
+pub use yumo_core::text_processor;
 pub mod tray;
 pub mod transcriber;
-pub mod vad;
+pub use yumo_core::vad;
 pub mod window_manager;
 
 use log::info;
