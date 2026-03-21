@@ -70,18 +70,20 @@ pub struct NapiAudioDevice {
 
 /// List available audio input devices.
 #[napi]
-pub fn list_audio_devices() -> Result<Vec<NapiAudioDevice>> {
-    let devices = yumo_core::platform::recorder::list_input_devices()
-        .map_err(|e| Error::from_reason(format!("Failed to list devices: {e}")))?;
+pub async fn list_audio_devices() -> Result<Vec<NapiAudioDevice>> {
+    tokio::task::spawn_blocking(|| {
+        let devices = yumo_core::platform::recorder::list_input_devices()
+            .map_err(|e| Error::from_reason(format!("Failed to list devices: {e}")))?;
 
-    Ok(devices
-        .into_iter()
-        .map(|d| NapiAudioDevice {
-            id: d.id,
-            name: d.name,
-            is_default: d.is_default,
-        })
-        .collect())
+        Ok(devices
+            .into_iter()
+            .map(|d| NapiAudioDevice {
+                id: d.id,
+                name: d.name,
+                is_default: d.is_default,
+            })
+            .collect())
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -90,13 +92,15 @@ pub fn list_audio_devices() -> Result<Vec<NapiAudioDevice>> {
 
 /// Get all settings as a JSON string.
 #[napi]
-pub fn get_all_settings() -> Result<String> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    let settings = db::get_all_settings(&conn)
-        .map_err(|e| Error::from_reason(format!("get_all_settings: {e}")))?;
-    serde_json::to_string(&settings)
-        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+pub async fn get_all_settings() -> Result<String> {
+    tokio::task::spawn_blocking(|| {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        let settings = db::get_all_settings(&conn)
+            .map_err(|e| Error::from_reason(format!("get_all_settings: {e}")))?;
+        serde_json::to_string(&settings)
+            .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -106,23 +110,25 @@ pub fn get_all_settings() -> Result<String> {
 /// Get transcriptions with cursor-based pagination.
 /// Returns a JSON string of `{ items, next_cursor }`.
 #[napi]
-pub fn get_transcriptions(
+pub async fn get_transcriptions(
     cursor: Option<String>,
     query: Option<String>,
     limit: Option<u32>,
 ) -> Result<String> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    let lim = limit.unwrap_or(50) as usize;
-    let result = db::get_transcriptions(
-        &conn,
-        cursor.as_deref(),
-        query.as_deref(),
-        lim,
-    )
-    .map_err(|e| Error::from_reason(format!("get_transcriptions: {e}")))?;
-    serde_json::to_string(&result)
-        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        let lim = limit.unwrap_or(50) as usize;
+        let result = db::get_transcriptions(
+            &conn,
+            cursor.as_deref(),
+            query.as_deref(),
+            lim,
+        )
+        .map_err(|e| Error::from_reason(format!("get_transcriptions: {e}")))?;
+        serde_json::to_string(&result)
+            .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -131,11 +137,13 @@ pub fn get_transcriptions(
 
 /// List all available models (local + cloud).
 #[napi]
-pub fn list_available_models() -> Result<String> {
-    let app = ctx()?;
-    let models = transcriber::all_models(&app.paths.models_dir);
-    serde_json::to_string(&models)
-        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+pub async fn list_available_models() -> Result<String> {
+    tokio::task::spawn_blocking(|| {
+        let app = ctx()?;
+        let models = transcriber::all_models(&app.paths.models_dir);
+        serde_json::to_string(&models)
+            .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -144,13 +152,15 @@ pub fn list_available_models() -> Result<String> {
 
 /// Update a single setting.
 #[napi]
-pub fn update_setting(key: String, value: String) -> Result<()> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    let json_value: serde_json::Value = serde_json::from_str(&value)
-        .unwrap_or_else(|_| serde_json::Value::String(value));
-    db::update_setting(&conn, &key, &json_value)
-        .map_err(|e| Error::from_reason(format!("update_setting: {e}")))
+pub async fn update_setting(key: String, value: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        let json_value: serde_json::Value = serde_json::from_str(&value)
+            .unwrap_or_else(|_| serde_json::Value::String(value));
+        db::update_setting(&conn, &key, &json_value)
+            .map_err(|e| Error::from_reason(format!("update_setting: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -159,13 +169,15 @@ pub fn update_setting(key: String, value: String) -> Result<()> {
 
 /// Get transcription statistics.
 #[napi]
-pub fn get_statistics(days: Option<u32>) -> Result<String> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    let stats = db::get_statistics(&conn, days.map(|d| d as i64))
-        .map_err(|e| Error::from_reason(format!("get_statistics: {e}")))?;
-    serde_json::to_string(&stats)
-        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+pub async fn get_statistics(days: Option<u32>) -> Result<String> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        let stats = db::get_statistics(&conn, days.map(|d| d as i64))
+            .map_err(|e| Error::from_reason(format!("get_statistics: {e}")))?;
+        serde_json::to_string(&stats)
+            .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -173,55 +185,67 @@ pub fn get_statistics(days: Option<u32>) -> Result<String> {
 // ---------------------------------------------------------------------------
 
 #[napi]
-pub fn get_vocabulary() -> Result<String> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    let words = db::get_vocabulary(&conn)
-        .map_err(|e| Error::from_reason(format!("get_vocabulary: {e}")))?;
-    serde_json::to_string(&words)
-        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+pub async fn get_vocabulary() -> Result<String> {
+    tokio::task::spawn_blocking(|| {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        let words = db::get_vocabulary(&conn)
+            .map_err(|e| Error::from_reason(format!("get_vocabulary: {e}")))?;
+        serde_json::to_string(&words)
+            .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn add_vocabulary(word: String) -> Result<String> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    db::add_vocabulary(&conn, &word)
-        .map_err(|e| Error::from_reason(format!("add_vocabulary: {e}")))
+pub async fn add_vocabulary(word: String) -> Result<String> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::add_vocabulary(&conn, &word)
+            .map_err(|e| Error::from_reason(format!("add_vocabulary: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn delete_vocabulary(id: String) -> Result<()> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    db::delete_vocabulary(&conn, &id)
-        .map_err(|e| Error::from_reason(format!("delete_vocabulary: {e}")))
+pub async fn delete_vocabulary(id: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::delete_vocabulary(&conn, &id)
+            .map_err(|e| Error::from_reason(format!("delete_vocabulary: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn get_replacements() -> Result<String> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    let items = db::get_replacements(&conn)
-        .map_err(|e| Error::from_reason(format!("get_replacements: {e}")))?;
-    serde_json::to_string(&items)
-        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+pub async fn get_replacements() -> Result<String> {
+    tokio::task::spawn_blocking(|| {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        let items = db::get_replacements(&conn)
+            .map_err(|e| Error::from_reason(format!("get_replacements: {e}")))?;
+        serde_json::to_string(&items)
+            .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn set_replacement(original: String, replacement: String) -> Result<String> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    db::set_replacement(&conn, &original, &replacement)
-        .map_err(|e| Error::from_reason(format!("set_replacement: {e}")))
+pub async fn set_replacement(original: String, replacement: String) -> Result<String> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::set_replacement(&conn, &original, &replacement)
+            .map_err(|e| Error::from_reason(format!("set_replacement: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn delete_replacement(id: String) -> Result<()> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    db::delete_replacement(&conn, &id)
-        .map_err(|e| Error::from_reason(format!("delete_replacement: {e}")))
+pub async fn delete_replacement(id: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::delete_replacement(&conn, &id)
+            .map_err(|e| Error::from_reason(format!("delete_replacement: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -229,19 +253,23 @@ pub fn delete_replacement(id: String) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 #[napi]
-pub fn delete_transcription(id: String) -> Result<()> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    db::delete_transcription(&conn, &id)
-        .map_err(|e| Error::from_reason(format!("delete_transcription: {e}")))
+pub async fn delete_transcription(id: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::delete_transcription(&conn, &id)
+            .map_err(|e| Error::from_reason(format!("delete_transcription: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn delete_all_transcriptions() -> Result<()> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    db::delete_all_transcriptions(&conn)
-        .map_err(|e| Error::from_reason(format!("delete_all_transcriptions: {e}")))
+pub async fn delete_all_transcriptions() -> Result<()> {
+    tokio::task::spawn_blocking(|| {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::delete_all_transcriptions(&conn)
+            .map_err(|e| Error::from_reason(format!("delete_all_transcriptions: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -249,46 +277,54 @@ pub fn delete_all_transcriptions() -> Result<()> {
 // ---------------------------------------------------------------------------
 
 #[napi]
-pub fn list_prompts() -> Result<String> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    let prompts = db::list_prompts(&conn)
-        .map_err(|e| Error::from_reason(format!("list_prompts: {e}")))?;
-    serde_json::to_string(&prompts)
-        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+pub async fn list_prompts() -> Result<String> {
+    tokio::task::spawn_blocking(|| {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        let prompts = db::list_prompts(&conn)
+            .map_err(|e| Error::from_reason(format!("list_prompts: {e}")))?;
+        serde_json::to_string(&prompts)
+            .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn add_prompt(
+pub async fn add_prompt(
     name: String,
     system_msg: String,
     user_msg: String,
 ) -> Result<String> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    db::add_prompt(&conn, &name, &system_msg, &user_msg, false)
-        .map_err(|e| Error::from_reason(format!("add_prompt: {e}")))
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::add_prompt(&conn, &name, &system_msg, &user_msg, false)
+            .map_err(|e| Error::from_reason(format!("add_prompt: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn update_prompt(
+pub async fn update_prompt(
     id: String,
     name: String,
     system_msg: String,
     user_msg: String,
 ) -> Result<()> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    db::update_prompt(&conn, &id, &name, &system_msg, &user_msg)
-        .map_err(|e| Error::from_reason(format!("update_prompt: {e}")))
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::update_prompt(&conn, &id, &name, &system_msg, &user_msg)
+            .map_err(|e| Error::from_reason(format!("update_prompt: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn delete_prompt(id: String) -> Result<()> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    db::delete_prompt(&conn, &id)
-        .map_err(|e| Error::from_reason(format!("delete_prompt: {e}")))
+pub async fn delete_prompt(id: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::delete_prompt(&conn, &id)
+            .map_err(|e| Error::from_reason(format!("delete_prompt: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -296,31 +332,35 @@ pub fn delete_prompt(id: String) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 #[napi]
-pub fn import_dictionary_csv(path: String, dict_type: String) -> Result<()> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    let p = std::path::Path::new(&path);
-    match dict_type.as_str() {
-        "vocabulary" => db::import_vocabulary_csv(&conn, p)
-            .map_err(|e| Error::from_reason(format!("import_vocabulary_csv: {e}"))),
-        "replacements" => db::import_replacements_csv(&conn, p)
-            .map_err(|e| Error::from_reason(format!("import_replacements_csv: {e}"))),
-        _ => Err(Error::from_reason(format!("Unknown dict type: {dict_type}"))),
-    }
+pub async fn import_dictionary_csv(path: String, dict_type: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        let p = std::path::Path::new(&path);
+        match dict_type.as_str() {
+            "vocabulary" => db::import_vocabulary_csv(&conn, p)
+                .map_err(|e| Error::from_reason(format!("import_vocabulary_csv: {e}"))),
+            "replacements" => db::import_replacements_csv(&conn, p)
+                .map_err(|e| Error::from_reason(format!("import_replacements_csv: {e}"))),
+            _ => Err(Error::from_reason(format!("Unknown dict type: {dict_type}"))),
+        }
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn export_dictionary_csv(path: String, dict_type: String) -> Result<()> {
-    let app = ctx()?;
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    let p = std::path::Path::new(&path);
-    match dict_type.as_str() {
-        "vocabulary" => db::export_vocabulary_csv(&conn, p)
-            .map_err(|e| Error::from_reason(format!("export_vocabulary_csv: {e}"))),
-        "replacements" => db::export_replacements_csv(&conn, p)
-            .map_err(|e| Error::from_reason(format!("export_replacements_csv: {e}"))),
-        _ => Err(Error::from_reason(format!("Unknown dict type: {dict_type}"))),
-    }
+pub async fn export_dictionary_csv(path: String, dict_type: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        let p = std::path::Path::new(&path);
+        match dict_type.as_str() {
+            "vocabulary" => db::export_vocabulary_csv(&conn, p)
+                .map_err(|e| Error::from_reason(format!("export_vocabulary_csv: {e}"))),
+            "replacements" => db::export_replacements_csv(&conn, p)
+                .map_err(|e| Error::from_reason(format!("export_replacements_csv: {e}"))),
+            _ => Err(Error::from_reason(format!("Unknown dict type: {dict_type}"))),
+        }
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -328,21 +368,27 @@ pub fn export_dictionary_csv(path: String, dict_type: String) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 #[napi]
-pub fn store_api_key(provider: String, key: String) -> Result<()> {
-    yumo_core::platform::keychain::store_key("com.voiceink.app", &provider, &key)
-        .map_err(|e| Error::from_reason(format!("store_key: {e}")))
+pub async fn store_api_key(provider: String, key: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        yumo_core::platform::keychain::store_key("com.voiceink.app", &provider, &key)
+            .map_err(|e| Error::from_reason(format!("store_key: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn get_api_key(provider: String) -> Result<Option<String>> {
-    yumo_core::platform::keychain::get_key("com.voiceink.app", &provider)
-        .map_err(|e| Error::from_reason(format!("get_key: {e}")))
+pub async fn get_api_key(provider: String) -> Result<Option<String>> {
+    tokio::task::spawn_blocking(move || {
+        yumo_core::platform::keychain::get_key("com.voiceink.app", &provider)
+            .map_err(|e| Error::from_reason(format!("get_key: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 #[napi]
-pub fn delete_api_key(provider: String) -> Result<()> {
-    yumo_core::platform::keychain::delete_key("com.voiceink.app", &provider)
-        .map_err(|e| Error::from_reason(format!("delete_key: {e}")))
+pub async fn delete_api_key(provider: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        yumo_core::platform::keychain::delete_key("com.voiceink.app", &provider)
+            .map_err(|e| Error::from_reason(format!("delete_key: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -420,9 +466,11 @@ pub async fn daemon_unload_model() -> Result<()> {
 }
 
 #[napi]
-pub fn daemon_check_deps() -> Result<bool> {
-    let d = daemon()?;
-    Ok(d.has_python())
+pub async fn daemon_check_deps() -> Result<bool> {
+    tokio::task::spawn_blocking(|| {
+        let d = daemon()?;
+        Ok(d.has_python())
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +478,7 @@ pub fn daemon_check_deps() -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 /// Start recording from the given audio device (or default).
+/// Kept synchronous: creates a RecordingHandle that must stay on the napi thread.
 #[napi]
 pub fn start_recording(device_id: Option<u32>) -> Result<String> {
     let app = ctx()?;
@@ -806,10 +855,12 @@ pub fn get_pipeline_state() -> Result<String> {
 
 /// Read a recording WAV file and return it as a base64 data URI.
 #[napi]
-pub fn get_recording(recording_path: String) -> Result<String> {
-    let path = std::path::Path::new(&recording_path);
-    audio_io::read_recording_as_data_uri(path)
-        .map_err(|e| Error::from_reason(format!("read_recording: {e}")))
+pub async fn get_recording(recording_path: String) -> Result<String> {
+    tokio::task::spawn_blocking(move || {
+        let path = std::path::Path::new(&recording_path);
+        audio_io::read_recording_as_data_uri(path)
+            .map_err(|e| Error::from_reason(format!("read_recording: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -838,54 +889,56 @@ pub async fn download_model(model_id: String) -> Result<()> {
 
 /// Delete a model by ID (local whisper .bin or MLX cache directory).
 #[napi]
-pub fn delete_model(model_id: String) -> Result<()> {
-    let app = ctx()?;
-    let all = transcriber::all_models(&app.paths.models_dir);
-    let model_info = all.iter().find(|m| m.id == model_id);
+pub async fn delete_model(model_id: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let all = transcriber::all_models(&app.paths.models_dir);
+        let model_info = all.iter().find(|m| m.id == model_id);
 
-    if let Some(model) = model_info {
-        match model.provider {
-            transcriber::ModelProvider::MlxWhisper | transcriber::ModelProvider::MlxFunASR => {
-                // Delete HuggingFace cache directory
-                if let Some(repo) = &model.model_repo {
-                    let cache_name = repo.replace('/', "--");
-                    let cache_dir = app.paths.models_dir.join(format!("models--{}", cache_name));
-                    if cache_dir.exists() {
-                        std::fs::remove_dir_all(&cache_dir)
-                            .map_err(|e| Error::from_reason(format!("remove MLX cache: {e}")))?;
+        if let Some(model) = model_info {
+            match model.provider {
+                transcriber::ModelProvider::MlxWhisper | transcriber::ModelProvider::MlxFunASR => {
+                    // Delete HuggingFace cache directory
+                    if let Some(repo) = &model.model_repo {
+                        let cache_name = repo.replace('/', "--");
+                        let cache_dir = app.paths.models_dir.join(format!("models--{}", cache_name));
+                        if cache_dir.exists() {
+                            std::fs::remove_dir_all(&cache_dir)
+                                .map_err(|e| Error::from_reason(format!("remove MLX cache: {e}")))?;
+                        }
+                    }
+                    // Unload if this model is currently loaded in daemon
+                    if let Ok(d) = daemon() {
+                        if d.loaded_model().as_deref() == model.model_repo.as_deref() {
+                            let cmd = serde_json::json!({"action": "unload"});
+                            let _ = d.send_command(&cmd);
+                            d.set_loaded_model(None);
+                        }
                     }
                 }
-                // Unload if this model is currently loaded in daemon
-                if let Ok(d) = daemon() {
-                    if d.loaded_model().as_deref() == model.model_repo.as_deref() {
-                        let cmd = serde_json::json!({"action": "unload"});
-                        let _ = d.send_command(&cmd);
-                        d.set_loaded_model(None);
+                _ => {
+                    let path = transcriber::model_path(&app.paths.models_dir, &model_id);
+                    if path.exists() {
+                        std::fs::remove_file(&path)
+                            .map_err(|e| Error::from_reason(format!("remove model: {e}")))?;
                     }
                 }
             }
-            _ => {
-                let path = transcriber::model_path(&app.paths.models_dir, &model_id);
-                if path.exists() {
-                    std::fs::remove_file(&path)
-                        .map_err(|e| Error::from_reason(format!("remove model: {e}")))?;
-                }
+        }
+
+        // Clear selected_model_id if this was the selected model
+        {
+            let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+            let selected = db::get_setting(&conn, "selected_model_id")
+                .map_err(|e| Error::from_reason(format!("get_setting: {e}")))?;
+            if selected.as_ref().and_then(|v| v.as_str()) == Some(&model_id) {
+                db::update_setting(&conn, "selected_model_id", &serde_json::json!(""))
+                    .map_err(|e| Error::from_reason(format!("update_setting: {e}")))?;
             }
         }
-    }
 
-    // Clear selected_model_id if this was the selected model
-    {
-        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-        let selected = db::get_setting(&conn, "selected_model_id")
-            .map_err(|e| Error::from_reason(format!("get_setting: {e}")))?;
-        if selected.as_ref().and_then(|v| v.as_str()) == Some(&model_id) {
-            db::update_setting(&conn, "selected_model_id", &serde_json::json!(""))
-                .map_err(|e| Error::from_reason(format!("update_setting: {e}")))?;
-        }
-    }
-
-    Ok(())
+        Ok(())
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -894,195 +947,205 @@ pub fn delete_model(model_id: String) -> Result<()> {
 
 /// List all available sprite sheet manifests as a JSON array.
 #[napi]
-pub fn list_sprites() -> Result<String> {
-    let app = ctx()?;
-    let base = &app.paths.sprites_dir;
-    if !base.exists() {
-        return Ok("[]".to_string());
-    }
-    let mut results = Vec::new();
-    let entries = std::fs::read_dir(base)
-        .map_err(|e| Error::from_reason(format!("read sprites dir: {e}")))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| Error::from_reason(format!("read entry: {e}")))?;
-        if !entry.path().is_dir() { continue; }
-        let manifest_path = entry.path().join("manifest.json");
-        if manifest_path.exists() {
-            let data = std::fs::read_to_string(&manifest_path)
-                .map_err(|e| Error::from_reason(format!("read manifest: {e}")))?;
-            if let Ok(mut manifest) = serde_json::from_str::<serde_json::Value>(&data) {
-                let dir_name = entry.file_name().to_string_lossy().to_string();
-                manifest.as_object_mut().map(|m| {
-                    m.insert("dirId".into(), serde_json::Value::String(dir_name));
-                });
-                results.push(manifest);
+pub async fn list_sprites() -> Result<String> {
+    tokio::task::spawn_blocking(|| {
+        let app = ctx()?;
+        let base = &app.paths.sprites_dir;
+        if !base.exists() {
+            return Ok("[]".to_string());
+        }
+        let mut results = Vec::new();
+        let entries = std::fs::read_dir(base)
+            .map_err(|e| Error::from_reason(format!("read sprites dir: {e}")))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| Error::from_reason(format!("read entry: {e}")))?;
+            if !entry.path().is_dir() { continue; }
+            let manifest_path = entry.path().join("manifest.json");
+            if manifest_path.exists() {
+                let data = std::fs::read_to_string(&manifest_path)
+                    .map_err(|e| Error::from_reason(format!("read manifest: {e}")))?;
+                if let Ok(mut manifest) = serde_json::from_str::<serde_json::Value>(&data) {
+                    let dir_name = entry.file_name().to_string_lossy().to_string();
+                    manifest.as_object_mut().map(|m| {
+                        m.insert("dirId".into(), serde_json::Value::String(dir_name));
+                    });
+                    results.push(manifest);
+                }
             }
         }
-    }
-    serde_json::to_string(&results)
-        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+        serde_json::to_string(&results)
+            .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 /// Read a sprite sheet image file as base64 data URI.
 #[napi]
-pub fn get_sprite_image(dir_id: String, file_name: String) -> Result<String> {
-    let app = ctx()?;
-    let path = app.paths.sprites_dir.join(&dir_id).join(&file_name);
-    if !path.exists() {
-        // Try processed version
-        let processed = app.paths.sprites_dir.join(&dir_id).join("sprite_processed.png");
-        if processed.exists() {
-            let data = std::fs::read(&processed)
-                .map_err(|e| Error::from_reason(format!("read processed sprite: {e}")))?;
-            let b64 = audio_io::base64_encode(&data);
-            return Ok(format!("data:image/png;base64,{}", b64));
+pub async fn get_sprite_image(dir_id: String, file_name: String) -> Result<String> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let path = app.paths.sprites_dir.join(&dir_id).join(&file_name);
+        if !path.exists() {
+            // Try processed version
+            let processed = app.paths.sprites_dir.join(&dir_id).join("sprite_processed.png");
+            if processed.exists() {
+                let data = std::fs::read(&processed)
+                    .map_err(|e| Error::from_reason(format!("read processed sprite: {e}")))?;
+                let b64 = audio_io::base64_encode(&data);
+                return Ok(format!("data:image/png;base64,{}", b64));
+            }
+            return Err(Error::from_reason(format!("Sprite image not found: {}", path.display())));
         }
-        return Err(Error::from_reason(format!("Sprite image not found: {}", path.display())));
-    }
-    let data = std::fs::read(&path)
-        .map_err(|e| Error::from_reason(format!("read sprite: {e}")))?;
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
-    let mime = match ext {
-        "gif" => "image/gif",
-        "jpg" | "jpeg" => "image/jpeg",
-        _ => "image/png",
-    };
-    let b64 = audio_io::base64_encode(&data);
-    Ok(format!("data:{};base64,{}", mime, b64))
+        let data = std::fs::read(&path)
+            .map_err(|e| Error::from_reason(format!("read sprite: {e}")))?;
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
+        let mime = match ext {
+            "gif" => "image/gif",
+            "jpg" | "jpeg" => "image/jpeg",
+            _ => "image/png",
+        };
+        let b64 = audio_io::base64_encode(&data);
+        Ok(format!("data:{};base64,{}", mime, b64))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 /// Import a sprite from a folder path. The folder must contain manifest.json.
 /// Returns the manifest JSON with dirId added.
 #[napi]
-pub fn import_sprite_folder(path: String) -> Result<String> {
-    let app = ctx()?;
-    let dir_path = std::path::Path::new(&path);
-    let manifest_path = dir_path.join("manifest.json");
-    if !manifest_path.exists() {
-        return Err(Error::from_reason("manifest.json not found in folder"));
-    }
+pub async fn import_sprite_folder(path: String) -> Result<String> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let dir_path = std::path::Path::new(&path);
+        let manifest_path = dir_path.join("manifest.json");
+        if !manifest_path.exists() {
+            return Err(Error::from_reason("manifest.json not found in folder"));
+        }
 
-    let manifest_data = std::fs::read_to_string(&manifest_path)
-        .map_err(|e| Error::from_reason(format!("read manifest: {e}")))?;
-    let manifest: serde_json::Value = serde_json::from_str(&manifest_data)
-        .map_err(|e| Error::from_reason(format!("parse manifest: {e}")))?;
+        let manifest_data = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| Error::from_reason(format!("read manifest: {e}")))?;
+        let manifest: serde_json::Value = serde_json::from_str(&manifest_data)
+            .map_err(|e| Error::from_reason(format!("parse manifest: {e}")))?;
 
-    let sprite_file = manifest.get("spriteFile")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| Error::from_reason("manifest.json missing spriteFile"))?;
+        let sprite_file = manifest.get("spriteFile")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| Error::from_reason("manifest.json missing spriteFile"))?;
 
-    let sprite_path = dir_path.join(sprite_file);
-    if !sprite_path.exists() {
-        return Err(Error::from_reason(format!("Sprite file not found: {}", sprite_file)));
-    }
+        let sprite_path = dir_path.join(sprite_file);
+        if !sprite_path.exists() {
+            return Err(Error::from_reason(format!("Sprite file not found: {}", sprite_file)));
+        }
 
-    // Create destination
-    let dest_id = uuid::Uuid::new_v4().to_string().to_uppercase();
-    let dest_dir = app.paths.sprites_dir.join(&dest_id);
-    std::fs::create_dir_all(&dest_dir)
-        .map_err(|e| Error::from_reason(format!("create sprite dir: {e}")))?;
+        // Create destination
+        let dest_id = uuid::Uuid::new_v4().to_string().to_uppercase();
+        let dest_dir = app.paths.sprites_dir.join(&dest_id);
+        std::fs::create_dir_all(&dest_dir)
+            .map_err(|e| Error::from_reason(format!("create sprite dir: {e}")))?;
 
-    std::fs::copy(&manifest_path, dest_dir.join("manifest.json"))
-        .map_err(|e| Error::from_reason(format!("copy manifest: {e}")))?;
-    std::fs::copy(&sprite_path, dest_dir.join(sprite_file))
-        .map_err(|e| Error::from_reason(format!("copy sprite: {e}")))?;
+        std::fs::copy(&manifest_path, dest_dir.join("manifest.json"))
+            .map_err(|e| Error::from_reason(format!("copy manifest: {e}")))?;
+        std::fs::copy(&sprite_path, dest_dir.join(sprite_file))
+            .map_err(|e| Error::from_reason(format!("copy sprite: {e}")))?;
 
-    // Copy processed version if exists
-    let processed = dir_path.join("sprite_processed.png");
-    if processed.exists() {
-        let _ = std::fs::copy(&processed, dest_dir.join("sprite_processed.png"));
-    }
+        // Copy processed version if exists
+        let processed = dir_path.join("sprite_processed.png");
+        if processed.exists() {
+            let _ = std::fs::copy(&processed, dest_dir.join("sprite_processed.png"));
+        }
 
-    let mut result = manifest;
-    result.as_object_mut().map(|m| {
-        m.insert("dirId".into(), serde_json::Value::String(dest_id));
-    });
-    serde_json::to_string(&result)
-        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+        let mut result = manifest;
+        result.as_object_mut().map(|m| {
+            m.insert("dirId".into(), serde_json::Value::String(dest_id));
+        });
+        serde_json::to_string(&result)
+            .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 /// Import a sprite from a .zip archive path.
 /// Returns the manifest JSON with dirId added.
 #[napi]
-pub fn import_sprite_zip(zip_path: String) -> Result<String> {
-    let app = ctx()?;
-    let file_path = std::path::Path::new(&zip_path);
+pub async fn import_sprite_zip(zip_path: String) -> Result<String> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let file_path = std::path::Path::new(&zip_path);
 
-    // Extract to temp directory
-    let tmp_dir = std::env::temp_dir().join(format!("sprite-import-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&tmp_dir)
-        .map_err(|e| Error::from_reason(format!("create tmp dir: {e}")))?;
+        // Extract to temp directory
+        let tmp_dir = std::env::temp_dir().join(format!("sprite-import-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp_dir)
+            .map_err(|e| Error::from_reason(format!("create tmp dir: {e}")))?;
 
-    let zip_file = std::fs::File::open(file_path)
-        .map_err(|e| Error::from_reason(format!("open zip: {e}")))?;
-    let mut archive = zip::ZipArchive::new(zip_file)
-        .map_err(|e| Error::from_reason(format!("read zip: {e}")))?;
-    archive.extract(&tmp_dir)
-        .map_err(|e| Error::from_reason(format!("extract zip: {e}")))?;
+        let zip_file = std::fs::File::open(file_path)
+            .map_err(|e| Error::from_reason(format!("open zip: {e}")))?;
+        let mut archive = zip::ZipArchive::new(zip_file)
+            .map_err(|e| Error::from_reason(format!("read zip: {e}")))?;
+        archive.extract(&tmp_dir)
+            .map_err(|e| Error::from_reason(format!("extract zip: {e}")))?;
 
-    // Find manifest.json recursively
-    let manifest_path = find_manifest_in_dir(&tmp_dir)
-        .ok_or_else(|| Error::from_reason("manifest.json not found in zip"))?;
+        // Find manifest.json recursively
+        let manifest_path = find_manifest_in_dir(&tmp_dir)
+            .ok_or_else(|| Error::from_reason("manifest.json not found in zip"))?;
 
-    let manifest_data = std::fs::read_to_string(&manifest_path)
-        .map_err(|e| Error::from_reason(format!("read manifest: {e}")))?;
-    let manifest: serde_json::Value = serde_json::from_str(&manifest_data)
-        .map_err(|e| Error::from_reason(format!("parse manifest: {e}")))?;
+        let manifest_data = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| Error::from_reason(format!("read manifest: {e}")))?;
+        let manifest: serde_json::Value = serde_json::from_str(&manifest_data)
+            .map_err(|e| Error::from_reason(format!("parse manifest: {e}")))?;
 
-    let sprite_file = manifest.get("spriteFile")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| Error::from_reason("manifest.json missing spriteFile"))?;
+        let sprite_file = manifest.get("spriteFile")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| Error::from_reason("manifest.json missing spriteFile"))?;
 
-    let manifest_dir = manifest_path.parent().unwrap_or(&tmp_dir);
-    let sprite_path = manifest_dir.join(sprite_file);
-    if !sprite_path.exists() {
+        let manifest_dir = manifest_path.parent().unwrap_or(&tmp_dir);
+        let sprite_path = manifest_dir.join(sprite_file);
+        if !sprite_path.exists() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err(Error::from_reason(format!("Sprite file not found: {}", sprite_file)));
+        }
+
+        // Create destination
+        let dest_id = uuid::Uuid::new_v4().to_string().to_uppercase();
+        let dest_dir = app.paths.sprites_dir.join(&dest_id);
+        std::fs::create_dir_all(&dest_dir)
+            .map_err(|e| Error::from_reason(format!("create sprite dir: {e}")))?;
+
+        std::fs::copy(&manifest_path, dest_dir.join("manifest.json"))
+            .map_err(|e| Error::from_reason(format!("copy manifest: {e}")))?;
+        std::fs::copy(&sprite_path, dest_dir.join(sprite_file))
+            .map_err(|e| Error::from_reason(format!("copy sprite: {e}")))?;
+
+        let processed = manifest_dir.join("sprite_processed.png");
+        if processed.exists() {
+            let _ = std::fs::copy(&processed, dest_dir.join("sprite_processed.png"));
+        }
+
         let _ = std::fs::remove_dir_all(&tmp_dir);
-        return Err(Error::from_reason(format!("Sprite file not found: {}", sprite_file)));
-    }
 
-    // Create destination
-    let dest_id = uuid::Uuid::new_v4().to_string().to_uppercase();
-    let dest_dir = app.paths.sprites_dir.join(&dest_id);
-    std::fs::create_dir_all(&dest_dir)
-        .map_err(|e| Error::from_reason(format!("create sprite dir: {e}")))?;
-
-    std::fs::copy(&manifest_path, dest_dir.join("manifest.json"))
-        .map_err(|e| Error::from_reason(format!("copy manifest: {e}")))?;
-    std::fs::copy(&sprite_path, dest_dir.join(sprite_file))
-        .map_err(|e| Error::from_reason(format!("copy sprite: {e}")))?;
-
-    let processed = manifest_dir.join("sprite_processed.png");
-    if processed.exists() {
-        let _ = std::fs::copy(&processed, dest_dir.join("sprite_processed.png"));
-    }
-
-    let _ = std::fs::remove_dir_all(&tmp_dir);
-
-    let mut result = manifest;
-    result.as_object_mut().map(|m| {
-        m.insert("dirId".into(), serde_json::Value::String(dest_id));
-    });
-    serde_json::to_string(&result)
-        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+        let mut result = manifest;
+        result.as_object_mut().map(|m| {
+            m.insert("dirId".into(), serde_json::Value::String(dest_id));
+        });
+        serde_json::to_string(&result)
+            .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 /// Delete a sprite sheet by its directory ID.
 #[napi]
-pub fn delete_sprite(dir_id: String) -> Result<()> {
-    let app = ctx()?;
-    let dir = app.paths.sprites_dir.join(&dir_id);
-    if dir.exists() && dir.is_dir() {
-        std::fs::remove_dir_all(&dir)
-            .map_err(|e| Error::from_reason(format!("remove sprite dir: {e}")))?;
-    }
-    // Clear selected_sprite_id if it was the deleted one
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    if let Ok(Some(current)) = db::get_setting(&conn, "selected_sprite_id") {
-        if current.as_str() == Some(dir_id.as_str()) {
-            let _ = db::update_setting(&conn, "selected_sprite_id", &serde_json::Value::String(String::new()));
+pub async fn delete_sprite(dir_id: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let dir = app.paths.sprites_dir.join(&dir_id);
+        if dir.exists() && dir.is_dir() {
+            std::fs::remove_dir_all(&dir)
+                .map_err(|e| Error::from_reason(format!("remove sprite dir: {e}")))?;
         }
-    }
-    Ok(())
+        // Clear selected_sprite_id if it was the deleted one
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        if let Ok(Some(current)) = db::get_setting(&conn, "selected_sprite_id") {
+            if current.as_str() == Some(dir_id.as_str()) {
+                let _ = db::update_setting(&conn, "selected_sprite_id", &serde_json::Value::String(String::new()));
+            }
+        }
+        Ok(())
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 /// Recursively find manifest.json in a directory.
@@ -1110,32 +1173,41 @@ fn find_manifest_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
 
 /// Auto-detect VoiceInk macOS data directory.
 #[napi]
-pub fn detect_voiceink_legacy_path() -> Option<String> {
-    let home = dirs::home_dir()?;
-    let store = home.join("Library/Application Support/com.prakashjoshipax.VoiceInk/default.store");
-    if store.exists() {
-        Some(store.to_string_lossy().to_string())
-    } else {
-        None
-    }
+pub async fn detect_voiceink_legacy_path() -> Result<Option<String>> {
+    tokio::task::spawn_blocking(|| {
+        let home = dirs::home_dir();
+        match home {
+            Some(home) => {
+                let store = home.join("Library/Application Support/com.prakashjoshipax.VoiceInk/default.store");
+                if store.exists() {
+                    Ok(Some(store.to_string_lossy().to_string()))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
 /// Import legacy VoiceInk data from a .store file path.
 /// Returns a JSON string with import results.
 #[napi]
-pub fn import_voiceink_legacy(store_path: String) -> Result<String> {
-    let app = ctx()?;
-    let store = std::path::Path::new(&store_path);
-    if !store.exists() {
-        return Err(Error::from_reason("VoiceInk database file not found"));
-    }
+pub async fn import_voiceink_legacy(store_path: String) -> Result<String> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let store = std::path::Path::new(&store_path);
+        if !store.exists() {
+            return Err(Error::from_reason("VoiceInk database file not found"));
+        }
 
-    let dict_store = store.parent().map(|p| p.join("dictionary.store"));
-    let dict_ref = dict_store.as_deref().filter(|p| p.exists());
+        let dict_store = store.parent().map(|p| p.join("dictionary.store"));
+        let dict_ref = dict_store.as_deref().filter(|p| p.exists());
 
-    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-    let result = db::import_voiceink_legacy(&conn, store, dict_ref, &app.paths.recordings_dir)
-        .map_err(|e| Error::from_reason(format!("import_legacy: {e}")))?;
-    serde_json::to_string(&result)
-        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        let result = db::import_voiceink_legacy(&conn, store, dict_ref, &app.paths.recordings_dir)
+            .map_err(|e| Error::from_reason(format!("import_legacy: {e}")))?;
+        serde_json::to_string(&result)
+            .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+    }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }

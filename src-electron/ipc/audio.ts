@@ -8,8 +8,8 @@ import {
 } from "../windows";
 
 export function registerAudioHandlers(): void {
-  ipcMain.handle("list-audio-devices", () => {
-    return getAddon().listAudioDevices();
+  ipcMain.handle("list-audio-devices", async () => {
+    return await getAddon().listAudioDevices();
   });
 
   ipcMain.handle("start-recording", (_e, args?: { deviceId?: number }) => {

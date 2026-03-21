@@ -21,10 +21,10 @@ export function registerSystemHandlers(): void {
   });
 
   // --- Hotkeys ---
-  ipcMain.handle("register-hotkey", (_e, args?: { shortcut?: string }) => {
+  ipcMain.handle("register-hotkey", async (_e, args?: { shortcut?: string }) => {
     if (args?.shortcut) {
       // Persist to settings
-      getAddon().updateSetting("hotkey", JSON.stringify(args.shortcut));
+      await getAddon().updateSetting("hotkey", JSON.stringify(args.shortcut));
       // Register global shortcut
       unregisterAllShortcuts();
       registerGlobalShortcut(args.shortcut);
@@ -50,15 +50,15 @@ export function registerSystemHandlers(): void {
   ipcMain.handle("get-system-locale", () => app.getLocale());
 
   // --- Legacy import ---
-  ipcMain.handle("detect-voiceink-legacy-path", () => {
-    return getAddon().detectVoiceinkLegacyPath();
+  ipcMain.handle("detect-voiceink-legacy-path", async () => {
+    return await getAddon().detectVoiceinkLegacyPath();
   });
 
   ipcMain.handle(
     "import-voiceink-legacy",
-    (_e, args?: { storePath?: string }) => {
+    async (_e, args?: { storePath?: string }) => {
       if (args?.storePath) {
-        const json = getAddon().importVoiceinkLegacy(args.storePath);
+        const json = await getAddon().importVoiceinkLegacy(args.storePath);
         return JSON.parse(json);
       }
       return null;
@@ -74,7 +74,7 @@ export function registerSystemHandlers(): void {
     if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
-    const json = getAddon().importVoiceinkLegacy(result.filePaths[0]);
+    const json = await getAddon().importVoiceinkLegacy(result.filePaths[0]);
     return JSON.parse(json);
   });
 }

@@ -2,13 +2,13 @@ import { ipcMain, dialog } from "electron";
 import { getAddon } from "../addon";
 
 export function registerModelsHandlers(): void {
-  ipcMain.handle("list-available-models", () => {
-    return JSON.parse(getAddon().listAvailableModels());
+  ipcMain.handle("list-available-models", async () => {
+    return JSON.parse(await getAddon().listAvailableModels());
   });
 
-  ipcMain.handle("select-model", (_e, args?: { modelId?: string }) => {
+  ipcMain.handle("select-model", async (_e, args?: { modelId?: string }) => {
     if (args?.modelId) {
-      getAddon().updateSetting("selected_model_id", JSON.stringify(args.modelId));
+      await getAddon().updateSetting("selected_model_id", JSON.stringify(args.modelId));
     }
   });
 
@@ -17,9 +17,9 @@ export function registerModelsHandlers(): void {
     await getAddon().downloadModel(args.modelId);
   });
 
-  ipcMain.handle("delete-model", (_e, args?: { modelId?: string }) => {
+  ipcMain.handle("delete-model", async (_e, args?: { modelId?: string }) => {
     if (args?.modelId) {
-      getAddon().deleteModel(args.modelId);
+      await getAddon().deleteModel(args.modelId);
     }
   });
 

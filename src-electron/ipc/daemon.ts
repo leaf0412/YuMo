@@ -23,7 +23,7 @@ export function registerDaemonHandlers(): void {
     await getAddon().daemonUnloadModel();
   });
 
-  ipcMain.handle("daemon-check-deps", () => {
-    return getAddon().daemonCheckDeps();
+  ipcMain.handle("daemon-check-deps", async () => {
+    return await getAddon().daemonCheckDeps();
   });
 }

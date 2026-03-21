@@ -17,83 +17,83 @@ const require = createRequire(import.meta.url);
 // ---------------------------------------------------------------------------
 
 export type NapiAddon = {
-  // Initialization
+  // Initialization (sync — one-time startup)
   init(dataDir: string): void;
 
   // Audio devices
-  listAudioDevices(): Array<{ id: number; name: string; isDefault: boolean }>;
+  listAudioDevices(): Promise<Array<{ id: number; name: string; isDefault: boolean }>>;
 
   // Settings
-  getAllSettings(): string;
-  updateSetting(key: string, value: string): void;
+  getAllSettings(): Promise<string>;
+  updateSetting(key: string, value: string): Promise<void>;
 
   // Transcriptions
-  getTranscriptions(cursor: string | null, query: string | null, limit: number | null): string;
-  deleteTranscription(id: string): void;
-  deleteAllTranscriptions(): void;
+  getTranscriptions(cursor: string | null, query: string | null, limit: number | null): Promise<string>;
+  deleteTranscription(id: string): Promise<void>;
+  deleteAllTranscriptions(): Promise<void>;
 
   // Models
-  listAvailableModels(): string;
+  listAvailableModels(): Promise<string>;
 
   // Statistics
-  getStatistics(days: number | null): string;
+  getStatistics(days: number | null): Promise<string>;
 
   // Vocabulary
-  getVocabulary(): string;
-  addVocabulary(word: string): string;
-  deleteVocabulary(id: string): void;
+  getVocabulary(): Promise<string>;
+  addVocabulary(word: string): Promise<string>;
+  deleteVocabulary(id: string): Promise<void>;
 
   // Replacements
-  getReplacements(): string;
-  setReplacement(original: string, replacement: string): string;
-  deleteReplacement(id: string): void;
+  getReplacements(): Promise<string>;
+  setReplacement(original: string, replacement: string): Promise<string>;
+  deleteReplacement(id: string): Promise<void>;
 
   // Prompts
-  listPrompts(): string;
-  addPrompt(name: string, systemMsg: string, userMsg: string): string;
-  updatePrompt(id: string, name: string, systemMsg: string, userMsg: string): void;
-  deletePrompt(id: string): void;
+  listPrompts(): Promise<string>;
+  addPrompt(name: string, systemMsg: string, userMsg: string): Promise<string>;
+  updatePrompt(id: string, name: string, systemMsg: string, userMsg: string): Promise<void>;
+  deletePrompt(id: string): Promise<void>;
 
   // CSV Import/Export
-  importDictionaryCsv(path: string, dictType: string): void;
-  exportDictionaryCsv(path: string, dictType: string): void;
+  importDictionaryCsv(path: string, dictType: string): Promise<void>;
+  exportDictionaryCsv(path: string, dictType: string): Promise<void>;
 
   // Keychain
-  storeApiKey(provider: string, key: string): void;
-  getApiKey(provider: string): string | null;
-  deleteApiKey(provider: string): void;
+  storeApiKey(provider: string, key: string): Promise<void>;
+  getApiKey(provider: string): Promise<string | null>;
+  deleteApiKey(provider: string): Promise<void>;
 
-  // Daemon
+  // Daemon (sync reads, async operations)
   daemonStatus(): { running: boolean; loadedModel: string | null };
   daemonStart(): Promise<void>;
   daemonStop(): void;
   daemonLoadModel(modelRepo: string): Promise<void>;
   daemonUnloadModel(): Promise<void>;
-  daemonCheckDeps(): boolean;
+  daemonCheckDeps(): Promise<boolean>;
 
-  // Recording pipeline
+  // Recording pipeline (startRecording stays sync — creates handle on napi thread)
   startRecording(deviceId: number | null): string;
   stopRecording(): Promise<string>;
   cancelRecording(): void;
   getPipelineState(): string;
 
   // Recording playback
-  getRecording(recordingPath: string): string;
+  getRecording(recordingPath: string): Promise<string>;
 
   // Model download/delete
   downloadModel(modelId: string): Promise<void>;
-  deleteModel(modelId: string): void;
+  deleteModel(modelId: string): Promise<void>;
 
   // Sprites
-  listSprites(): string;
-  getSpriteImage(dirId: string, fileName: string): string;
-  importSpriteFolder(path: string): string;
-  importSpriteZip(zipPath: string): string;
-  deleteSprite(dirId: string): void;
+  listSprites(): Promise<string>;
+  getSpriteImage(dirId: string, fileName: string): Promise<string>;
+  importSpriteFolder(path: string): Promise<string>;
+  importSpriteZip(zipPath: string): Promise<string>;
+  deleteSprite(dirId: string): Promise<void>;
 
   // Legacy import
-  detectVoiceinkLegacyPath(): string | null;
-  importVoiceinkLegacy(storePath: string): string;
+  detectVoiceinkLegacyPath(): Promise<string | null>;
+  importVoiceinkLegacy(storePath: string): Promise<string>;
 };
 
 // ---------------------------------------------------------------------------
