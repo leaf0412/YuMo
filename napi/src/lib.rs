@@ -182,6 +182,22 @@ pub fn get_vocabulary() -> Result<String> {
 }
 
 #[napi]
+pub fn add_vocabulary(word: String) -> Result<String> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    db::add_vocabulary(&conn, &word)
+        .map_err(|e| Error::from_reason(format!("add_vocabulary: {e}")))
+}
+
+#[napi]
+pub fn delete_vocabulary(id: String) -> Result<()> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    db::delete_vocabulary(&conn, &id)
+        .map_err(|e| Error::from_reason(format!("delete_vocabulary: {e}")))
+}
+
+#[napi]
 pub fn get_replacements() -> Result<String> {
     let app = ctx()?;
     let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
@@ -189,6 +205,121 @@ pub fn get_replacements() -> Result<String> {
         .map_err(|e| Error::from_reason(format!("get_replacements: {e}")))?;
     serde_json::to_string(&items)
         .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+}
+
+#[napi]
+pub fn set_replacement(original: String, replacement: String) -> Result<String> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    db::set_replacement(&conn, &original, &replacement)
+        .map_err(|e| Error::from_reason(format!("set_replacement: {e}")))
+}
+
+#[napi]
+pub fn delete_replacement(id: String) -> Result<()> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    db::delete_replacement(&conn, &id)
+        .map_err(|e| Error::from_reason(format!("delete_replacement: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Transcription CRUD
+// ---------------------------------------------------------------------------
+
+#[napi]
+pub fn delete_transcription(id: String) -> Result<()> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    db::delete_transcription(&conn, &id)
+        .map_err(|e| Error::from_reason(format!("delete_transcription: {e}")))
+}
+
+#[napi]
+pub fn delete_all_transcriptions() -> Result<()> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    db::delete_all_transcriptions(&conn)
+        .map_err(|e| Error::from_reason(format!("delete_all_transcriptions: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Prompts
+// ---------------------------------------------------------------------------
+
+#[napi]
+pub fn list_prompts() -> Result<String> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    let prompts = db::list_prompts(&conn)
+        .map_err(|e| Error::from_reason(format!("list_prompts: {e}")))?;
+    serde_json::to_string(&prompts)
+        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+}
+
+#[napi]
+pub fn add_prompt(
+    name: String,
+    system_msg: String,
+    user_msg: String,
+) -> Result<String> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    db::add_prompt(&conn, &name, &system_msg, &user_msg, false)
+        .map_err(|e| Error::from_reason(format!("add_prompt: {e}")))
+}
+
+#[napi]
+pub fn update_prompt(
+    id: String,
+    name: String,
+    system_msg: String,
+    user_msg: String,
+) -> Result<()> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    db::update_prompt(&conn, &id, &name, &system_msg, &user_msg)
+        .map_err(|e| Error::from_reason(format!("update_prompt: {e}")))
+}
+
+#[napi]
+pub fn delete_prompt(id: String) -> Result<()> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    db::delete_prompt(&conn, &id)
+        .map_err(|e| Error::from_reason(format!("delete_prompt: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// CSV Import / Export
+// ---------------------------------------------------------------------------
+
+#[napi]
+pub fn import_dictionary_csv(path: String, dict_type: String) -> Result<()> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    let p = std::path::Path::new(&path);
+    match dict_type.as_str() {
+        "vocabulary" => db::import_vocabulary_csv(&conn, p)
+            .map_err(|e| Error::from_reason(format!("import_vocabulary_csv: {e}"))),
+        "replacements" => db::import_replacements_csv(&conn, p)
+            .map_err(|e| Error::from_reason(format!("import_replacements_csv: {e}"))),
+        _ => Err(Error::from_reason(format!("Unknown dict type: {dict_type}"))),
+    }
+}
+
+#[napi]
+pub fn export_dictionary_csv(path: String, dict_type: String) -> Result<()> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    let p = std::path::Path::new(&path);
+    match dict_type.as_str() {
+        "vocabulary" => db::export_vocabulary_csv(&conn, p)
+            .map_err(|e| Error::from_reason(format!("export_vocabulary_csv: {e}"))),
+        "replacements" => db::export_replacements_csv(&conn, p)
+            .map_err(|e| Error::from_reason(format!("export_replacements_csv: {e}"))),
+        _ => Err(Error::from_reason(format!("Unknown dict type: {dict_type}"))),
+    }
 }
 
 // ---------------------------------------------------------------------------
