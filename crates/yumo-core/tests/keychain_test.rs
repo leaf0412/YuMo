@@ -1,4 +1,4 @@
-use yumo_lib::keychain;
+use yumo_core::keychain;
 
 #[test]
 fn test_store_and_retrieve_api_key() {

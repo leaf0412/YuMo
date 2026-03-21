@@ -572,6 +572,23 @@ pub fn read_recording_as_data_uri(path: &std::path::Path) -> Result<String, AppE
     }
     let data = std::fs::read(path)?;
     info!("[recorder] read_recording_as_data_uri size={} bytes", data.len());
-    let b64 = crate::commands::base64_encode(&data);
+    let b64 = base64_encode(&data);
     Ok(format!("data:audio/wav;base64,{}", b64))
+}
+
+/// Minimal base64 encoder (no external dependency).
+pub fn base64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((n >> 18) & 0x3F) as usize] as char);
+        out.push(TABLE[((n >> 12) & 0x3F) as usize] as char);
+        out.push(if chunk.len() > 1 { TABLE[((n >> 6) & 0x3F) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TABLE[(n & 0x3F) as usize] as char } else { '=' });
+    }
+    out
 }

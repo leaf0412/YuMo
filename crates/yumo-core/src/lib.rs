@@ -12,3 +12,14 @@ pub mod downloader;
 pub mod vad;
 pub mod db;
 pub mod denoiser;
+
+#[cfg(target_os = "macos")]
+pub mod recorder;
+#[cfg(target_os = "macos")]
+pub mod audio_ctrl;
+#[cfg(target_os = "macos")]
+pub mod paster;
+#[cfg(target_os = "macos")]
+pub mod permissions;
+#[cfg(target_os = "macos")]
+pub mod keychain;

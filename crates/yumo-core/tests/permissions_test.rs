@@ -1,4 +1,4 @@
-use yumo_lib::permissions;
+use yumo_core::permissions;
 
 #[test]
 fn test_check_permissions_returns_status() {

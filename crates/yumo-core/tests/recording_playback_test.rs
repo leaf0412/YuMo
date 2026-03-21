@@ -1,5 +1,5 @@
-use yumo_lib::db;
-use yumo_lib::recorder::AudioData;
+use yumo_core::db;
+use yumo_core::recorder::AudioData;
 
 #[test]
 fn test_transcription_stores_recording_path() {
@@ -34,16 +34,16 @@ fn test_get_recording_audio_returns_base64() {
         sample_rate: 16000,
         channels: 1,
     };
-    let path = yumo_lib::recorder::save_recording(&audio, tmp.path()).unwrap();
+    let path = yumo_core::recorder::save_recording(&audio, tmp.path()).unwrap();
 
-    let data_uri = yumo_lib::recorder::read_recording_as_data_uri(&path).unwrap();
+    let data_uri = yumo_core::recorder::read_recording_as_data_uri(&path).unwrap();
     assert!(data_uri.starts_with("data:audio/wav;base64,"));
     assert!(data_uri.len() > 100);
 }
 
 #[test]
 fn test_get_recording_audio_not_found() {
-    let result = yumo_lib::recorder::read_recording_as_data_uri(
+    let result = yumo_core::recorder::read_recording_as_data_uri(
         std::path::Path::new("/nonexistent/file.wav")
     );
     assert!(result.is_err());

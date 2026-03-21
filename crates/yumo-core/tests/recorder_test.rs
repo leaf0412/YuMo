@@ -1,4 +1,4 @@
-use yumo_lib::recorder;
+use yumo_core::recorder;
 
 #[test]
 fn test_list_audio_devices() {
