@@ -7,6 +7,7 @@ import { registerDictionaryHandlers } from "./dictionary";
 import { registerKeychainHandlers } from "./keychain";
 import { registerSystemHandlers } from "./system";
 import { registerSpritesHandlers } from "./sprites";
+import { registerWindowHandlers } from "./windows";
 
 export function registerAllHandlers(): void {
   registerSettingsHandlers();
@@ -18,4 +19,5 @@ export function registerAllHandlers(): void {
   registerKeychainHandlers();
   registerSystemHandlers();
   registerSpritesHandlers();
+  registerWindowHandlers();
 }
