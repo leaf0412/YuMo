@@ -2,7 +2,6 @@ pub use yumo_core::cloud;
 pub mod commands;
 pub use yumo_core::daemon;
 pub use yumo_core::db;
-pub use yumo_core::denoiser;
 pub use yumo_core::downloader;
 pub use yumo_core::enhancer;
 pub use yumo_core::error;
@@ -126,28 +125,6 @@ pub fn run() {
 
                 sync_file("mlx_funasr_daemon.py", false);
 
-                // Sync DTLN denoiser models to ~/.voiceink/denoiser/
-                let denoiser_dir = &app_state.paths.denoiser_dir;
-                std::fs::create_dir_all(denoiser_dir).expect("Cannot create denoiser dir");
-                for model_name in &["dtln_1.onnx", "dtln_2.onnx"] {
-                    let dest = denoiser_dir.join(model_name);
-                    if !dest.exists() {
-                        let src = res_dir.as_ref()
-                            .map(|d| d.join(model_name))
-                            .filter(|p| p.exists())
-                            .unwrap_or_else(|| dev_dir.join(model_name));
-
-                        if !src.exists() {
-                            info!("[app] [sync_resource] {} not found at {:?}", model_name, src);
-                            continue;
-                        }
-
-                        match std::fs::copy(&src, &dest) {
-                            Ok(bytes) => info!("[app] [sync_resource] {} installed ({} bytes)", model_name, bytes),
-                            Err(e) => log::error!("[app] [sync_resource] {} copy failed: {}", model_name, e),
-                        }
-                    }
-                }
             }
 
             tray::setup_tray(app.handle())?;

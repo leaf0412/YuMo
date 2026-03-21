@@ -49,7 +49,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources/mlx_funasr_daemon.py", "resources/dtln_1.onnx", "resources/dtln_2.onnx"],
+    "resources": ["resources/mlx_funasr_daemon.py"],
     "macOS": {
       "entitlements": "entitlements.plist",
       "signingIdentity": "-"

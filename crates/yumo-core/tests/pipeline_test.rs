@@ -8,6 +8,9 @@ fn test_pipeline_state_transitions() {
     assert_eq!(state, pipeline::PipelineState::Recording);
 
     state = pipeline::transition(state, pipeline::Action::StopRecording);
+    assert_eq!(state, pipeline::PipelineState::Processing);
+
+    state = pipeline::transition(state, pipeline::Action::ProcessingComplete);
     assert_eq!(state, pipeline::PipelineState::Transcribing);
 
     state = pipeline::transition(state, pipeline::Action::TranscriptionComplete);

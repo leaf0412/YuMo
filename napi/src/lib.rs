@@ -30,8 +30,6 @@ pub fn init(data_dir: String) -> Result<()> {
     paths.models_dir = std::path::PathBuf::from(&data_dir).join("models");
     paths.sprites_dir = std::path::PathBuf::from(&data_dir).join("sprites");
     paths.recordings_dir = std::path::PathBuf::from(&data_dir).join("recordings");
-    paths.denoiser_dir = std::path::PathBuf::from(&data_dir).join("denoiser");
-
     // Ensure data directory exists
     std::fs::create_dir_all(&data_dir)
         .map_err(|e| Error::from_reason(format!("Failed to create data dir: {e}")))?;

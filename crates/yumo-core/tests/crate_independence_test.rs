@@ -34,12 +34,15 @@ fn test_core_types_standalone() {
 
 #[test]
 fn test_pipeline_state_transitions() {
-    // Full pipeline cycle: Idle -> Recording -> Transcribing -> Pasting -> Idle
+    // Full pipeline cycle: Idle -> Recording -> Processing -> Transcribing -> Pasting -> Idle
     let s = PipelineState::Idle;
     let s = pipeline::transition(s, Action::StartRecording);
     assert_eq!(s, PipelineState::Recording);
 
     let s = pipeline::transition(s, Action::StopRecording);
+    assert_eq!(s, PipelineState::Processing);
+
+    let s = pipeline::transition(s, Action::ProcessingComplete);
     assert_eq!(s, PipelineState::Transcribing);
 
     let s = pipeline::transition(s, Action::TranscriptionComplete);
@@ -53,6 +56,7 @@ fn test_pipeline_state_transitions() {
 fn test_pipeline_cancel_from_any_state() {
     for state in [
         PipelineState::Recording,
+        PipelineState::Processing,
         PipelineState::Transcribing,
         PipelineState::Enhancing,
         PipelineState::Pasting,

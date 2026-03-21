@@ -2,7 +2,6 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use crate::denoiser::DtlnDenoiser;
 use crate::pipeline::PipelineState;
 use crate::platform::RecordingHandle;
 
@@ -17,8 +16,6 @@ pub struct AppPaths {
     pub sprites_dir: PathBuf,
     /// Saved recording WAV files
     pub recordings_dir: PathBuf,
-    /// DTLN denoiser ONNX model files
-    pub denoiser_dir: PathBuf,
 }
 
 impl AppPaths {
@@ -50,13 +47,7 @@ impl AppPaths {
             .map(PathBuf::from)
             .unwrap_or_else(|| data_dir.join("recordings"));
 
-        let denoiser_dir = settings
-            .get("path_denoiser")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| data_dir.join("denoiser"));
-
-        Self { data_dir, models_dir, sprites_dir, recordings_dir, denoiser_dir }
+        Self { data_dir, models_dir, sprites_dir, recordings_dir }
     }
 
     /// Defaults (no DB needed, for bootstrap before DB exists).
@@ -67,7 +58,6 @@ impl AppPaths {
             models_dir: data_dir.join("models"),
             sprites_dir: data_dir.join("sprites"),
             recordings_dir: data_dir.join("recordings"),
-            denoiser_dir: data_dir.join("denoiser"),
             data_dir,
         }
     }
@@ -82,7 +72,6 @@ pub struct AppContext {
     pub pipeline_state: Mutex<PipelineState>,
     pub recording_handle: Mutex<Option<RecordingHandle>>,
     pub paths: AppPaths,
-    pub denoiser: Mutex<Option<DtlnDenoiser>>,
 }
 
 impl AppContext {
@@ -92,7 +81,6 @@ impl AppContext {
             pipeline_state: Mutex::new(PipelineState::Idle),
             recording_handle: Mutex::new(None),
             paths,
-            denoiser: Mutex::new(None),
         }
     }
 }

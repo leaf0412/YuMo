@@ -35,17 +35,11 @@ fn test_app_context_construction() {
     assert!(handle.is_none());
     drop(handle);
 
-    // Verify denoiser starts as None
-    let denoiser = ctx.denoiser.lock().unwrap();
-    assert!(denoiser.is_none());
-    drop(denoiser);
-
     // Verify paths are preserved
     assert_eq!(ctx.paths.data_dir, expected_paths.data_dir);
     assert_eq!(ctx.paths.models_dir, expected_paths.models_dir);
     assert_eq!(ctx.paths.sprites_dir, expected_paths.sprites_dir);
     assert_eq!(ctx.paths.recordings_dir, expected_paths.recordings_dir);
-    assert_eq!(ctx.paths.denoiser_dir, expected_paths.denoiser_dir);
 }
 
 #[test]
@@ -109,8 +103,4 @@ fn test_app_paths_from_settings_custom_data_dir() {
         .recordings_dir
         .to_string_lossy()
         .contains("/tmp/yumo-test/recordings"));
-    assert!(paths
-        .denoiser_dir
-        .to_string_lossy()
-        .contains("/tmp/yumo-test/denoiser"));
 }

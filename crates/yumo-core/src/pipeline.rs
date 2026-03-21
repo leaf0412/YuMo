@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub enum PipelineState {
     Idle,
     Recording,
+    Processing,
     Transcribing,
     Enhancing,
     Pasting,
@@ -14,6 +15,7 @@ pub enum Action {
     StartRecording,
     StopRecording,
     Cancel,
+    ProcessingComplete,
     TranscriptionComplete,
     EnhancementComplete,
     PasteComplete,
@@ -34,7 +36,8 @@ pub fn transition(state: PipelineState, action: Action) -> PipelineState {
 pub fn transition_with_config(state: PipelineState, action: Action, config: &PipelineConfig) -> PipelineState {
     match (state, action) {
         (PipelineState::Idle, Action::StartRecording) => PipelineState::Recording,
-        (PipelineState::Recording, Action::StopRecording) => PipelineState::Transcribing,
+        (PipelineState::Recording, Action::StopRecording) => PipelineState::Processing,
+        (PipelineState::Processing, Action::ProcessingComplete) => PipelineState::Transcribing,
         (PipelineState::Recording, Action::Cancel) => PipelineState::Idle,
         (PipelineState::Transcribing, Action::TranscriptionComplete) => {
             if config.enhancement_enabled {

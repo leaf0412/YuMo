@@ -11,8 +11,7 @@ use crate::hotkey;
 use crate::pipeline::PipelineState;
 use crate::state::AppContext;
 use crate::daemon::DaemonManager;
-use crate::denoiser::Denoiser;
-use crate::{audio_io, denoiser, platform, text_processor, transcriber};
+use crate::{audio_io, platform, text_processor, transcriber};
 use crate::platform::{audio_ctrl, keychain, paster, permissions};
 
 // ---------------------------------------------------------------------------
@@ -163,7 +162,7 @@ pub async fn stop_recording(
             .pipeline_state
             .lock()
             .map_err(|e| AppError::Recording(e.to_string()))?;
-        *pipeline = PipelineState::Transcribing;
+        *pipeline = PipelineState::Processing;
     }
     let _ = app.emit(
         "recording-state",
@@ -179,60 +178,6 @@ pub async fn stop_recording(
         error!("[pipeline] recorder::stop_recording failed: {}", e);
         AppError::Recording(e.to_string())
     })?;
-
-    // 2.1 Apply noise reduction if enabled
-    let noise_reduction_enabled = {
-        let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
-        db::get_all_settings(&conn)?
-            .get("noise_reduction")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-    };
-
-    let audio_samples = audio_data.pcm_samples.len();
-    let audio_secs = audio_samples as f64 / audio_data.sample_rate.max(1) as f64;
-    let audio_data = if noise_reduction_enabled && audio_secs >= 1.0 {
-        info!("[pipeline] noise reduction enabled, applying DTLN denoiser...");
-        let denoise_start = std::time::Instant::now();
-
-        // Lazily initialize and cache the denoiser
-        let mut denoiser_guard = state.denoiser.lock()
-            .map_err(|e| AppError::Recording(format!("denoiser lock: {}", e)))?;
-        if denoiser_guard.is_none() {
-            let model_dir = state.paths.denoiser_dir.to_string_lossy().to_string();
-            match denoiser::DtlnDenoiser::new(&model_dir) {
-                Ok(d) => { *denoiser_guard = Some(d); }
-                Err(e) => {
-                    log::warn!("[pipeline] denoiser init failed: {}, skipping", e);
-                }
-            }
-        }
-
-        match denoiser_guard.as_ref() {
-            Some(d) => {
-                match d.process(&audio_data.pcm_samples, audio_data.sample_rate) {
-                    Ok(denoised) => {
-                        info!(
-                            "[pipeline] noise reduction complete in {:.1}ms",
-                            denoise_start.elapsed().as_secs_f64() * 1000.0
-                        );
-                        platform::AudioData {
-                            pcm_samples: denoised,
-                            sample_rate: audio_data.sample_rate,
-                            channels: audio_data.channels,
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!("[pipeline] noise reduction failed: {}, using original audio", e);
-                        audio_data
-                    }
-                }
-            }
-            None => audio_data,
-        }
-    } else {
-        audio_data
-    };
 
     let rms = if audio_data.pcm_samples.is_empty() {
         0.0
@@ -640,6 +585,7 @@ pub fn get_pipeline_state(state: State<AppContext>) -> Result<serde_json::Value,
     let s = match *pipeline {
         PipelineState::Idle => "idle",
         PipelineState::Recording => "recording",
+        PipelineState::Processing => "processing",
         PipelineState::Transcribing => "transcribing",
         PipelineState::Enhancing => "enhancing",
         PipelineState::Pasting => "pasting",

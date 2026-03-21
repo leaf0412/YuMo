@@ -8,7 +8,6 @@ use yumo_core::cloud;
 use yumo_core::daemon;
 use yumo_core::daemon_client;
 use yumo_core::db;
-use yumo_core::denoiser;
 use yumo_core::downloader;
 use yumo_core::enhancer;
 use yumo_core::error;
@@ -65,10 +64,6 @@ fn test_all_modules_accessible() {
     // db
     let _ = std::mem::size_of::<db::TranscriptionRecord>();
     let _ = std::mem::size_of::<db::Statistics>();
-
-    // denoiser
-    let _ = std::mem::size_of::<denoiser::PassthroughDenoiser>();
-    let _ = std::mem::size_of::<denoiser::DenoiserConfig>();
 
     // state
     let _ = state::AppPaths::defaults();
