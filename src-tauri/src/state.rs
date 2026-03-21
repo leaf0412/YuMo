@@ -16,6 +16,8 @@ pub struct AppPaths {
     pub sprites_dir: PathBuf,
     /// Saved recording WAV files
     pub recordings_dir: PathBuf,
+    /// DTLN denoiser ONNX model files
+    pub denoiser_dir: PathBuf,
 }
 
 impl AppPaths {
@@ -47,7 +49,13 @@ impl AppPaths {
             .map(PathBuf::from)
             .unwrap_or_else(|| data_dir.join("recordings"));
 
-        Self { data_dir, models_dir, sprites_dir, recordings_dir }
+        let denoiser_dir = settings
+            .get("path_denoiser")
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| data_dir.join("denoiser"));
+
+        Self { data_dir, models_dir, sprites_dir, recordings_dir, denoiser_dir }
     }
 
     /// Defaults (no DB needed, for bootstrap before DB exists).
@@ -58,6 +66,7 @@ impl AppPaths {
             models_dir: data_dir.join("models"),
             sprites_dir: data_dir.join("sprites"),
             recordings_dir: data_dir.join("recordings"),
+            denoiser_dir: data_dir.join("denoiser"),
             data_dir,
         }
     }
