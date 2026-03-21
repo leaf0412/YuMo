@@ -66,7 +66,8 @@ function getAddon(): NapiAddon {
   if (!addon) {
     addon = loadAddon();
     // Initialize with default data directory
-    const dataDir = join(app.getPath("userData"), "yumo-data");
+    // Use the same data directory as Tauri version (~/.voiceink)
+    const dataDir = join(app.getPath("home"), ".voiceink");
     addon.init(dataDir);
   }
   return addon;

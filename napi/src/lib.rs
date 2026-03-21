@@ -35,7 +35,7 @@ pub fn init(data_dir: String) -> Result<()> {
     std::fs::create_dir_all(&data_dir)
         .map_err(|e| Error::from_reason(format!("Failed to create data dir: {e}")))?;
 
-    let db_path = std::path::PathBuf::from(&data_dir).join("yumo.db");
+    let db_path = std::path::PathBuf::from(&data_dir).join("data.db");
     let conn = db::init_database(&db_path)
         .map_err(|e| Error::from_reason(format!("Failed to init database: {e}")))?;
 
