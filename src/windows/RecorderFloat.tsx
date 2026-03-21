@@ -80,21 +80,17 @@ export default function RecorderFloat() {
   // Listen for ESC events to show hint in recorder window
   useEffect(() => {
     let lastEsc = 0;
-    const unlisten = listen('escape-pressed', () => {
-      invoke('frontend_log', { level: 'info', message: '[recorder] escape-pressed received' });
-      const now = Date.now();
-      if (now - lastEsc < 500) {
-        setEscHintType('cancelled');
-        lastEsc = 0;
-      } else {
-        lastEsc = now;
-        setEscHintType('pressAgain');
+    // Listen for escape hints broadcast from main window (App.tsx)
+    const cleanup = onBroadcast('escape-hint', (payload) => {
+      const hint = payload as EscHintType;
+      setEscHintType(hint);
+      if (hint === 'pressAgain') {
         if (escHintTimer.current) clearTimeout(escHintTimer.current);
         escHintTimer.current = window.setTimeout(() => setEscHintType(null), 2000);
       }
     });
     return () => {
-      unlisten.then(fn => fn());
+      cleanup();
       if (escHintTimer.current) clearTimeout(escHintTimer.current);
     };
   }, []);

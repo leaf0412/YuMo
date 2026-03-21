@@ -168,10 +168,12 @@ export default function App() {
         logEvent('App', 'hotkey_cancel', { current_state: pipelineRef.current });
         invoke('cancel_recording').catch(() => {});
         import('antd').then(({ message }) => message.info(i18n.t('app.recordingCancelled')));
+        broadcast('escape-hint', 'cancelled');
         lastEsc = 0;
       } else {
         lastEsc = now;
         import('antd').then(({ message }) => message.info(i18n.t('app.pressEscAgain')));
+        broadcast('escape-hint', 'pressAgain');
       }
     });
 
@@ -183,10 +185,12 @@ export default function App() {
           logEvent('App', 'hotkey_cancel', { current_state: pipelineRef.current });
           invoke('cancel_recording').catch(() => {});
           import('antd').then(({ message }) => message.info(i18n.t('app.recordingCancelled')));
+          broadcast('escape-hint', 'cancelled');
           lastEsc = 0;
         } else {
           lastEsc = now;
           import('antd').then(({ message }) => message.info(i18n.t('app.pressEscAgain')));
+          broadcast('escape-hint', 'pressAgain');
         }
       }
     };
