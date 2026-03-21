@@ -8,6 +8,7 @@
 import { BrowserWindow, screen } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getAddon } from "./addon";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,16 +73,19 @@ export function createRecorderWindow(): BrowserWindow {
     return recorderWindow;
   }
 
-  // Center horizontally, just below menu bar
+  // Restore saved position from DB, or center below menu bar
+  const saved = loadWindowPosition("recorder");
   const display = screen.getPrimaryDisplay();
   const sw = display.workAreaSize.width;
-  const x = Math.round((sw - 200) / 2);
-  const y = 30;
+  const x = saved ? Math.round(saved.x) : Math.round((sw - 200) / 2);
+  const y = saved ? Math.round(saved.y) : 30;
+  const width = saved ? Math.round(saved.width) : 200;
+  const height = saved ? Math.round(saved.height) : 220;
 
   recorderWindow = new BrowserWindow({
     title: "YuMo Recorder",
-    width: 200,
-    height: 220,
+    width,
+    height,
     x,
     y,
     frame: false,
@@ -92,7 +96,7 @@ export function createRecorderWindow(): BrowserWindow {
     show: false,          // hidden by default, shown during recording
     skipTaskbar: true,
     hasShadow: false,
-    focusable: false,     // don't steal focus from the text input
+    // Draggable via -webkit-app-region: drag in the HTML/CSS
     webPreferences: {
       preload: join(__dirname, "../preload/preload.cjs"),
       contextIsolation: true,
@@ -106,6 +110,15 @@ export function createRecorderWindow(): BrowserWindow {
   } else {
     recorderWindow.loadFile(join(distPath(), "recorder.html"));
   }
+
+  // Save position when window is moved (dragged)
+  recorderWindow.on("moved", () => {
+    if (recorderWindow && !recorderWindow.isDestroyed()) {
+      const [rx, ry] = recorderWindow.getPosition();
+      const [rw, rh] = recorderWindow.getSize();
+      saveWindowPosition("recorder", { x: rx, y: ry, width: rw, height: rh });
+    }
+  });
 
   recorderWindow.on("closed", () => {
     recorderWindow = null;
@@ -140,4 +153,43 @@ export function getMainWindow(): BrowserWindow | null {
 
 export function getRecorderWindow(): BrowserWindow | null {
   return recorderWindow && !recorderWindow.isDestroyed() ? recorderWindow : null;
+}
+
+// ---------------------------------------------------------------------------
+// Window position persistence (mirrors Tauri WindowManager)
+// ---------------------------------------------------------------------------
+
+type WindowPos = { x: number; y: number; width: number; height: number };
+
+function loadWindowPosition(label: string): WindowPos | null {
+  try {
+    const settingsJson = getAddon().getAllSettings();
+    const settings = JSON.parse(settingsJson);
+    const layoutStr = settings.window_layout;
+    if (typeof layoutStr !== "string") return null;
+    const layout = JSON.parse(layoutStr);
+    const pos = layout?.positions?.[label];
+    if (pos && typeof pos.x === "number") {
+      console.log(`[windows] restored position for '${label}': (${pos.x}, ${pos.y})`);
+      return pos;
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return null;
+}
+
+function saveWindowPosition(label: string, pos: WindowPos): void {
+  try {
+    const settingsJson = getAddon().getAllSettings();
+    const settings = JSON.parse(settingsJson);
+    const layoutStr = settings.window_layout;
+    const layout = typeof layoutStr === "string" ? JSON.parse(layoutStr) : { positions: {} };
+    if (!layout.positions) layout.positions = {};
+    layout.positions[label] = pos;
+    getAddon().updateSetting("window_layout", JSON.stringify(JSON.stringify(layout)));
+    console.log(`[windows] saved position for '${label}': (${pos.x}, ${pos.y})`);
+  } catch (err) {
+    console.error(`[windows] failed to save position for '${label}':`, err);
+  }
 }

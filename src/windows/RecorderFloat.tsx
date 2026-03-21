@@ -176,6 +176,8 @@ export default function RecorderFloat() {
         height: '100%',
         userSelect: 'none',
         cursor: 'grab',
+        // @ts-expect-error Electron uses this for window dragging
+        WebkitAppRegion: 'drag',
       }}
     >
       {hasSprite ? (
@@ -236,6 +238,8 @@ export default function RecorderFloat() {
           style={{
             cursor: 'pointer',
             pointerEvents: 'auto',
+            // @ts-expect-error Electron: make button clickable (not draggable)
+            WebkitAppRegion: 'no-drag',
             marginLeft: 4,
             opacity: 0.7,
             fontSize: 14,
