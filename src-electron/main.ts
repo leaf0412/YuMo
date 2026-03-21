@@ -1,7 +1,7 @@
 import { app, BrowserWindow } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { registerIpcHandlers } from "./ipc-handlers";
+import { registerAllHandlers } from "./ipc/index";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -35,7 +35,7 @@ function createWindow(): void {
 // -------------------------------------------------------------------------
 
 app.whenReady().then(() => {
-  registerIpcHandlers();
+  registerAllHandlers();
   createWindow();
 
   app.on("activate", () => {
