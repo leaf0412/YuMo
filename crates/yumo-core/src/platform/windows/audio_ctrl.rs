@@ -6,6 +6,7 @@ use log::{info, warn};
 // WindowsAudioCtrl — PlatformAudioCtrl implementation
 // ---------------------------------------------------------------------------
 //
+// TODO(windows): implement via IAudioEndpointVolume COM interface
 // Windows mute detection and control require the COM-based
 // IAudioEndpointVolume interface, which is complex to set up without a
 // dedicated crate.  For now we return safe defaults and log a warning so

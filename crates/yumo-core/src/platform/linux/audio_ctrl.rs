@@ -37,11 +37,16 @@ impl PlatformAudioCtrl for LinuxAudioCtrl {
     fn set_mute(mute: bool) -> AppResult<()> {
         let val = if mute { "1" } else { "0" };
         log::info!("[audio_ctrl] set_mute mute={} (pactl)", mute);
-        Command::new("pactl")
+        match Command::new("pactl")
             .args(["set-sink-mute", "@DEFAULT_SINK@", val])
             .status()
-            .map_err(|e| AppError::Io(e.to_string()))?;
-        Ok(())
+        {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                log::warn!("[audio_ctrl] pactl unavailable, cannot set mute: {}", e);
+                Ok(())
+            }
+        }
     }
 }
 

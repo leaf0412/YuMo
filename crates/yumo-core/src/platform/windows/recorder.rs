@@ -14,8 +14,13 @@ use std::sync::{Arc, Mutex};
 pub struct RecordingHandle {
     stream: cpal::Stream,
     buffer: Arc<Mutex<Vec<f32>>>,
+    native_sample_rate: u32,
+    native_channels: u16,
 }
 
+// SAFETY: RecordingHandle is created on one thread and moved (via stop/cancel) to exactly
+// one consumer thread. The Stream is never concurrently accessed — it is moved whole.
+// Cross-thread buffer access is protected by Arc<Mutex<Vec<f32>>>.
 unsafe impl Send for RecordingHandle {}
 
 // ---------------------------------------------------------------------------
@@ -134,11 +139,48 @@ fn start_recording_impl(
     let device_name = device.name().unwrap_or_else(|_| "<unknown>".to_string());
     info!("[recorder] using device: {}", device_name);
 
-    // Request 16 kHz mono f32 — the preferred format for Whisper
-    let config = cpal::StreamConfig {
-        channels: 1,
-        sample_rate: cpal::SampleRate(16000),
-        buffer_size: cpal::BufferSize::Default,
+    // Try 16 kHz mono first; fall back to device default if unsupported
+    let (config, native_sr, native_ch) = match device.supported_input_configs() {
+        Ok(mut configs) => {
+            // Check if 16kHz mono is directly supported
+            let target_sr = cpal::SampleRate(16000);
+            let has_16k_mono = configs.any(|c| {
+                c.channels() == 1
+                    && c.min_sample_rate() <= target_sr
+                    && c.max_sample_rate() >= target_sr
+            });
+
+            if has_16k_mono {
+                info!("[recorder] device supports 16kHz mono natively");
+                (cpal::StreamConfig {
+                    channels: 1,
+                    sample_rate: target_sr,
+                    buffer_size: cpal::BufferSize::Default,
+                }, 16000u32, 1u16)
+            } else {
+                // Use device default config; we'll resample later
+                let default_config = device.default_input_config().map_err(|e| {
+                    AppError::Recording(format!("No supported input config: {}", e))
+                })?;
+                let sr = default_config.sample_rate().0;
+                let ch = default_config.channels();
+                info!("[recorder] 16kHz mono unsupported, using device default: {}Hz {}ch", sr, ch);
+                (cpal::StreamConfig {
+                    channels: ch,
+                    sample_rate: cpal::SampleRate(sr),
+                    buffer_size: cpal::BufferSize::Default,
+                }, sr, ch)
+            }
+        }
+        Err(_) => {
+            // Fallback: try 16kHz mono anyway
+            warn!("[recorder] cannot query supported configs, trying 16kHz mono");
+            (cpal::StreamConfig {
+                channels: 1,
+                sample_rate: cpal::SampleRate(16000),
+                buffer_size: cpal::BufferSize::Default,
+            }, 16000, 1)
+        }
     };
 
     let (level_tx, level_rx): (Sender<AudioLevel>, Receiver<AudioLevel>) = mpsc::channel();
@@ -188,16 +230,18 @@ fn start_recording_impl(
         AppError::Recording(format!("Failed to start stream: {}", e))
     })?;
 
-    info!("[recorder] recording started on device={}", device_name);
-    Ok((RecordingHandle { stream, buffer }, level_rx))
+    info!("[recorder] recording started on device={} config={}Hz {}ch", device_name, native_sr, native_ch);
+    Ok((RecordingHandle { stream, buffer, native_sample_rate: native_sr, native_channels: native_ch }, level_rx))
 }
 
 fn stop_recording_impl(handle: RecordingHandle) -> AppResult<AudioData> {
     info!("[recorder] stop_recording");
+    let native_sr = handle.native_sample_rate;
+    let native_ch = handle.native_channels;
     // Dropping the stream stops it
     drop(handle.stream);
 
-    let samples = handle
+    let mut samples = handle
         .buffer
         .lock()
         .map_err(|e| {
@@ -205,6 +249,21 @@ fn stop_recording_impl(handle: RecordingHandle) -> AppResult<AudioData> {
             AppError::Recording(e.to_string())
         })?
         .clone();
+
+    // Convert to mono if multi-channel
+    if native_ch > 1 {
+        info!("[recorder] converting {}ch to mono", native_ch);
+        let ch = native_ch as usize;
+        samples = samples.chunks(ch).map(|frame| {
+            frame.iter().sum::<f32>() / ch as f32
+        }).collect();
+    }
+
+    // Resample to 16kHz if native rate differs
+    if native_sr != 16000 {
+        info!("[recorder] resampling {}Hz -> 16000Hz ({} samples)", native_sr, samples.len());
+        samples = linear_resample(&samples, native_sr, 16000);
+    }
 
     let duration_secs = samples.len() as f64 / 16000.0;
     info!(
@@ -221,8 +280,29 @@ fn stop_recording_impl(handle: RecordingHandle) -> AppResult<AudioData> {
 
 fn cancel_recording_impl(handle: RecordingHandle) -> AppResult<()> {
     warn!("[recorder] cancel_recording (discarding data)");
-    // Drop stream and discard buffer
     drop(handle.stream);
     drop(handle.buffer);
     Ok(())
+}
+
+/// Simple linear interpolation resampling.
+fn linear_resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+    if from_rate == to_rate || samples.is_empty() {
+        return samples.to_vec();
+    }
+    let ratio = from_rate as f64 / to_rate as f64;
+    let out_len = (samples.len() as f64 / ratio) as usize;
+    let mut out = Vec::with_capacity(out_len);
+    for i in 0..out_len {
+        let src_pos = i as f64 * ratio;
+        let idx = src_pos as usize;
+        let frac = src_pos - idx as f64;
+        let s = if idx + 1 < samples.len() {
+            samples[idx] * (1.0 - frac as f32) + samples[idx + 1] * frac as f32
+        } else {
+            samples[idx.min(samples.len() - 1)]
+        };
+        out.push(s);
+    }
+    out
 }
