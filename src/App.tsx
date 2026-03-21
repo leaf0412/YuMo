@@ -12,7 +12,7 @@ import {
   ThunderboltOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from './lib/events';
 import yumoIcon from './assets/yumo-icon.svg';
 import { invoke, logEvent } from './lib/logger';
 import { broadcast } from './lib/broadcast';

@@ -9,7 +9,7 @@ import {
   CheckCircleOutlined,
   LoadingOutlined,
 } from '@ant-design/icons';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../lib/events';
 import { useTranslation } from 'react-i18next';
 import { invoke, formatError, logEvent } from '../lib/logger';
 import useAppStore, { type ModelInfo } from '../stores/useAppStore';

@@ -21,11 +21,15 @@ type NapiAddon = {
   init(dataDir: string): void;
   listAudioDevices(): Array<{ id: number; name: string; isDefault: boolean }>;
   getAllSettings(): string;
-  getTranscriptions(
-    cursor: string | null,
-    query: string | null,
-    limit: number | null,
-  ): string;
+  getTranscriptions(cursor: string | null, query: string | null, limit: number | null): string;
+  listAvailableModels(): string;
+  updateSetting(key: string, value: string): void;
+  getStatistics(days: number | null): string;
+  getVocabulary(): string;
+  getReplacements(): string;
+  storeApiKey(provider: string, key: string): void;
+  getApiKey(provider: string): string | null;
+  deleteApiKey(provider: string): void;
 };
 
 function loadAddon(): NapiAddon {
@@ -103,58 +107,67 @@ export function registerIpcHandlers(): void {
     },
   );
 
-  // --- Stub handlers for commands not yet wired to napi ---
-  // These return sensible defaults so the UI can render without crashing.
+  // --- Wired to napi addon ---
+
+  ipcMain.handle("list-available-models", () => {
+    return JSON.parse(getAddon().listAvailableModels());
+  });
+
+  ipcMain.handle("update-setting", (_e, args?: { key?: string; value?: unknown }) => {
+    if (args?.key) {
+      const val = typeof args.value === 'string' ? args.value : JSON.stringify(args.value);
+      getAddon().updateSetting(args.key, val);
+    }
+  });
+
+  ipcMain.handle("get-statistics", (_e, args?: { days?: number }) => {
+    return JSON.parse(getAddon().getStatistics(args?.days ?? null));
+  });
+
+  ipcMain.handle("get-vocabulary", () => {
+    return JSON.parse(getAddon().getVocabulary());
+  });
+
+  ipcMain.handle("get-replacements", () => {
+    return JSON.parse(getAddon().getReplacements());
+  });
+
+  ipcMain.handle("store-api-key", (_e, args?: { provider?: string; key?: string }) => {
+    if (args?.provider && args?.key) {
+      getAddon().storeApiKey(args.provider, args.key);
+    }
+  });
+
+  ipcMain.handle("get-api-key", (_e, args?: { provider?: string }) => {
+    return args?.provider ? getAddon().getApiKey(args.provider) : null;
+  });
+
+  ipcMain.handle("delete-api-key", (_e, args?: { provider?: string }) => {
+    if (args?.provider) getAddon().deleteApiKey(args.provider);
+  });
+
+  // --- Platform stubs (no napi needed) ---
 
   ipcMain.handle("check-permissions", () => {
     return { microphone: true, accessibility: true };
   });
 
-  ipcMain.handle("frontend-log", () => {
-    // no-op: Electron logs go to stdout
-  });
-
-  ipcMain.handle("get-statistics", () => {
-    return {
-      total_sessions: 0,
-      total_words: 0,
-      total_duration_seconds: 0,
-      total_keystrokes_saved: 0,
-      time_saved_minutes: 0,
-      avg_wpm: 0,
-      daily_wpm: [],
-      wpm_stats: { avg: 0, max: 0, min: 0 },
-    };
-  });
-
-  ipcMain.handle("list-available-models", () => {
-    return [];
+  ipcMain.handle("frontend-log", (_e, args?: { level?: string; message?: string }) => {
+    if (args?.message) {
+      const level = args.level === 'error' ? 'error' : 'info';
+      console[level](`[frontend] ${args.message}`);
+    }
   });
 
   ipcMain.handle("daemon-status", () => {
     return { running: false, loaded_model: null };
   });
 
-  ipcMain.handle("detect-voiceink-legacy-path", () => {
-    return null;
-  });
+  ipcMain.handle("detect-voiceink-legacy-path", () => null);
 
-  ipcMain.handle("list-sprites", () => {
-    return [];
-  });
+  ipcMain.handle("list-sprites", () => []);
 
-  ipcMain.handle("get-system-locale", () => {
-    return app.getLocale();
-  });
+  ipcMain.handle("get-system-locale", () => app.getLocale());
 
-  ipcMain.handle("update-setting", () => {
-    // TODO: wire to napi
-  });
-
-  ipcMain.handle("request-permission", () => {
-    // No-op on Electron
-  });
-
-  // Catch-all for unregistered commands — prevents crashes
-  ipcMain.handle("__unhandled__", () => null);
+  ipcMain.handle("request-permission", () => {});
 }

@@ -4,6 +4,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use yumo_core::db;
 use yumo_core::state::{AppContext, AppPaths};
+use yumo_core::transcriber;
 
 // ---------------------------------------------------------------------------
 // Global AppContext (initialized once via `init`)
@@ -113,4 +114,93 @@ pub fn get_transcriptions(
     .map_err(|e| Error::from_reason(format!("get_transcriptions: {e}")))?;
     serde_json::to_string(&result)
         .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+/// List all available models (local + cloud).
+#[napi]
+pub fn list_available_models() -> Result<String> {
+    let app = ctx()?;
+    let models = transcriber::all_models(&app.paths.models_dir);
+    serde_json::to_string(&models)
+        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Settings update
+// ---------------------------------------------------------------------------
+
+/// Update a single setting.
+#[napi]
+pub fn update_setting(key: String, value: String) -> Result<()> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    let json_value: serde_json::Value = serde_json::from_str(&value)
+        .unwrap_or_else(|_| serde_json::Value::String(value));
+    db::update_setting(&conn, &key, &json_value)
+        .map_err(|e| Error::from_reason(format!("update_setting: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Statistics
+// ---------------------------------------------------------------------------
+
+/// Get transcription statistics.
+#[napi]
+pub fn get_statistics(days: Option<u32>) -> Result<String> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    let stats = db::get_statistics(&conn, days.map(|d| d as i64))
+        .map_err(|e| Error::from_reason(format!("get_statistics: {e}")))?;
+    serde_json::to_string(&stats)
+        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Vocabulary & Replacements
+// ---------------------------------------------------------------------------
+
+#[napi]
+pub fn get_vocabulary() -> Result<String> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    let words = db::get_vocabulary(&conn)
+        .map_err(|e| Error::from_reason(format!("get_vocabulary: {e}")))?;
+    serde_json::to_string(&words)
+        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+}
+
+#[napi]
+pub fn get_replacements() -> Result<String> {
+    let app = ctx()?;
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    let items = db::get_replacements(&conn)
+        .map_err(|e| Error::from_reason(format!("get_replacements: {e}")))?;
+    serde_json::to_string(&items)
+        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Keychain
+// ---------------------------------------------------------------------------
+
+#[napi]
+pub fn store_api_key(provider: String, key: String) -> Result<()> {
+    yumo_core::platform::keychain::store_key("com.voiceink.app", &provider, &key)
+        .map_err(|e| Error::from_reason(format!("store_key: {e}")))
+}
+
+#[napi]
+pub fn get_api_key(provider: String) -> Result<Option<String>> {
+    yumo_core::platform::keychain::get_key("com.voiceink.app", &provider)
+        .map_err(|e| Error::from_reason(format!("get_key: {e}")))
+}
+
+#[napi]
+pub fn delete_api_key(provider: String) -> Result<()> {
+    yumo_core::platform::keychain::delete_key("com.voiceink.app", &provider)
+        .map_err(|e| Error::from_reason(format!("delete_key: {e}")))
 }

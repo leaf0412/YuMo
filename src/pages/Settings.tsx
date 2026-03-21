@@ -11,7 +11,7 @@ import {
   SafetyCertificateOutlined, CheckCircleOutlined, CloseCircleOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { emit } from '@tauri-apps/api/event';
+import { emit } from '../lib/events';
 import i18n from '../i18n';
 import { getResolvedLocale, type UiLocale } from '../i18n/utils';
 import { invoke, formatError, logEvent } from '../lib/logger';
