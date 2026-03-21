@@ -1,0 +1,20 @@
+appId: com.yumo.electron
+productName: YuMo
+directories:
+  buildResources: build
+  output: release
+files:
+  - dist-electron/**/*
+extraResources:
+  - from: napi/
+    to: napi/
+    filter:
+      - "*.node"
+linux:
+  target:
+    - AppImage
+    - deb
+  artifactName: ${productName}-${version}-linux.${ext}
+  category: Utility
+publish:
+  provider: github
