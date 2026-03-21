@@ -429,7 +429,9 @@ def _transcribe_funasr(model, audio_path, language=None, max_tokens=500, tempera
 
 
 def _funasr_generate_text(model, audio_path, language, sf, np, max_tokens=500, temperature=0.0):
-    """Generate raw text from FunASR model, with automatic chunking for long audio."""
+    """Generate raw text from FunASR model, with VAD-based chunking for long audio."""
+    import re as _re
+
     audio_data, sample_rate = sf.read(audio_path, dtype='float32')
     log(f"Total audio duration: {len(audio_data) / sample_rate:.2f}s, sample_rate: {sample_rate}")
 
@@ -446,46 +448,93 @@ def _funasr_generate_text(model, audio_path, language, sf, np, max_tokens=500, t
         sample_rate = target_sr
 
     duration_secs = len(audio_data) / sample_rate
-    chunk_secs = 30  # FunASR works best with ≤30s audio
+    max_chunk_secs = 30  # FunASR works best with ≤30s audio
 
-    if duration_secs <= chunk_secs + 5:
-        # Short audio: process as single chunk (with padding)
+    if duration_secs <= max_chunk_secs + 5:
+        # Short audio: process as single chunk
         text = _funasr_generate_single_chunk(model, audio_data, sample_rate, language, np, max_tokens, temperature)
     else:
-        # Long audio: split into chunks and concatenate results
-        log(f"Long audio ({duration_secs:.1f}s), splitting into ~{chunk_secs}s chunks")
+        # Long audio: VAD-based split at silence boundaries
+        chunks = _vad_split_audio(audio_data, sample_rate, np,
+                                  max_chunk_secs=max_chunk_secs,
+                                  min_chunk_secs=5)
+        log(f"Long audio ({duration_secs:.1f}s), VAD split into {len(chunks)} chunks")
+
         texts = []
-        chunk_samples = chunk_secs * sample_rate
-        overlap_samples = int(0.5 * sample_rate)  # 0.5s overlap for continuity
-        offset = 0
-        chunk_idx = 0
-
-        while offset < len(audio_data):
-            end = min(offset + chunk_samples, len(audio_data))
-            chunk = audio_data[offset:end]
+        for idx, (chunk, chunk_offset) in enumerate(chunks):
             chunk_duration = len(chunk) / sample_rate
-            log(f"Chunk {chunk_idx}: offset={offset/sample_rate:.1f}s duration={chunk_duration:.1f}s")
+            log(f"Chunk {idx}: offset={chunk_offset:.1f}s duration={chunk_duration:.1f}s")
 
-            # Skip very short trailing chunks (< 0.5s)
-            if chunk_duration < 0.5:
-                break
-
-            import re as _re
             chunk_text = _funasr_generate_single_chunk(
                 model, chunk, sample_rate, language, np, max_tokens, temperature
             )
-            chunk_text = _clean_funasr_text(chunk_text, _re)  # clean per-chunk
+            chunk_text = _clean_funasr_text(chunk_text, _re)
             if chunk_text:
                 texts.append(chunk_text)
-                log(f"Chunk {chunk_idx} result: '{chunk_text[:50]}...' ({len(chunk_text)} chars)" if len(chunk_text) > 50 else f"Chunk {chunk_idx} result: '{chunk_text}'")
-
-            offset = end - overlap_samples if end < len(audio_data) else end
-            chunk_idx += 1
+                preview = f"'{chunk_text[:50]}...' ({len(chunk_text)} chars)" if len(chunk_text) > 50 else f"'{chunk_text}'"
+                log(f"Chunk {idx} result: {preview}")
+            else:
+                log(f"Chunk {idx}: empty result (silence/noise)")
 
         text = "".join(texts)
-        log(f"Chunked transcription complete: {chunk_idx} chunks, {len(text)} chars total")
+        log(f"Chunked transcription complete: {len(chunks)} chunks, {len(text)} chars total")
 
     return text
+
+
+def _vad_split_audio(audio, sample_rate, np, max_chunk_secs=30, min_chunk_secs=5):
+    """Split audio at silence boundaries using energy-based VAD.
+
+    Returns list of (chunk_array, offset_seconds) tuples.
+    Each chunk is ≤ max_chunk_secs long, cut at the quietest point near the boundary.
+    """
+    total_samples = len(audio)
+    max_chunk_samples = int(max_chunk_secs * sample_rate)
+    min_chunk_samples = int(min_chunk_secs * sample_rate)
+
+    # Precompute frame-level energy (20ms frames)
+    frame_size = int(0.02 * sample_rate)  # 320 samples at 16kHz
+    n_frames = total_samples // frame_size
+    energy = np.array([
+        np.mean(audio[i * frame_size:(i + 1) * frame_size] ** 2)
+        for i in range(n_frames)
+    ])
+
+    # Smooth energy with a small window to avoid cutting on transient dips
+    smooth_window = 5  # 100ms
+    if len(energy) > smooth_window:
+        kernel = np.ones(smooth_window) / smooth_window
+        energy = np.convolve(energy, kernel, mode='same')
+
+    chunks = []
+    offset = 0
+
+    while offset < total_samples:
+        remaining = total_samples - offset
+
+        if remaining <= max_chunk_samples + min_chunk_samples:
+            # Last chunk: take everything
+            chunks.append((audio[offset:], offset / sample_rate))
+            break
+
+        # Look for the quietest point in the search window [min_chunk, max_chunk]
+        search_start_frame = (offset + min_chunk_samples) // frame_size
+        search_end_frame = min((offset + max_chunk_samples) // frame_size, n_frames)
+
+        if search_start_frame >= search_end_frame:
+            # Fallback: hard cut at max_chunk
+            cut = offset + max_chunk_samples
+        else:
+            # Find frame with minimum energy in the search window
+            window_energy = energy[search_start_frame:search_end_frame]
+            best_frame = search_start_frame + np.argmin(window_energy)
+            cut = best_frame * frame_size
+            log(f"VAD: silence at {cut / sample_rate:.2f}s (energy={energy[best_frame]:.6f})")
+
+        chunks.append((audio[offset:cut], offset / sample_rate))
+        offset = cut
+
+    return chunks
 
 
 def _funasr_generate_single_chunk(model, audio_data, sample_rate, language, np, max_tokens, temperature):
