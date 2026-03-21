@@ -35,7 +35,9 @@ jobs:
             libayatana-appindicator3-dev \
             libasound2-dev \
             cmake \
-            build-essential
+            build-essential \
+            libdbus-1-dev \
+            pkg-config
 
       - name: Install CMake (Windows)
         if: matrix.os == 'windows-latest'
