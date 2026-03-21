@@ -6,8 +6,8 @@ use ort::value::Value;
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
-use std::cell::UnsafeCell;
 use std::path::Path;
+use std::sync::Mutex;
 
 /// DTLN constants derived from the ONNX model shapes.
 const FRAME_LEN: usize = 512;
@@ -15,6 +15,12 @@ const FRAME_SHIFT: usize = 128;
 const FFT_SIZE: usize = 512;
 const MAG_BINS: usize = FFT_SIZE / 2 + 1; // 257
 const HIDDEN_UNITS: usize = 128;
+
+/// Number of warm-up frames to prepend so the LSTM hidden states
+/// adapt to the noise profile before processing the actual audio.
+/// Without this the first ~1 s gets little/no denoising because
+/// the LSTM outputs near-identity masks while its state is all-zeros.
+const WARM_UP_FRAMES: usize = 150;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DenoiserConfig {
@@ -42,10 +48,8 @@ impl Denoiser for PassthroughDenoiser {
 /// Stage 1: FFT magnitude → LSTM mask → apply mask to complex spectrum → iFFT
 /// Stage 2: Time-domain frame → LSTM refinement → output frame
 pub struct DtlnDenoiser {
-    /// UnsafeCell because ort::Session::run requires &mut self,
-    /// but we only call it from &self (single-threaded processing).
-    session1: UnsafeCell<Session>,
-    session2: UnsafeCell<Session>,
+    session1: Mutex<Session>,
+    session2: Mutex<Session>,
 }
 
 impl DtlnDenoiser {
@@ -85,8 +89,8 @@ impl DtlnDenoiser {
 
         info!("[denoiser] both DTLN models loaded");
         Ok(Self {
-            session1: UnsafeCell::new(session1),
-            session2: UnsafeCell::new(session2),
+            session1: Mutex::new(session1),
+            session2: Mutex::new(session2),
         })
     }
 }
@@ -100,21 +104,41 @@ impl Denoiser for DtlnDenoiser {
 
         info!("[denoiser] DTLN processing {} samples", input_len);
 
-        // Pad input so we have at least one full frame and exact overlap-add alignment
-        let padded_len = if input_len < FRAME_LEN {
+        // Prepend warm-up segment so the LSTM hidden states are
+        // pre-conditioned before processing the real audio start.
+        // We mirror-repeat the beginning of the audio as warm-up material.
+        let warm_up_samples = WARM_UP_FRAMES * FRAME_SHIFT;
+        let warm_up_src_len = warm_up_samples.min(input_len);
+        let mut warm_up = Vec::with_capacity(warm_up_samples);
+        while warm_up.len() < warm_up_samples {
+            let remaining = warm_up_samples - warm_up.len();
+            let chunk_len = remaining.min(warm_up_src_len);
+            warm_up.extend_from_slice(&samples[..chunk_len]);
+        }
+        let mut full_input = Vec::with_capacity(warm_up_samples + input_len);
+        full_input.extend_from_slice(&warm_up);
+        full_input.extend_from_slice(samples);
+        let total_len = full_input.len();
+
+        info!(
+            "[denoiser] warm-up: {} samples prepended ({} frames)",
+            warm_up_samples, WARM_UP_FRAMES
+        );
+
+        // Pad so we have at least one full frame and exact overlap-add alignment
+        let padded_len = if total_len < FRAME_LEN {
             FRAME_LEN
         } else {
-            // Ensure (padded_len - FRAME_LEN) is divisible by FRAME_SHIFT
-            let extra = (input_len - FRAME_LEN) % FRAME_SHIFT;
+            let extra = (total_len - FRAME_LEN) % FRAME_SHIFT;
             if extra == 0 {
-                input_len
+                total_len
             } else {
-                input_len + (FRAME_SHIFT - extra)
+                total_len + (FRAME_SHIFT - extra)
             }
         };
 
         let mut padded = vec![0.0f32; padded_len];
-        padded[..input_len].copy_from_slice(samples);
+        padded[..total_len].copy_from_slice(&full_input);
 
         let num_frames = (padded_len - FRAME_LEN) / FRAME_SHIFT + 1;
 
@@ -133,10 +157,10 @@ impl Denoiser for DtlnDenoiser {
         // Output buffer for overlap-add
         let mut output = vec![0.0f32; padded_len];
 
-        // SAFETY: DtlnDenoiser is used single-threaded; UnsafeCell lets us
-        // get &mut Session from &self, which ort::Session::run requires.
-        let session1_mut = unsafe { &mut *self.session1.get() };
-        let session2_mut = unsafe { &mut *self.session2.get() };
+        let mut session1_guard = self.session1.lock()
+            .map_err(|e| AppError::Io(format!("denoiser session1 lock: {}", e)))?;
+        let mut session2_guard = self.session2.lock()
+            .map_err(|e| AppError::Io(format!("denoiser session2 lock: {}", e)))?;
 
         for i in 0..num_frames {
             let start = i * FRAME_SHIFT;
@@ -175,7 +199,7 @@ impl Denoiser for DtlnDenoiser {
             let h1_val = Value::from_array(h1_array)
                 .map_err(|e| AppError::Io(format!("ort value: {}", e)))?;
 
-            let out1 = session1_mut
+            let out1 = session1_guard
                 .run(ort::inputs![
                     "input_2" => mag_val,
                     "input_3" => h1_val,
@@ -225,7 +249,7 @@ impl Denoiser for DtlnDenoiser {
             let h2_val = Value::from_array(h2_array)
                 .map_err(|e| AppError::Io(format!("ort value: {}", e)))?;
 
-            let out2 = session2_mut
+            let out2 = session2_guard
                 .run(ort::inputs![
                     "input_4" => frame_val,
                     "input_5" => h2_val,
@@ -247,11 +271,11 @@ impl Denoiser for DtlnDenoiser {
             }
         }
 
-        // Truncate to original length
-        output.truncate(input_len);
+        // Strip warm-up prefix and truncate to original length
+        let result: Vec<f32> = output[warm_up_samples..].iter().copied().take(input_len).collect();
 
-        info!("[denoiser] DTLN processing complete, {} samples", output.len());
-        Ok(output)
+        info!("[denoiser] DTLN processing complete, {} samples", result.len());
+        Ok(result)
     }
 }
 

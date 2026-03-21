@@ -11,6 +11,7 @@ use crate::hotkey;
 use crate::keychain;
 use crate::pipeline::PipelineState;
 use crate::state::AppState;
+use crate::denoiser::Denoiser;
 use crate::{audio_ctrl, denoiser, paster, permissions, recorder, text_processor, transcriber};
 
 // ---------------------------------------------------------------------------
@@ -174,26 +175,41 @@ pub async fn stop_recording(
     let audio_data = if noise_reduction_enabled {
         info!("[pipeline] noise reduction enabled, applying DTLN denoiser...");
         let denoise_start = std::time::Instant::now();
-        let config = denoiser::DenoiserConfig {
-            enabled: true,
-            model_dir: Some(state.paths.denoiser_dir.to_string_lossy().to_string()),
-        };
-        match denoiser::process_or_passthrough(&config, &audio_data.pcm_samples, audio_data.sample_rate) {
-            Ok(denoised) => {
-                info!(
-                    "[pipeline] noise reduction complete in {:.1}ms",
-                    denoise_start.elapsed().as_secs_f64() * 1000.0
-                );
-                recorder::AudioData {
-                    pcm_samples: denoised,
-                    sample_rate: audio_data.sample_rate,
-                    channels: audio_data.channels,
+
+        // Lazily initialize and cache the denoiser
+        let mut denoiser_guard = state.denoiser.lock()
+            .map_err(|e| AppError::Recording(format!("denoiser lock: {}", e)))?;
+        if denoiser_guard.is_none() {
+            let model_dir = state.paths.denoiser_dir.to_string_lossy().to_string();
+            match denoiser::DtlnDenoiser::new(&model_dir) {
+                Ok(d) => { *denoiser_guard = Some(d); }
+                Err(e) => {
+                    log::warn!("[pipeline] denoiser init failed: {}, skipping", e);
                 }
             }
-            Err(e) => {
-                log::warn!("[pipeline] noise reduction failed: {}, using original audio", e);
-                audio_data
+        }
+
+        match denoiser_guard.as_ref() {
+            Some(d) => {
+                match d.process(&audio_data.pcm_samples, audio_data.sample_rate) {
+                    Ok(denoised) => {
+                        info!(
+                            "[pipeline] noise reduction complete in {:.1}ms",
+                            denoise_start.elapsed().as_secs_f64() * 1000.0
+                        );
+                        recorder::AudioData {
+                            pcm_samples: denoised,
+                            sample_rate: audio_data.sample_rate,
+                            channels: audio_data.channels,
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("[pipeline] noise reduction failed: {}, using original audio", e);
+                        audio_data
+                    }
+                }
             }
+            None => audio_data,
         }
     } else {
         audio_data

@@ -2,6 +2,7 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use crate::denoiser::DtlnDenoiser;
 use crate::pipeline::PipelineState;
 use crate::recorder::RecordingHandle;
 
@@ -78,6 +79,7 @@ pub struct AppState {
     pub recording_handle: Mutex<Option<RecordingHandle>>,
     pub paths: AppPaths,
     pub daemon: crate::daemon::DaemonManager,
+    pub denoiser: Mutex<Option<DtlnDenoiser>>,
 }
 
 impl AppState {
@@ -88,6 +90,7 @@ impl AppState {
             recording_handle: Mutex::new(None),
             paths,
             daemon,
+            denoiser: Mutex::new(None),
         }
     }
 }
