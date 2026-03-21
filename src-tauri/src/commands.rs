@@ -11,7 +11,7 @@ use crate::hotkey;
 use crate::keychain;
 use crate::pipeline::PipelineState;
 use crate::state::AppState;
-use crate::{audio_ctrl, paster, permissions, recorder, text_processor, transcriber};
+use crate::{audio_ctrl, denoiser, paster, permissions, recorder, text_processor, transcriber};
 
 // ---------------------------------------------------------------------------
 // Frontend log bridge — writes frontend logs to the same log.txt
@@ -161,6 +161,44 @@ pub async fn stop_recording(
         error!("[pipeline] recorder::stop_recording failed: {}", e);
         AppError::Recording(e.to_string())
     })?;
+
+    // 2.1 Apply noise reduction if enabled
+    let noise_reduction_enabled = {
+        let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
+        db::get_all_settings(&conn)?
+            .get("noise_reduction")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    };
+
+    let audio_data = if noise_reduction_enabled {
+        info!("[pipeline] noise reduction enabled, applying DTLN denoiser...");
+        let denoise_start = std::time::Instant::now();
+        let config = denoiser::DenoiserConfig {
+            enabled: true,
+            model_dir: Some(state.paths.denoiser_dir.to_string_lossy().to_string()),
+        };
+        match denoiser::process_or_passthrough(&config, &audio_data.pcm_samples, audio_data.sample_rate) {
+            Ok(denoised) => {
+                info!(
+                    "[pipeline] noise reduction complete in {:.1}ms",
+                    denoise_start.elapsed().as_secs_f64() * 1000.0
+                );
+                recorder::AudioData {
+                    pcm_samples: denoised,
+                    sample_rate: audio_data.sample_rate,
+                    channels: audio_data.channels,
+                }
+            }
+            Err(e) => {
+                log::warn!("[pipeline] noise reduction failed: {}, using original audio", e);
+                audio_data
+            }
+        }
+    } else {
+        audio_data
+    };
+
     let rms = if audio_data.pcm_samples.is_empty() {
         0.0
     } else {
