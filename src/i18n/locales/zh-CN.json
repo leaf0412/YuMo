@@ -36,6 +36,7 @@
   "pipeline.transcribing": "转录中...",
   "pipeline.enhancing": "增强中...",
   "pipeline.pasting": "粘贴中...",
+  "recorder.preparing": "准备中...",
   "recorder.cancel": "取消",
   "recorder.cancelledHint": "录音已取消",
   "recorder.escHint": "再按一次 ESC 取消",

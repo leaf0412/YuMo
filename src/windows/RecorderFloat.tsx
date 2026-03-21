@@ -161,6 +161,7 @@ export default function RecorderFloat() {
 
   const hasSprite = spriteManifest && spriteImageSrc;
   const isRecording = state === PIPELINE_RECORDING;
+  const isPreparing = isRecording && duration < 1;
   const color = PIPELINE_COLORS[state];
   const animation = PIPELINE_ANIMATIONS[state];
 
@@ -221,8 +222,8 @@ export default function RecorderFloat() {
           background: color,
           animation,
         }} />
-        <span>{PIPELINE_LABEL_KEYS[state] ? t(PIPELINE_LABEL_KEYS[state]) : ''}</span>
-        {isRecording && (
+        <span>{isPreparing ? t('recorder.preparing') : (PIPELINE_LABEL_KEYS[state] ? t(PIPELINE_LABEL_KEYS[state]) : '')}</span>
+        {isRecording && !isPreparing && (
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(duration)}</span>
         )}
         {/* Cancel button — no drag region so it's clickable */}
