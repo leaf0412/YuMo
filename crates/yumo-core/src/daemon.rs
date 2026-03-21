@@ -890,7 +890,7 @@ fn bootstrap_venv(cb: Option<&DaemonEventCallback>) -> AppResult<String> {
         Command::new(&uv).args([
             "pip", "install",
             "--python", &format!("{}/bin/python3", venv_dir_str),
-            "--upgrade", "mlx-audio", "mlx-audio-plus", "soundfile",
+            "--upgrade", "mlx-audio", "mlx-audio-plus", "soundfile", "httpx[socks]",
         ]),
         "uv-pip",
     ).map_err(|e| {
