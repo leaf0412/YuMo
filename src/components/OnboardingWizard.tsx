@@ -282,6 +282,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
                     size="small"
                     onClick={() => handleDownloadModel(m)}
                     style={{ cursor: 'pointer' }}
+                    data-testid={`model-${m.id}`}
                   >
                     <Flex justify="space-between" align="center">
                       <Flex vertical gap={2}>
@@ -318,6 +319,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
                   onKeyDown={recordingHotkey ? handleHotkeyKeyDown : undefined}
                   prefix={recordingHotkey ? <LoadingOutlined /> : <ThunderboltOutlined />}
                   style={{ maxWidth: 300 }}
+                  data-testid="hotkey-record-btn"
                 />
               </Flex>
             )}
@@ -411,6 +413,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
               size="large"
               onClick={handleNext}
               disabled={!canProceed() && step !== 4}
+              data-testid={step === 0 ? 'onboarding-start' : step === 5 ? 'onboarding-done' : undefined}
             >
               {nextLabel()}
             </Button>

@@ -157,7 +157,7 @@ export default function Settings() {
   const items = [
     {
       key: 'audio',
-      label: <Space><AudioOutlined />{t('settings.sectionAudio')}</Space>,
+      label: <Space data-testid="settings-recording"><AudioOutlined />{t('settings.sectionAudio')}</Space>,
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
           {settingRow(t('settings.audioDevice'),
@@ -194,7 +194,7 @@ export default function Settings() {
     },
     {
       key: 'vad',
-      label: <Space><ThunderboltOutlined />{t('settings.sectionVad')}</Space>,
+      label: <Space data-testid="settings-transcription"><ThunderboltOutlined />{t('settings.sectionVad')}</Space>,
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
           {settingRow(t('settings.enableVad'), <Switch checked={settings.vad_enabled} onChange={(v) => updateSetting('vad_enabled', v)} />)}
@@ -273,7 +273,7 @@ export default function Settings() {
     },
     {
       key: 'general',
-      label: <Space><SettingOutlined />{t('settings.sectionGeneral')}</Space>,
+      label: <Space data-testid="settings-general"><SettingOutlined />{t('settings.sectionGeneral')}</Space>,
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
           {settingRow(t('settings.language'),
@@ -286,10 +286,11 @@ export default function Settings() {
                 emit('language-changed', resolved);
               }}
               style={{ width: 250 }}
+              data-testid="language-select"
               options={[
                 { value: 'system', label: t('settings.langFollowSystem') },
-                { value: 'zh-CN', label: t('settings.langChinese') },
-                { value: 'en', label: t('settings.langEnglish') },
+                { value: 'zh-CN', label: t('settings.langChinese'), 'data-testid': 'language-zh' },
+                { value: 'en', label: t('settings.langEnglish'), 'data-testid': 'language-en' },
               ]}
             />,
           )}

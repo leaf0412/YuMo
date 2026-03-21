@@ -272,10 +272,10 @@ export default function Models() {
             : <Button type="primary" size="small" loading={daemonBusy} onClick={handleDaemonStart}>{t('models.daemon.start')}</Button>}
         </Space>
       </Flex>
-      <Row gutter={[16, 16]}>
+      <Row gutter={[16, 16]} data-testid="model-list">
         {mlxModels.map((model) => (
           <Col xs={24} sm={12} md={8} key={model.id}>
-            <Card style={isSelected(model.id) ? { borderColor: '#52c41a' } : undefined} styles={{ body: { padding: 16 } }}>
+            <Card style={isSelected(model.id) ? { borderColor: '#52c41a' } : undefined} styles={{ body: { padding: 16 } }} data-testid={`model-${model.id}`}>
               <Flex vertical gap={12}>
                 <Flex justify="space-between" align="center">
                   <Space><ThunderboltOutlined /><Text strong>{model.name}</Text></Space>
@@ -354,7 +354,7 @@ export default function Models() {
       <Row gutter={[16, 16]}>
         {cloudModels.map((model) => (
           <Col xs={24} sm={12} md={8} key={model.id}>
-            <Card style={isSelected(model.id) ? { borderColor: '#52c41a' } : undefined} styles={{ body: { padding: 16 } }}>
+            <Card style={isSelected(model.id) ? { borderColor: '#52c41a' } : undefined} styles={{ body: { padding: 16 } }} data-testid={`model-${model.id}`}>
               <Flex vertical gap={12}>
                 <Flex justify="space-between" align="center">
                   <Space><CloudOutlined /><Text strong>{model.name}</Text></Space>
@@ -435,8 +435,8 @@ export default function Models() {
       </div>
       <Tabs activeKey={activeTab} onChange={setActiveTab}
         items={[
-          { key: 'mlx', label: t('models.tab.mlx', { count: mlxModels.length }), children: mlxTabContent },
-          { key: 'cloud', label: t('models.tab.cloud', { count: cloudModels.length }), children: cloudTabContent },
+          { key: 'mlx', label: <span data-testid="local-models-tab">{t('models.tab.mlx', { count: mlxModels.length })}</span>, children: mlxTabContent },
+          { key: 'cloud', label: <span data-testid="cloud-models-tab">{t('models.tab.cloud', { count: cloudModels.length })}</span>, children: cloudTabContent },
         ]}
       />
     </Flex>

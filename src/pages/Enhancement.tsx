@@ -190,12 +190,12 @@ export default function Enhancement() {
         <Flex vertical gap="middle" style={{ width: '100%' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text strong>{t('enhancement.enableToggle')}</Text>
-            <Switch checked={settings.ai_enhancement_enabled} onChange={(checked) => updateSetting('ai_enhancement_enabled', checked)} />
+            <Switch checked={settings.ai_enhancement_enabled} onChange={(checked) => updateSetting('ai_enhancement_enabled', checked)} data-testid="enhance-toggle" />
           </div>
           <Divider style={{ margin: '8px 0' }} />
           <div>
             <Text>{t('enhancement.provider')}</Text>
-            <Select value={settings.llm_provider} onChange={(v) => updateSetting('llm_provider', v)} style={{ width: '100%', marginTop: 8 }} options={PROVIDERS} placeholder={t('enhancement.selectProvider')} />
+            <Select value={settings.llm_provider} onChange={(v) => updateSetting('llm_provider', v)} style={{ width: '100%', marginTop: 8 }} options={PROVIDERS.map(p => ({ ...p, 'data-testid': `llm-provider-${p.value}` }))} placeholder={t('enhancement.selectProvider')} data-testid="llm-provider-select" />
           </div>
           <div>
             <Text>{t('enhancement.model')}</Text>
@@ -204,7 +204,7 @@ export default function Enhancement() {
           <div>
             <Text>{t('enhancement.apiKey')}</Text>
             <Space.Compact style={{ width: '100%', marginTop: 8 }}>
-              <Input.Password placeholder={t('enhancement.enterApiKey')} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+              <Input.Password placeholder={t('enhancement.enterApiKey')} value={apiKey} onChange={(e) => setApiKey(e.target.value)} data-testid="api-key-input" />
               <Button onClick={handleSaveApiKey}>{t('common.save')}</Button>
             </Space.Compact>
           </div>
@@ -216,7 +216,7 @@ export default function Enhancement() {
           )}
         </Flex>
       </Card>
-      <Card title={t('enhancement.promptManagement')} extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>{t('enhancement.newPrompt')}</Button>}>
+      <Card title={t('enhancement.promptManagement')} extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal} data-testid="create-prompt-btn">{t('enhancement.newPrompt')}</Button>}>
         {prompts.length === 0 ? (
           <Text type="secondary">{t('enhancement.noPrompts')}</Text>
         ) : (
@@ -239,11 +239,11 @@ export default function Enhancement() {
           ))
         )}
       </Card>
-      <Modal title={editingPrompt ? t('enhancement.editPrompt') : t('enhancement.newPrompt')} open={modalOpen} onOk={handleModalOk} onCancel={() => setModalOpen(false)} okText={t('common.save')} cancelText={t('common.cancel')}>
+      <Modal title={editingPrompt ? t('enhancement.editPrompt') : t('enhancement.newPrompt')} open={modalOpen} onOk={handleModalOk} onCancel={() => setModalOpen(false)} okText={t('common.save')} cancelText={t('common.cancel')} okButtonProps={{ 'data-testid': 'save-prompt-btn' } as Record<string, string>}>
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label={t('enhancement.nameLabel')} rules={[{ required: true, message: t('enhancement.nameRequired') }]}><Input placeholder={t('enhancement.namePlaceholder')} /></Form.Item>
+          <Form.Item name="name" label={t('enhancement.nameLabel')} rules={[{ required: true, message: t('enhancement.nameRequired') }]}><Input placeholder={t('enhancement.namePlaceholder')} data-testid="prompt-name-input" /></Form.Item>
           <Form.Item name="systemMsg" label={t('enhancement.systemMessageLabel')} rules={[{ required: true, message: t('enhancement.systemMessageRequired') }]}><TextArea rows={4} placeholder={t('enhancement.systemMessagePlaceholder')} /></Form.Item>
-          <Form.Item name="userMsg" label={t('enhancement.userMessageLabel')} rules={[{ required: true, message: t('enhancement.userMessageRequired') }]}><TextArea rows={4} placeholder={t('enhancement.userMessagePlaceholder', { skipInterpolation: true })} /></Form.Item>
+          <Form.Item name="userMsg" label={t('enhancement.userMessageLabel')} rules={[{ required: true, message: t('enhancement.userMessageRequired') }]}><TextArea rows={4} placeholder={t('enhancement.userMessagePlaceholder', { skipInterpolation: true })} data-testid="prompt-template-input" /></Form.Item>
         </Form>
       </Modal>
     </Flex>
