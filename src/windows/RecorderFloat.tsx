@@ -81,6 +81,7 @@ export default function RecorderFloat() {
   useEffect(() => {
     let lastEsc = 0;
     const unlisten = listen('escape-pressed', () => {
+      invoke('frontend_log', { level: 'info', message: '[recorder] escape-pressed received' });
       const now = Date.now();
       if (now - lastEsc < 500) {
         setEscHintType('cancelled');
