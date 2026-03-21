@@ -1,8 +1,10 @@
-use yumo_core::recorder;
+use yumo_core::platform::recorder;
+use yumo_core::platform::AudioData;
+use yumo_core::audio_io;
 
 #[test]
 fn test_list_audio_devices() {
-    let devices = recorder::list_input_devices();
+    let devices = recorder::list_input_devices().unwrap();
     // Every Mac has at least a built-in mic
     assert!(!devices.is_empty(), "Should find at least one input device");
     for dev in &devices {
@@ -15,7 +17,7 @@ fn test_list_audio_devices() {
 #[test]
 #[ignore]
 fn test_record_short_audio() {
-    let devices = recorder::list_input_devices();
+    let devices = recorder::list_input_devices().unwrap();
     let device_id = devices[0].id;
 
     let (handle, _rx) = recorder::start_recording(device_id).unwrap();
@@ -30,7 +32,7 @@ fn test_record_short_audio() {
 #[test]
 fn test_save_wav_from_synthetic_data() {
     // Test WAV writing with synthetic data (no mic needed)
-    let audio_data = recorder::AudioData {
+    let audio_data = AudioData {
         pcm_samples: vec![0.0f32; 16000], // 1 second of silence
         sample_rate: 16000,
         channels: 1,
@@ -38,7 +40,7 @@ fn test_save_wav_from_synthetic_data() {
 
     let tmp = tempfile::TempDir::new().unwrap();
     let wav_path = tmp.path().join("test.wav");
-    recorder::save_wav(&audio_data, &wav_path).unwrap();
+    audio_io::save_wav(&audio_data, &wav_path).unwrap();
 
     assert!(wav_path.exists());
     let metadata = std::fs::metadata(&wav_path).unwrap();
@@ -47,7 +49,7 @@ fn test_save_wav_from_synthetic_data() {
 
 #[test]
 fn test_save_wav_readable() {
-    let audio_data = recorder::AudioData {
+    let audio_data = AudioData {
         pcm_samples: (0..16000).map(|i| (i as f32 * 0.001).sin()).collect(),
         sample_rate: 16000,
         channels: 1,
@@ -55,7 +57,7 @@ fn test_save_wav_readable() {
 
     let tmp = tempfile::TempDir::new().unwrap();
     let wav_path = tmp.path().join("sine.wav");
-    recorder::save_wav(&audio_data, &wav_path).unwrap();
+    audio_io::save_wav(&audio_data, &wav_path).unwrap();
 
     // Read back with hound and verify
     let reader = hound::WavReader::open(&wav_path).unwrap();

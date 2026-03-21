@@ -18,18 +18,19 @@ use yumo_core::state;
 use yumo_core::text_processor;
 use yumo_core::transcriber;
 use yumo_core::vad;
+use yumo_core::audio_io;
 
 // macOS-only modules
 #[cfg(target_os = "macos")]
-use yumo_core::audio_ctrl;
+use yumo_core::platform::audio_ctrl;
 #[cfg(target_os = "macos")]
-use yumo_core::keychain;
+use yumo_core::platform::keychain;
 #[cfg(target_os = "macos")]
-use yumo_core::paster;
+use yumo_core::platform::paster;
 #[cfg(target_os = "macos")]
-use yumo_core::permissions;
+use yumo_core::platform::permissions;
 #[cfg(target_os = "macos")]
-use yumo_core::recorder;
+use yumo_core::platform::recorder;
 
 #[test]
 fn test_all_modules_accessible() {
@@ -84,10 +85,10 @@ fn test_all_modules_accessible() {
 #[cfg(target_os = "macos")]
 #[test]
 fn test_macos_modules_accessible() {
-    // recorder types
-    let _ = std::mem::size_of::<recorder::AudioInputDevice>();
-    let _ = std::mem::size_of::<recorder::AudioData>();
-    let _ = std::mem::size_of::<recorder::AudioLevel>();
+    // recorder types (from platform::types, re-exported via platform::*)
+    let _ = std::mem::size_of::<yumo_core::platform::AudioInputDevice>();
+    let _ = std::mem::size_of::<yumo_core::platform::AudioData>();
+    let _ = std::mem::size_of::<yumo_core::platform::AudioLevel>();
 
     // These modules are function-based; just verify they compiled
     let _ = std::any::type_name::<fn()>();

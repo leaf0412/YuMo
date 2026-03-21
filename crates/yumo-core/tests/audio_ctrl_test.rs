@@ -1,21 +1,22 @@
-use yumo_core::audio_ctrl;
+use yumo_core::platform::audio_ctrl;
 
 #[test]
-fn test_get_default_output_device() {
-    let device_id = audio_ctrl::default_output_device_id();
-    assert_ne!(device_id, 0, "Should find a default output device");
+fn test_is_system_muted_returns_ok() {
+    // Should return Ok with a bool, not crash
+    let result = audio_ctrl::is_system_muted();
+    assert!(result.is_ok(), "is_system_muted should return Ok, got {:?}", result);
 }
 
 #[test]
 fn test_mute_unmute_roundtrip() {
-    let original = audio_ctrl::is_system_muted();
+    let original = audio_ctrl::is_system_muted().unwrap();
 
-    audio_ctrl::set_system_muted(true);
-    assert!(audio_ctrl::is_system_muted());
+    audio_ctrl::set_system_muted(true).unwrap();
+    assert!(audio_ctrl::is_system_muted().unwrap());
 
-    audio_ctrl::set_system_muted(false);
-    assert!(!audio_ctrl::is_system_muted());
+    audio_ctrl::set_system_muted(false).unwrap();
+    assert!(!audio_ctrl::is_system_muted().unwrap());
 
     // Restore
-    audio_ctrl::set_system_muted(original);
+    audio_ctrl::set_system_muted(original).unwrap();
 }

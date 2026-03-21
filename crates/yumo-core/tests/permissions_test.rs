@@ -1,4 +1,5 @@
-use yumo_core::permissions;
+use yumo_core::platform::permissions;
+use yumo_core::platform::PermissionStatus;
 
 #[test]
 fn test_check_permissions_returns_status() {
@@ -12,7 +13,7 @@ fn test_check_permissions_returns_status() {
 
 #[test]
 fn test_permission_status_serializes() {
-    let status = permissions::PermissionStatus {
+    let status = PermissionStatus {
         microphone: true,
         accessibility: false,
     };

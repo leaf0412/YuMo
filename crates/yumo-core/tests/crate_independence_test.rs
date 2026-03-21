@@ -64,7 +64,7 @@ fn test_pipeline_cancel_from_any_state() {
 
 #[test]
 fn test_audio_input_device_struct() {
-    use yumo_core::recorder::{AudioData, AudioInputDevice, AudioLevel};
+    use yumo_core::platform::{AudioData, AudioInputDevice, AudioLevel};
 
     let device = AudioInputDevice {
         id: 1,
