@@ -1148,6 +1148,97 @@ pub async fn delete_sprite(dir_id: String) -> Result<()> {
     }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
+/// Process a sprite sheet image: remove background color and save as sprite_processed.png.
+/// Mirrors Tauri commands.rs process_sprite_background logic.
+#[napi]
+pub async fn process_sprite_background(dir_id: String, threshold: f64) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let app = ctx()?;
+        let dir = app.paths.sprites_dir.join(&dir_id);
+        let manifest_path = dir.join("manifest.json");
+        let manifest_data = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| Error::from_reason(format!("read manifest: {e}")))?;
+        let manifest: serde_json::Value = serde_json::from_str(&manifest_data)
+            .map_err(|e| Error::from_reason(format!("manifest.json parse error: {e}")))?;
+
+        let sprite_file = manifest
+            .get("spriteFile")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| Error::from_reason("missing spriteFile"))?;
+
+        let src_path = dir.join(sprite_file);
+        let mut img = image::open(&src_path)
+            .map_err(|e| Error::from_reason(format!("failed to open image: {e}")))?
+            .to_rgba8();
+
+        let (width, height) = img.dimensions();
+
+        // Sample 4 corners (inset 14px)
+        let inset = 14u32.min(width.min(height) / 4);
+        let corners = [
+            (inset, inset),
+            (width - 1 - inset, inset),
+            (inset, height - 1 - inset),
+            (width - 1 - inset, height - 1 - inset),
+        ];
+
+        let samples: Vec<(f64, f64, f64)> = corners
+            .iter()
+            .map(|&(cx, cy)| {
+                let p = img.get_pixel(cx, cy);
+                (p[0] as f64 / 255.0, p[1] as f64 / 255.0, p[2] as f64 / 255.0)
+            })
+            .collect();
+
+        // Pick two most similar corner colors
+        let mut best_dist = f64::MAX;
+        let (mut bi, mut bj) = (0usize, 1usize);
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                let d = sprite_color_dist(&samples[i], &samples[j]);
+                if d < best_dist {
+                    best_dist = d;
+                    bi = i;
+                    bj = j;
+                }
+            }
+        }
+
+        let bg = (
+            (samples[bi].0 + samples[bj].0) / 2.0,
+            (samples[bi].1 + samples[bj].1) / 2.0,
+            (samples[bi].2 + samples[bj].2) / 2.0,
+        );
+
+        // Replace matching pixels with transparent
+        for pixel in img.pixels_mut() {
+            let c = (
+                pixel[0] as f64 / 255.0,
+                pixel[1] as f64 / 255.0,
+                pixel[2] as f64 / 255.0,
+            );
+            if sprite_color_dist(&c, &bg) < threshold {
+                pixel[0] = 0;
+                pixel[1] = 0;
+                pixel[2] = 0;
+                pixel[3] = 0;
+            }
+        }
+
+        let dest_path = dir.join("sprite_processed.png");
+        img.save(&dest_path)
+            .map_err(|e| Error::from_reason(format!("failed to save processed image: {e}")))?;
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| Error::from_reason(format!("spawn: {e}")))?
+}
+
+fn sprite_color_dist(a: &(f64, f64, f64), b: &(f64, f64, f64)) -> f64 {
+    ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2) + (a.2 - b.2).powi(2)).sqrt()
+}
+
 /// Recursively find manifest.json in a directory.
 fn find_manifest_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let direct = dir.join("manifest.json");

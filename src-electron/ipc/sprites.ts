@@ -47,8 +47,15 @@ export function registerSpritesHandlers(): void {
     }
   });
 
-  ipcMain.handle("process-sprite-background", () => {
-    // Background processing not yet implemented in napi
-    return null;
-  });
+  ipcMain.handle(
+    "process-sprite-background",
+    async (_e, args?: { dirId?: string; threshold?: number }) => {
+      if (args?.dirId) {
+        await getAddon().processSpriteBackground(
+          args.dirId,
+          args.threshold ?? 0.12,
+        );
+      }
+    },
+  );
 }

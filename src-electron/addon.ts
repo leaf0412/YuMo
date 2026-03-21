@@ -90,6 +90,7 @@ export type NapiAddon = {
   importSpriteFolder(path: string): Promise<string>;
   importSpriteZip(zipPath: string): Promise<string>;
   deleteSprite(dirId: string): Promise<void>;
+  processSpriteBackground(dirId: string, threshold: number): Promise<void>;
 
   // Legacy import
   detectVoiceinkLegacyPath(): Promise<string | null>;
