@@ -44,7 +44,7 @@ app.on("window-all-closed", () => {
 
 async function warmupDaemon(): Promise<void> {
   try {
-    const settingsJson = getAddon().getAllSettings();
+    const settingsJson = await getAddon().getAllSettings();
     const settings = JSON.parse(settingsJson);
     const modelId = settings.selected_model_id;
     if (!modelId) {
@@ -53,7 +53,7 @@ async function warmupDaemon(): Promise<void> {
     }
 
     // Find model info to get repo name
-    const modelsJson = getAddon().listAvailableModels();
+    const modelsJson = await getAddon().listAvailableModels();
     const models = JSON.parse(modelsJson);
     const model = models.find((m: { id: string }) => m.id === modelId);
     if (!model?.model_repo) {
@@ -81,9 +81,9 @@ async function warmupDaemon(): Promise<void> {
 // Hotkey restoration
 // -------------------------------------------------------------------------
 
-function restoreSavedHotkey(): void {
+async function restoreSavedHotkey(): Promise<void> {
   try {
-    const settingsJson = getAddon().getAllSettings();
+    const settingsJson = await getAddon().getAllSettings();
     const settings = JSON.parse(settingsJson);
     const hotkey = settings.hotkey;
     if (typeof hotkey === "string" && hotkey.length > 0) {
