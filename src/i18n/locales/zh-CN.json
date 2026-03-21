@@ -279,6 +279,15 @@
   "onboarding.stepHotkey": "快捷键",
   "onboarding.stepDone": "完成",
 
+  "settings.sectionPermissions": "权限状态",
+  "settings.permMicrophone": "麦克风权限",
+  "settings.permAccessibility": "辅助功能权限",
+  "settings.permGranted": "已授权",
+  "settings.permDenied": "未授权",
+  "settings.permGrant": "去授权",
+  "settings.permRefresh": "刷新状态",
+  "settings.permissionRequestFailed": "请求权限失败",
+
   "settings.sectionImport": "数据导入",
   "settings.importLegacyDetected": "检测到旧版语墨数据",
   "settings.importLegacyAuto": "自动导入",

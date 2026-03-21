@@ -279,6 +279,15 @@
   "onboarding.stepHotkey": "Hotkey",
   "onboarding.stepDone": "Done",
 
+  "settings.sectionPermissions": "Permissions",
+  "settings.permMicrophone": "Microphone",
+  "settings.permAccessibility": "Accessibility",
+  "settings.permGranted": "Granted",
+  "settings.permDenied": "Not Granted",
+  "settings.permGrant": "Grant",
+  "settings.permRefresh": "Refresh",
+  "settings.permissionRequestFailed": "Failed to request permission",
+
   "settings.sectionImport": "Data Import",
   "settings.importLegacyDetected": "Legacy VoiceInk data detected",
   "settings.importLegacyAuto": "Auto Import",

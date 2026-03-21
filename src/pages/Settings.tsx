@@ -8,6 +8,7 @@ import {
   FontSizeOutlined, DesktopOutlined, KeyOutlined, AppstoreOutlined,
   HistoryOutlined, SettingOutlined, ClearOutlined, ImportOutlined,
   PictureOutlined, FolderOpenOutlined, FileZipOutlined,
+  SafetyCertificateOutlined, CheckCircleOutlined, CloseCircleOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { emit } from '@tauri-apps/api/event';
@@ -107,6 +108,13 @@ export default function Settings() {
     }
   }, [t]);
 
+  const loadPermissions = useCallback(async () => {
+    try {
+      const result = await invoke<{ microphone: boolean; accessibility: boolean }>('check_permissions');
+      setPermissions(result);
+    } catch { /* ignore */ }
+  }, []);
+
   const loadSpriteSettings = useCallback(async () => {
     try {
       const s = await invoke<{ selected_sprite_id?: string; sprite_size?: number }>('get_settings');
@@ -118,10 +126,11 @@ export default function Settings() {
   useEffect(() => {
     loadSettings();
     loadDevices();
+    loadPermissions();
     detectLegacyPath();
     loadSprites();
     loadSpriteSettings();
-  }, [loadSettings, loadDevices, detectLegacyPath, loadSprites, loadSpriteSettings]);
+  }, [loadSettings, loadDevices, loadPermissions, detectLegacyPath, loadSprites, loadSpriteSettings]);
 
   const updateSetting = async (key: string, value: unknown) => {
     try {
@@ -134,6 +143,9 @@ export default function Settings() {
   };
 
   const [recordingHotkey, setRecordingHotkey] = useState(false);
+
+  // Permission state
+  const [permissions, setPermissions] = useState<{ microphone: boolean; accessibility: boolean }>({ microphone: false, accessibility: false });
 
   // Data import state
   const [legacyPath, setLegacyPath] = useState<string | null>(null);
@@ -322,7 +334,69 @@ export default function Settings() {
     </div>
   );
 
+  const permissionIcon = (granted: boolean) =>
+    granted
+      ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
+      : <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
+
+  const handleRequestPermission = async (type: string) => {
+    try {
+      await invoke('request_permission', { permissionType: type });
+      // Poll for permission changes
+      const interval = setInterval(async () => {
+        const result = await invoke<{ microphone: boolean; accessibility: boolean }>('check_permissions');
+        setPermissions(result);
+        if ((type === 'microphone' && result.microphone) || (type === 'accessibility' && result.accessibility)) {
+          clearInterval(interval);
+        }
+      }, 1000);
+      // Stop polling after 30s
+      setTimeout(() => clearInterval(interval), 30000);
+    } catch (e) {
+      message.error(formatError(e, t('settings.permissionRequestFailed')));
+    }
+  };
+
   const items = [
+    {
+      key: 'permissions',
+      label: <Space><SafetyCertificateOutlined />{t('settings.sectionPermissions')}</Space>,
+      children: (
+        <Flex vertical gap={8} style={{ width: '100%' }}>
+          {settingRow(
+            t('settings.permMicrophone'),
+            <Space>
+              {permissionIcon(permissions.microphone)}
+              <Text type={permissions.microphone ? 'success' : 'danger'}>
+                {permissions.microphone ? t('settings.permGranted') : t('settings.permDenied')}
+              </Text>
+              {!permissions.microphone && (
+                <Button size="small" type="link" onClick={() => handleRequestPermission('microphone')}>
+                  {t('settings.permGrant')}
+                </Button>
+              )}
+            </Space>,
+          )}
+          {settingRow(
+            t('settings.permAccessibility'),
+            <Space>
+              {permissionIcon(permissions.accessibility)}
+              <Text type={permissions.accessibility ? 'success' : 'danger'}>
+                {permissions.accessibility ? t('settings.permGranted') : t('settings.permDenied')}
+              </Text>
+              {!permissions.accessibility && (
+                <Button size="small" type="link" onClick={() => handleRequestPermission('accessibility')}>
+                  {t('settings.permGrant')}
+                </Button>
+              )}
+            </Space>,
+          )}
+          <Button size="small" style={{ alignSelf: 'flex-start' }} onClick={loadPermissions}>
+            {t('settings.permRefresh')}
+          </Button>
+        </Flex>
+      ),
+    },
     {
       key: 'audio',
       label: <Space data-testid="settings-recording"><AudioOutlined />{t('settings.sectionAudio')}</Space>,
