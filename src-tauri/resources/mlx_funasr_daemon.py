@@ -460,14 +460,23 @@ def _funasr_generate_text(model, audio_path, language, sf, np, max_tokens=500, t
                                   min_chunk_secs=5)
         log(f"Long audio ({duration_secs:.1f}s), VAD split into {len(chunks)} chunks")
 
+        # For "auto" language: detect language on first chunk, then lock it for all chunks.
+        # This prevents per-chunk language switching (e.g., Chinese → English → Chinese).
+        detected_lang = language
         texts = []
         for idx, (chunk, chunk_offset) in enumerate(chunks):
             chunk_duration = len(chunk) / sample_rate
-            log(f"Chunk {idx}: offset={chunk_offset:.1f}s duration={chunk_duration:.1f}s")
+            log(f"Chunk {idx}: offset={chunk_offset:.1f}s duration={chunk_duration:.1f}s lang={detected_lang}")
 
             chunk_text = _funasr_generate_single_chunk(
-                model, chunk, sample_rate, language, np, max_tokens, temperature
+                model, chunk, sample_rate, detected_lang, np, max_tokens, temperature
             )
+
+            # After first chunk: detect language from output and lock it
+            if idx == 0 and detected_lang in (None, "auto", ""):
+                detected_lang = _detect_language_from_text(chunk_text)
+                log(f"Language detected from chunk 0: {detected_lang}")
+
             chunk_text = _clean_funasr_text(chunk_text, _re)
             if chunk_text:
                 texts.append(chunk_text)
@@ -557,6 +566,30 @@ def _funasr_generate_single_chunk(model, audio_data, sample_rate, language, np, 
     text = result.text if hasattr(result, 'text') else str(result)
     _log_funasr_result(result)
     return text
+
+
+def _detect_language_from_text(text):
+    """Detect dominant language from transcribed text.
+
+    Simple heuristic: count CJK characters vs Latin characters.
+    Returns a language code suitable for FunASR lang_param.
+    """
+    if not text:
+        return "auto"
+    cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    latin = sum(1 for c in text if 'a' <= c.lower() <= 'z')
+    jp_kana = sum(1 for c in text if '\u3040' <= c <= '\u30ff')
+    kr = sum(1 for c in text if '\uac00' <= c <= '\ud7af')
+
+    if jp_kana > len(text) * 0.1:
+        return "ja"
+    if kr > len(text) * 0.1:
+        return "ko"
+    if cjk > latin:
+        return "zh"
+    if latin > cjk:
+        return "en"
+    return "auto"
 
 
 def _build_funasr_lang_param(language):
