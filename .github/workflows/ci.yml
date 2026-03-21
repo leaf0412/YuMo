@@ -8,9 +8,34 @@ on:
 
 jobs:
   check:
-    runs-on: macos-latest
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libpulse-dev \
+            libsecret-1-dev \
+            libayatana-appindicator3-dev \
+            libasound2-dev \
+            cmake \
+            build-essential
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -20,6 +45,8 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -32,10 +59,13 @@ jobs:
       - name: Frontend build
         run: npm run build
 
-      - name: Rust check
+      - name: Rust check (yumo-core, all platforms)
+        run: cargo check -p yumo-core
+
+      - name: Rust tests (yumo-core, platform-gated)
+        run: cargo test -p yumo-core
+
+      - name: Rust check (yumo Tauri app, macOS only)
+        if: matrix.os == 'macos-latest'
         working-directory: src-tauri
         run: cargo check
-
-      - name: Rust tests
-        working-directory: src-tauri
-        run: cargo test
