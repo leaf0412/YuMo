@@ -618,7 +618,7 @@ const MIN_MLX_AUDIO_VERSION: &str = "0.3.0";
 fn python_has_mlx(python: &str) -> bool {
     let output = Command::new(python)
         .args(["-c", &format!(
-            "import mlx_audio; v = mlx_audio.__version__; parts = [int(x) for x in v.split('.')[:3]]; min_parts = [int(x) for x in '{}'.split('.')]; ok = parts >= min_parts; print(f'{{v}} {{\"ok\" if ok else \"old\"}}')",
+            "from importlib.metadata import version; v = version('mlx-audio'); parts = [int(x) for x in v.split('.')[:3]]; min_parts = [int(x) for x in '{}'.split('.')]; ok = parts >= min_parts; print(f'{{v}} {{\"ok\" if ok else \"old\"}}')",
             MIN_MLX_AUDIO_VERSION
         )])
         .stdout(Stdio::piped())
@@ -890,7 +890,7 @@ fn bootstrap_venv(cb: Option<&DaemonEventCallback>) -> AppResult<String> {
         Command::new(&uv).args([
             "pip", "install",
             "--python", &format!("{}/bin/python3", venv_dir_str),
-            "--upgrade", "mlx-audio-plus", "soundfile",
+            "--upgrade", "mlx-audio", "mlx-audio-plus", "soundfile",
         ]),
         "uv-pip",
     ).map_err(|e| {
