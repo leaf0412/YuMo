@@ -277,5 +277,28 @@
   "onboarding.stepAcc": "Accessibility",
   "onboarding.stepModel": "Model",
   "onboarding.stepHotkey": "Hotkey",
-  "onboarding.stepDone": "Done"
+  "onboarding.stepDone": "Done",
+
+  "settings.sectionImport": "Data Import",
+  "settings.importLegacyDetected": "Legacy VoiceInk data detected",
+  "settings.importLegacyAuto": "Auto Import",
+  "settings.importLegacyManual": "Select File Manually",
+  "settings.importLegacyNotDetected": "No legacy VoiceInk data detected. You can manually select a .store file to import.",
+  "settings.importSuccess": "Import complete: {{transcriptions}} transcriptions, {{vocabulary}} vocabulary, {{replacements}} replacements, {{recordings}} recordings",
+  "settings.importSkipped": " ({{skipped}} duplicates skipped)",
+  "settings.importFailed": "Import failed",
+  "settings.importing": "Importing...",
+
+  "settings.sectionSprite": "Sprite Manager",
+  "settings.spriteImportFolder": "Import Folder",
+  "settings.spriteImportZip": "Import ZIP",
+  "settings.spriteNoData": "No sprites yet, please import",
+  "settings.spriteSize": "Sprite Size",
+  "settings.spriteBgRemoval": "Background Removal",
+  "settings.spriteBgRemovalHint": "Higher values remove more background, but may affect sprite colors. Select a sprite first.",
+  "settings.spriteImportSuccess": "Imported: {{name}}",
+  "settings.spriteDeleteSuccess": "Deleted",
+  "settings.spriteLoadFailed": "Failed to load sprites",
+  "settings.spriteImportFailed": "Import failed",
+  "settings.spriteProcessFailed": "Processing failed"
 }

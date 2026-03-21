@@ -6,15 +6,28 @@ import {
 import {
   AudioOutlined, FilterOutlined, ThunderboltOutlined, CopyOutlined,
   FontSizeOutlined, DesktopOutlined, KeyOutlined, AppstoreOutlined,
-  HistoryOutlined, SettingOutlined, ClearOutlined,
+  HistoryOutlined, SettingOutlined, ClearOutlined, ImportOutlined,
+  PictureOutlined, FolderOpenOutlined, FileZipOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { emit } from '@tauri-apps/api/event';
 import i18n from '../i18n';
 import { getResolvedLocale, type UiLocale } from '../i18n/utils';
 import { invoke, formatError, logEvent } from '../lib/logger';
+import type { SpriteManifest } from '../components/SpriteAnimation';
+import SpriteCard from '../components/SpriteCard';
 
 const { Text } = Typography;
+
+type SpriteEntry = SpriteManifest & { dirId: string };
+
+interface ImportResult {
+  transcriptions_imported: number;
+  transcriptions_skipped: number;
+  vocabulary_imported: number;
+  replacements_imported: number;
+  recordings_copied: number;
+}
 
 interface AudioDevice {
   id: number;
@@ -65,10 +78,50 @@ export default function Settings() {
     } catch { /* logged */ }
   }, []);
 
+  const detectLegacyPath = useCallback(async () => {
+    try {
+      const path = await invoke<string | null>('detect_voiceink_legacy_path');
+      setLegacyPath(path);
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadSprites = useCallback(async () => {
+    try {
+      const list = await invoke<SpriteEntry[]>('list_sprites');
+      setSprites(list);
+      const srcs: Record<string, string> = {};
+      await Promise.all(
+        list.map(async (s) => {
+          try {
+            srcs[s.dirId] = await invoke<string>('get_sprite_image', { dirId: s.dirId, fileName: 'sprite_processed.png' });
+          } catch {
+            try {
+              srcs[s.dirId] = await invoke<string>('get_sprite_image', { dirId: s.dirId, fileName: s.spriteFile });
+            } catch { /* skip */ }
+          }
+        })
+      );
+      setSpriteSrcs(srcs);
+    } catch (e) {
+      message.error(formatError(e, t('settings.spriteLoadFailed')));
+    }
+  }, [t]);
+
+  const loadSpriteSettings = useCallback(async () => {
+    try {
+      const s = await invoke<{ selected_sprite_id?: string; sprite_size?: number }>('get_settings');
+      if (s.selected_sprite_id) setSelectedSpriteId(s.selected_sprite_id);
+      if (s.sprite_size) setSpriteSize(s.sprite_size);
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     loadSettings();
     loadDevices();
-  }, [loadSettings, loadDevices]);
+    detectLegacyPath();
+    loadSprites();
+    loadSpriteSettings();
+  }, [loadSettings, loadDevices, detectLegacyPath, loadSprites, loadSpriteSettings]);
 
   const updateSetting = async (key: string, value: unknown) => {
     try {
@@ -81,6 +134,18 @@ export default function Settings() {
   };
 
   const [recordingHotkey, setRecordingHotkey] = useState(false);
+
+  // Data import state
+  const [legacyPath, setLegacyPath] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  // Sprite state
+  const [sprites, setSprites] = useState<SpriteEntry[]>([]);
+  const [spriteSrcs, setSpriteSrcs] = useState<Record<string, string>>({});
+  const [selectedSpriteId, setSelectedSpriteId] = useState('');
+  const [spriteSize, setSpriteSize] = useState(180);
+  const [bgThreshold, setBgThreshold] = useState(0.18);
+  const [bgProcessing, setBgProcessing] = useState(false);
 
   const keyEventToShortcut = (e: React.KeyboardEvent): string | null => {
     const parts: string[] = [];
@@ -99,8 +164,7 @@ export default function Settings() {
     const mapped = keyMap[key] || (key.length === 1 ? key.toUpperCase() : key);
     parts.push(mapped);
 
-    if (parts.length < 2) return null;
-    return parts.join('+');
+    return parts.join('+') || null;
   };
 
   const handleHotkeyKeyDown = (e: React.KeyboardEvent) => {
@@ -145,6 +209,110 @@ export default function Settings() {
     } catch (e) {
       message.error(formatError(e, t('settings.clearHistoryFailed')));
     }
+  };
+
+  const showImportResult = (result: ImportResult) => {
+    let msg = t('settings.importSuccess', {
+      transcriptions: result.transcriptions_imported,
+      vocabulary: result.vocabulary_imported,
+      replacements: result.replacements_imported,
+      recordings: result.recordings_copied,
+    });
+    if (result.transcriptions_skipped > 0) {
+      msg += t('settings.importSkipped', { skipped: result.transcriptions_skipped });
+    }
+    message.success(msg);
+  };
+
+  const handleImportLegacyAuto = async () => {
+    if (!legacyPath) return;
+    setImporting(true);
+    try {
+      const result = await invoke<ImportResult>('import_voiceink_legacy', { storePath: legacyPath });
+      logEvent('Settings', 'import_legacy_auto', { ...result });
+      showImportResult(result);
+    } catch (e) {
+      message.error(formatError(e, t('settings.importFailed')));
+    }
+    setImporting(false);
+  };
+
+  const handleImportLegacyManual = async () => {
+    setImporting(true);
+    try {
+      const result = await invoke<ImportResult>('import_voiceink_from_dialog');
+      logEvent('Settings', 'import_legacy_manual', { ...result });
+      showImportResult(result);
+    } catch (e) {
+      message.error(formatError(e, t('settings.importFailed')));
+    }
+    setImporting(false);
+  };
+
+  const handleSpriteImportFolder = async () => {
+    try {
+      const result = await invoke<SpriteEntry | null>('import_sprite_folder');
+      if (result) {
+        logEvent('Sprite', 'import_folder', { name: result.name });
+        message.success(t('settings.spriteImportSuccess', { name: result.name }));
+        await loadSprites();
+      }
+    } catch (e) {
+      message.error(formatError(e, t('settings.spriteImportFailed')));
+    }
+  };
+
+  const handleSpriteImportZip = async () => {
+    try {
+      const result = await invoke<SpriteEntry | null>('import_sprite_zip');
+      if (result) {
+        logEvent('Sprite', 'import_zip', { name: result.name });
+        message.success(t('settings.spriteImportSuccess', { name: result.name }));
+        await loadSprites();
+      }
+    } catch (e) {
+      message.error(formatError(e, t('settings.spriteImportFailed')));
+    }
+  };
+
+  const handleSpriteDelete = async (dirId: string) => {
+    try {
+      await invoke('delete_sprite', { dirId });
+      logEvent('Sprite', 'delete', { dirId });
+      message.success(t('settings.spriteDeleteSuccess'));
+      if (selectedSpriteId === dirId) {
+        setSelectedSpriteId('');
+        updateSetting('selected_sprite_id', '');
+      }
+      await loadSprites();
+    } catch (e) {
+      message.error(formatError(e, t('settings.spriteImportFailed')));
+    }
+  };
+
+  const handleSpriteSelect = (dirId: string) => {
+    const newValue = dirId === selectedSpriteId ? '' : dirId;
+    setSelectedSpriteId(newValue);
+    updateSetting('selected_sprite_id', newValue);
+  };
+
+  const handleSpriteSizeChange = (size: number) => {
+    setSpriteSize(size);
+    updateSetting('sprite_size', size);
+  };
+
+  const handleBgThresholdCommit = async (value: number) => {
+    setBgThreshold(value);
+    if (!selectedSpriteId) return;
+    setBgProcessing(true);
+    try {
+      await invoke('process_sprite_background', { dirId: selectedSpriteId, threshold: value });
+      logEvent('Sprite', 'process_background', { dirId: selectedSpriteId, threshold: value });
+      await loadSprites();
+    } catch (e) {
+      message.error(formatError(e, t('settings.spriteProcessFailed')));
+    }
+    setBgProcessing(false);
   };
 
   const settingRow = (label: string, control: React.ReactNode) => (
@@ -268,6 +436,98 @@ export default function Settings() {
           <Popconfirm title={t('settings.confirmClearHistory')} onConfirm={handleClearAllHistory} okText={t('common.confirm')} cancelText={t('common.cancel')}>
             <Button danger icon={<ClearOutlined />}>{t('settings.clearAllHistory')}</Button>
           </Popconfirm>
+        </Flex>
+      ),
+    },
+    {
+      key: 'import',
+      label: <Space><ImportOutlined />{t('settings.sectionImport')}</Space>,
+      children: (
+        <Flex vertical gap={8} style={{ width: '100%' }}>
+          {legacyPath ? (
+            <>
+              <Text type="success">{t('settings.importLegacyDetected')}</Text>
+              <Text type="secondary" copyable style={{ fontSize: 12 }}>{legacyPath}</Text>
+              <Space>
+                <Button type="primary" onClick={handleImportLegacyAuto} loading={importing}>
+                  {t('settings.importLegacyAuto')}
+                </Button>
+                <Button onClick={handleImportLegacyManual} loading={importing}>
+                  {t('settings.importLegacyManual')}
+                </Button>
+              </Space>
+            </>
+          ) : (
+            <>
+              <Text type="secondary">{t('settings.importLegacyNotDetected')}</Text>
+              <Button onClick={handleImportLegacyManual} loading={importing}>
+                {t('settings.importLegacyManual')}
+              </Button>
+            </>
+          )}
+        </Flex>
+      ),
+    },
+    {
+      key: 'sprite',
+      label: <Space><PictureOutlined />{t('settings.sectionSprite')}</Space>,
+      children: (
+        <Flex vertical gap={12} style={{ width: '100%' }}>
+          <Space>
+            <Button icon={<FolderOpenOutlined />} onClick={handleSpriteImportFolder}>
+              {t('settings.spriteImportFolder')}
+            </Button>
+            <Button icon={<FileZipOutlined />} onClick={handleSpriteImportZip}>
+              {t('settings.spriteImportZip')}
+            </Button>
+          </Space>
+
+          {sprites.length === 0 ? (
+            <Text type="secondary">{t('settings.spriteNoData')}</Text>
+          ) : (
+            <Flex wrap="wrap" gap={12}>
+              {sprites.map((sprite) =>
+                spriteSrcs[sprite.dirId] && (
+                  <SpriteCard
+                    key={sprite.dirId}
+                    manifest={sprite}
+                    imageSrc={spriteSrcs[sprite.dirId]}
+                    isSelected={selectedSpriteId === sprite.dirId}
+                    onSelect={() => handleSpriteSelect(sprite.dirId)}
+                    onDelete={() => handleSpriteDelete(sprite.dirId)}
+                  />
+                )
+              )}
+            </Flex>
+          )}
+
+          {sprites.length > 0 && (
+            <Flex vertical gap={16} style={{ maxWidth: 400 }}>
+              <div>
+                <Flex justify="space-between" align="center">
+                  <Text>{t('settings.spriteSize')}</Text>
+                  <Text type="secondary">{spriteSize}px</Text>
+                </Flex>
+                <Slider min={80} max={300} step={10} value={spriteSize} onChange={handleSpriteSizeChange} />
+              </div>
+              <div>
+                <Flex justify="space-between" align="center">
+                  <Text>{t('settings.spriteBgRemoval')}</Text>
+                  <Text type="secondary">{bgThreshold.toFixed(2)}</Text>
+                </Flex>
+                <Slider
+                  min={0.01} max={0.50} step={0.01}
+                  value={bgThreshold}
+                  onChange={setBgThreshold}
+                  onChangeComplete={handleBgThresholdCommit}
+                  disabled={!selectedSpriteId || bgProcessing}
+                />
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('settings.spriteBgRemovalHint')}
+                </Text>
+              </div>
+            </Flex>
+          )}
         </Flex>
       ),
     },

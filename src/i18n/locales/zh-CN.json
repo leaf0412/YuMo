@@ -277,5 +277,28 @@
   "onboarding.stepAcc": "辅助功能",
   "onboarding.stepModel": "模型",
   "onboarding.stepHotkey": "快捷键",
-  "onboarding.stepDone": "完成"
+  "onboarding.stepDone": "完成",
+
+  "settings.sectionImport": "数据导入",
+  "settings.importLegacyDetected": "检测到旧版语墨数据",
+  "settings.importLegacyAuto": "自动导入",
+  "settings.importLegacyManual": "手动选择文件",
+  "settings.importLegacyNotDetected": "未检测到旧版语墨数据，可手动选择 .store 文件导入。",
+  "settings.importSuccess": "导入完成：转录 {{transcriptions}} 条，词汇 {{vocabulary}} 条，替换 {{replacements}} 条，录音 {{recordings}} 个",
+  "settings.importSkipped": "（跳过重复 {{skipped}} 条）",
+  "settings.importFailed": "导入失败",
+  "settings.importing": "导入中...",
+
+  "settings.sectionSprite": "精灵图管理",
+  "settings.spriteImportFolder": "导入文件夹",
+  "settings.spriteImportZip": "导入 ZIP",
+  "settings.spriteNoData": "暂无精灵图，请导入",
+  "settings.spriteSize": "精灵图大小",
+  "settings.spriteBgRemoval": "背景去除",
+  "settings.spriteBgRemovalHint": "值越高去除背景越彻底，但可能影响精灵图本体颜色。需先选中一个精灵图。",
+  "settings.spriteImportSuccess": "导入成功: {{name}}",
+  "settings.spriteDeleteSuccess": "已删除",
+  "settings.spriteLoadFailed": "加载精灵图失败",
+  "settings.spriteImportFailed": "导入失败",
+  "settings.spriteProcessFailed": "处理失败"
 }
