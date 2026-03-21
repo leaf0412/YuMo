@@ -357,66 +357,110 @@ def _transcribe_glmasr(model, audio_path, language=None, temperature=0.0):
     return text
 
 
+_QWEN3_LANG_MAP = {
+    "zh": "Chinese", "en": "English", "ja": "Japanese", "ko": "Korean",
+    "fr": "French", "de": "German", "es": "Spanish", "pt": "Portuguese",
+    "it": "Italian", "ru": "Russian", "yue": "Cantonese",
+    "chinese": "Chinese", "english": "English", "japanese": "Japanese",
+    "korean": "Korean", "french": "French", "german": "German",
+    "spanish": "Spanish", "portuguese": "Portuguese", "italian": "Italian",
+    "russian": "Russian", "cantonese": "Cantonese",
+}
+
+
 def _transcribe_qwen3_asr(model, audio_path, language=None, max_tokens=8192, temperature=0.0):
-    """Transcribe using Qwen3-ASR model."""
+    """Transcribe using Qwen3-ASR model, with VAD chunking for long audio."""
+    import soundfile as sf
+    import numpy as np
+    import re as _re
+
     log(f"Qwen3-ASR transcribing: {audio_path}, language={language}")
 
-    # Qwen3-ASR expects full language names, not ISO codes
-    # Map common ISO 639-1 codes to Qwen3-ASR language names
-    qwen3_lang_map = {
-        "zh": "Chinese",
-        "en": "English",
-        "ja": "Japanese",
-        "ko": "Korean",
-        "fr": "French",
-        "de": "German",
-        "es": "Spanish",
-        "pt": "Portuguese",
-        "it": "Italian",
-        "ru": "Russian",
-        "yue": "Cantonese",
-        # Also support already-correct formats (case-insensitive)
-        "chinese": "Chinese",
-        "english": "English",
-        "japanese": "Japanese",
-        "korean": "Korean",
-        "french": "French",
-        "german": "German",
-        "spanish": "Spanish",
-        "portuguese": "Portuguese",
-        "italian": "Italian",
-        "russian": "Russian",
-        "cantonese": "Cantonese",
+    audio_data, sample_rate = sf.read(audio_path, dtype='float32')
+    duration_secs = len(audio_data) / sample_rate
+    log(f"Qwen3-ASR audio duration: {duration_secs:.2f}s")
+
+    if len(audio_data.shape) > 1:
+        audio_data = audio_data.mean(axis=1)
+
+    if sample_rate != 16000:
+        from mlx_audio.stt.utils import resample_audio
+        audio_data = resample_audio(audio_data, sample_rate, 16000)
+        sample_rate = 16000
+
+    max_chunk_secs = 30
+
+    if duration_secs <= max_chunk_secs + 5:
+        # Short audio — single pass
+        text = _qwen3_generate_single(model, audio_path, language, max_tokens, temperature)
+    else:
+        # Long audio — VAD split
+        log(f"Long audio ({duration_secs:.1f}s), VAD splitting for Qwen3-ASR")
+        chunks = _vad_split_audio(audio_data, sample_rate, np,
+                                  max_chunk_secs=max_chunk_secs,
+                                  min_chunk_secs=15)
+        log(f"Qwen3-ASR: {len(chunks)} chunks")
+
+        detected_lang = language
+        texts = []
+        tmp_dir = os.path.join(os.path.expanduser("~"), ".voiceink", "tmp")
+        os.makedirs(tmp_dir, exist_ok=True)
+
+        for idx, (chunk, chunk_offset) in enumerate(chunks):
+            chunk_duration = len(chunk) / sample_rate
+            log(f"Qwen3 Chunk {idx}: offset={chunk_offset:.1f}s duration={chunk_duration:.1f}s")
+
+            # Write chunk to temp WAV
+            tmp_chunk = os.path.join(tmp_dir, f"qwen3_chunk_{idx}.wav")
+            sf.write(tmp_chunk, chunk, sample_rate)
+
+            chunk_text = _qwen3_generate_single(model, tmp_chunk, detected_lang, max_tokens, temperature)
+
+            try:
+                os.unlink(tmp_chunk)
+            except Exception:
+                pass
+
+            # Detect language from first chunk
+            if idx == 0 and detected_lang in (None, "auto", ""):
+                detected_lang = _detect_language_from_text(chunk_text)
+                log(f"Qwen3-ASR language detected: {detected_lang}")
+
+            chunk_text = _clean_funasr_text(chunk_text, _re)
+            if chunk_text:
+                texts.append(chunk_text)
+                preview = f"'{chunk_text[:50]}...'" if len(chunk_text) > 50 else f"'{chunk_text}'"
+                log(f"Qwen3 Chunk {idx} result: {preview}")
+
+        text = "".join(texts)
+        log(f"Qwen3-ASR chunked complete: {len(chunks)} chunks, {len(text)} chars")
+
+    log(f"Final text: '{text}' (length: {len(text)})")
+    return text
+
+
+def _qwen3_generate_single(model, audio_path, language, max_tokens, temperature):
+    """Transcribe a single audio file with Qwen3-ASR."""
+    generate_kwargs = {
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_p": 1.0,
+        "verbose": False,
     }
+    if language and language not in ("auto", ""):
+        mapped = _QWEN3_LANG_MAP.get(language.lower(), language)
+        generate_kwargs["language"] = mapped
 
     old_stdout = sys.stdout
     sys.stdout = sys.stderr
     try:
-        # Qwen3-ASR supports language parameter for better accuracy
-        generate_kwargs = {
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": 1.0,  # Disable nucleus sampling to avoid MLX boolean indexing bug
-            "verbose": False,
-        }
-        if language and language != "auto":
-            # Map ISO code to Qwen3-ASR language name
-            mapped_lang = qwen3_lang_map.get(language.lower(), language)
-            generate_kwargs["language"] = mapped_lang
-            log(f"Qwen3-ASR using language: {mapped_lang} (from {language})")
-
         result = model.generate(audio_path, **generate_kwargs)
     finally:
         sys.stdout = old_stdout
 
     text = result.text if hasattr(result, 'text') else str(result)
-    log(f"Qwen3-ASR raw text: '{text}'")
-
-    if text:
-        text = text.strip()
-
-    log(f"Final text: '{text}' (length: {len(text)})")
-    return text
+    _log_funasr_result(result)
+    return text.strip() if text else ""
 
 
 def _transcribe_funasr(model, audio_path, language=None, max_tokens=500, temperature=0.0):
@@ -456,7 +500,7 @@ def _funasr_generate_text(model, audio_path, language, sf, np, max_tokens=500, t
         sample_rate = target_sr
 
     duration_secs = len(audio_data) / sample_rate
-    max_chunk_secs = 30  # FunASR works best with ≤30s audio
+    max_chunk_secs = 30   # FunASR works best with ≤30s audio
 
     if duration_secs <= max_chunk_secs + 5:
         # Short audio: process as single chunk
@@ -465,7 +509,7 @@ def _funasr_generate_text(model, audio_path, language, sf, np, max_tokens=500, t
         # Long audio: VAD-based split at silence boundaries
         chunks = _vad_split_audio(audio_data, sample_rate, np,
                                   max_chunk_secs=max_chunk_secs,
-                                  min_chunk_secs=5)
+                                  min_chunk_secs=15)
         log(f"Long audio ({duration_secs:.1f}s), VAD split into {len(chunks)} chunks")
 
         # For "auto" language: detect language on first chunk, then lock it for all chunks.
