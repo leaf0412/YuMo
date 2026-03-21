@@ -7243,12 +7243,17 @@ dependencies = [
 name = "yumo-napi"
 version = "0.3.0"
 dependencies = [
+ "dirs 5.0.1",
+ "hound",
  "log",
  "napi",
  "napi-build",
  "napi-derive",
  "serde_json",
+ "tokio",
+ "uuid",
  "yumo-core",
+ "zip",
 ]
 
 [[package]]

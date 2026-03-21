@@ -4,8 +4,9 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use yumo_core::daemon::DaemonManager;
 use yumo_core::db;
+use yumo_core::platform;
 use yumo_core::state::{AppContext, AppPaths};
-use yumo_core::transcriber;
+use yumo_core::{audio_io, text_processor, transcriber};
 
 // ---------------------------------------------------------------------------
 // Global state (initialized once via `init`)
@@ -415,4 +416,719 @@ pub fn daemon_unload_model() -> Result<()> {
 pub fn daemon_check_deps() -> Result<bool> {
     let d = daemon()?;
     Ok(d.has_python())
+}
+
+// ---------------------------------------------------------------------------
+// Recording pipeline
+// ---------------------------------------------------------------------------
+
+/// Start recording from the given audio device (or default).
+#[napi]
+pub fn start_recording(device_id: Option<u32>) -> Result<String> {
+    let app = ctx()?;
+
+    // 1. Check idle
+    {
+        let pipeline = app.pipeline_state.lock()
+            .map_err(|e| Error::from_reason(format!("pipeline lock: {e}")))?;
+        if *pipeline != yumo_core::pipeline::PipelineState::Idle {
+            return Err(Error::from_reason("Already recording"));
+        }
+    }
+
+    // 2. Read settings and handle system mute
+    let settings = {
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::get_all_settings(&conn)
+            .map_err(|e| Error::from_reason(format!("get_all_settings: {e}")))?
+    };
+    let mute = settings.get("system_mute_enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if mute {
+        let _ = platform::audio_ctrl::set_system_muted(true);
+    }
+
+    // 3. Resolve device
+    let devices = platform::recorder::list_input_devices()
+        .map_err(|e| Error::from_reason(format!("list devices: {e}")))?;
+    if devices.is_empty() {
+        return Err(Error::from_reason("No input devices found"));
+    }
+    let dev_id = device_id.unwrap_or_else(|| {
+        let saved = settings.get("audio_device")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        if let Some(id) = saved {
+            if devices.iter().any(|d| d.id == id) {
+                return id;
+            }
+        }
+        devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(devices[0].id)
+    });
+
+    // 4. Start recording
+    let (handle, _level_rx) = platform::recorder::start_recording(dev_id)
+        .map_err(|e| Error::from_reason(format!("start_recording: {e}")))?;
+
+    // 5. Store handle and update state
+    {
+        let mut rec = app.recording_handle.lock()
+            .map_err(|e| Error::from_reason(format!("recording lock: {e}")))?;
+        *rec = Some(handle);
+    }
+    {
+        let mut pipeline = app.pipeline_state.lock()
+            .map_err(|e| Error::from_reason(format!("pipeline lock: {e}")))?;
+        *pipeline = yumo_core::pipeline::PipelineState::Recording;
+    }
+
+    Ok(serde_json::json!({"state": "recording"}).to_string())
+}
+
+/// Stop recording, transcribe, apply text processing, paste, and save to DB.
+/// Returns a JSON string with the transcription result.
+#[napi]
+pub async fn stop_recording() -> Result<String> {
+    let app = ctx()?;
+
+    // 1. Take recording handle
+    let handle = {
+        app.recording_handle.lock()
+            .map_err(|e| Error::from_reason(format!("recording lock: {e}")))?
+            .take()
+            .ok_or_else(|| Error::from_reason("Not recording"))?
+    };
+
+    // 1.5 Update state to Processing
+    {
+        let mut pipeline = app.pipeline_state.lock()
+            .map_err(|e| Error::from_reason(format!("pipeline lock: {e}")))?;
+        *pipeline = yumo_core::pipeline::PipelineState::Processing;
+    }
+
+    // 2. Stop recording and get audio data
+    let audio_data = platform::recorder::stop_recording(handle)
+        .map_err(|e| Error::from_reason(format!("stop_recording: {e}")))?;
+
+    let audio_duration_secs = if audio_data.sample_rate > 0 && audio_data.channels > 0 {
+        audio_data.pcm_samples.len() as f64 / audio_data.sample_rate as f64 / audio_data.channels as f64
+    } else {
+        0.0
+    };
+
+    // 2.5 Save recording WAV
+    let recording_path = audio_io::save_recording(&audio_data, &app.paths.recordings_dir)
+        .ok()
+        .map(|p| p.to_string_lossy().to_string());
+
+    // 3. Update state to Transcribing
+    {
+        let mut pipeline = app.pipeline_state.lock()
+            .map_err(|e| Error::from_reason(format!("pipeline lock: {e}")))?;
+        *pipeline = yumo_core::pipeline::PipelineState::Transcribing;
+    }
+
+    // 4. Read settings
+    let settings_map = {
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::get_all_settings(&conn)
+            .map_err(|e| Error::from_reason(format!("get_all_settings: {e}")))?
+    };
+    let model_id = settings_map.get("selected_model_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("ggml-base.en")
+        .to_string();
+    let language = settings_map.get("language")
+        .and_then(|v| v.as_str())
+        .unwrap_or("en")
+        .to_string();
+    let temperature_key = format!("model_{}_temperature", model_id);
+    let max_tokens_key = format!("model_{}_max_tokens", model_id);
+    let temperature: f64 = settings_map.get(&temperature_key)
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let max_tokens: u32 = settings_map.get(&max_tokens_key)
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32)
+        .unwrap_or(1900);
+
+    // 5. Transcribe — route by model provider
+    let all = transcriber::all_models(&app.paths.models_dir);
+    let model_info = all.iter().find(|m| m.id == model_id);
+
+    let transcribe_result = match model_info.map(|m| &m.provider) {
+        Some(transcriber::ModelProvider::MlxFunASR) => {
+            // Use daemon for MLX transcription
+            let d = daemon()?;
+            if !d.is_running() {
+                d.start().map_err(|e| Error::from_reason(format!("daemon start: {e}")))?;
+            }
+            // Auto-load model if needed
+            let model_repo = model_info.and_then(|m| m.model_repo.clone());
+            let loaded = d.loaded_model();
+            if model_repo.is_some() && loaded.as_ref() != model_repo.as_ref() {
+                let repo = model_repo.as_ref().unwrap();
+                let cmd = serde_json::json!({"action": "load", "model": repo});
+                let resp = d.send_command(&cmd)
+                    .map_err(|e| Error::from_reason(format!("daemon load: {e}")))?;
+                if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" {
+                    d.set_loaded_model(model_repo.clone());
+                } else {
+                    let msg = resp.error.unwrap_or_else(|| format!("load failed: {}", resp.status));
+                    // Reset to idle on failure
+                    let mut pipeline = app.pipeline_state.lock()
+                        .map_err(|e| Error::from_reason(format!("pipeline lock: {e}")))?;
+                    *pipeline = yumo_core::pipeline::PipelineState::Idle;
+                    return Err(Error::from_reason(msg));
+                }
+            }
+            // Write temp WAV and send to daemon synchronously
+            let samples = audio_data.pcm_samples.clone();
+            let sr = audio_data.sample_rate;
+            let lang = language.clone();
+            let tmp_dir = dirs::home_dir().unwrap_or_default().join(".voiceink/tmp");
+            std::fs::create_dir_all(&tmp_dir)
+                .map_err(|e| Error::from_reason(format!("create tmp dir: {e}")))?;
+            let wav_path = tmp_dir.join("recording.wav");
+            let spec = hound::WavSpec {
+                channels: 1,
+                sample_rate: sr,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            };
+            let mut writer = hound::WavWriter::create(&wav_path, spec)
+                .map_err(|e| Error::from_reason(format!("wav create: {e}")))?;
+            for &s in &samples {
+                writer.write_sample(s).map_err(|e| Error::from_reason(format!("wav write: {e}")))?;
+            }
+            writer.finalize().map_err(|e| Error::from_reason(format!("wav finalize: {e}")))?;
+
+            let cmd = serde_json::json!({
+                "action": "transcribe",
+                "audio": wav_path.to_string_lossy(),
+                "language": lang,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            });
+            // Must drop previous guard, re-acquire for send_command
+            drop(d);
+            let daemon_ref = daemon()?;
+            let resp = daemon_ref.send_command(&cmd)
+                .map_err(|e| Error::from_reason(format!("daemon transcribe: {e}")))?;
+            let _ = std::fs::remove_file(&wav_path);
+            daemon_ref.check_and_restart_if_bloated();
+
+            if resp.status == "success" {
+                Ok(transcriber::TranscriptionResult {
+                    text: resp.text.unwrap_or_default(),
+                    duration_ms: 0,
+                })
+            } else {
+                Err(Error::from_reason(
+                    resp.error.unwrap_or_else(|| "Transcription failed".into())
+                ))
+            }
+        }
+        _ => {
+            // Local whisper model
+            let model_path = transcriber::model_path(&app.paths.models_dir, &model_id);
+            if !model_path.exists() {
+                let mut pipeline = app.pipeline_state.lock()
+                    .map_err(|e| Error::from_reason(format!("pipeline lock: {e}")))?;
+                *pipeline = yumo_core::pipeline::PipelineState::Idle;
+                return Err(Error::from_reason("No model downloaded"));
+            }
+            let samples = audio_data.pcm_samples.clone();
+            let sr = audio_data.sample_rate;
+            let lang = language.clone();
+            let temp = temperature as f32;
+            // Run whisper in a blocking task
+            tokio::task::spawn_blocking(move || {
+                let wctx = transcriber::load_model(&model_path)
+                    .map_err(|e| Error::from_reason(format!("load_model: {e}")))?;
+                transcriber::transcribe(&wctx, &samples, sr, &lang, temp)
+                    .map_err(|e| Error::from_reason(format!("transcribe: {e}")))
+            })
+            .await
+            .map_err(|e| Error::from_reason(format!("spawn_blocking: {e}")))?
+        }
+    };
+
+    // Handle transcription failure
+    let result = match transcribe_result {
+        Ok(r) => r,
+        Err(e) => {
+            let mut pipeline = app.pipeline_state.lock()
+                .map_err(|er| Error::from_reason(format!("pipeline lock: {er}")))?;
+            *pipeline = yumo_core::pipeline::PipelineState::Idle;
+            return Err(e);
+        }
+    };
+    let text = result.text;
+
+    // 6. Apply text processing
+    let replacements: Vec<(String, String)> = {
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::get_replacements(&conn)
+            .map_err(|e| Error::from_reason(format!("get_replacements: {e}")))?
+            .into_iter()
+            .map(|r| (r.original, r.replacement))
+            .collect()
+    };
+    let auto_capitalize = settings_map.get("auto_capitalize")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let processed_text = text_processor::process_text(&text, &replacements, auto_capitalize);
+
+    // 7. Paste
+    {
+        let mut pipeline = app.pipeline_state.lock()
+            .map_err(|e| Error::from_reason(format!("pipeline lock: {e}")))?;
+        *pipeline = yumo_core::pipeline::PipelineState::Pasting;
+    }
+
+    let final_text = &processed_text;
+
+    if platform::permissions::check_accessibility() {
+        let restore_delay = settings_map.get("clipboard_restore_delay")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1500.0) as u64;
+        platform::paster::paste_text(final_text, restore_delay);
+    } else {
+        platform::paster::write_clipboard(final_text);
+    }
+
+    // 8. Save to DB
+    let word_count = db::count_words(final_text) as i32;
+    {
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        db::insert_transcription(
+            &conn,
+            &processed_text,
+            None, // enhanced_text not implemented yet
+            audio_duration_secs,
+            &model_id,
+            word_count,
+            recording_path.as_deref(),
+        )
+        .map_err(|e| Error::from_reason(format!("insert_transcription: {e}")))?;
+    }
+
+    // 8.1 Save transcription text alongside WAV
+    if let Some(ref wav_path) = recording_path {
+        let txt_path = std::path::Path::new(wav_path).with_extension("txt");
+        let _ = std::fs::write(&txt_path, final_text);
+    }
+
+    // 9. Unmute system audio
+    if settings_map.get("system_mute_enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        let _ = platform::audio_ctrl::set_system_muted(false);
+    }
+
+    // 10. Back to idle
+    {
+        let mut pipeline = app.pipeline_state.lock()
+            .map_err(|e| Error::from_reason(format!("pipeline lock: {e}")))?;
+        *pipeline = yumo_core::pipeline::PipelineState::Idle;
+    }
+
+    let result_json = serde_json::json!({
+        "text": processed_text,
+        "enhanced_text": serde_json::Value::Null,
+    });
+    Ok(result_json.to_string())
+}
+
+/// Cancel an in-progress recording, discarding audio.
+#[napi]
+pub fn cancel_recording() -> Result<()> {
+    let app = ctx()?;
+
+    let handle = app.recording_handle.lock()
+        .map_err(|e| Error::from_reason(format!("recording lock: {e}")))?
+        .take();
+    if let Some(h) = handle {
+        let _ = platform::recorder::cancel_recording(h);
+    }
+
+    {
+        let mut pipeline = app.pipeline_state.lock()
+            .map_err(|e| Error::from_reason(format!("pipeline lock: {e}")))?;
+        *pipeline = yumo_core::pipeline::PipelineState::Idle;
+    }
+
+    // Unmute if needed
+    if let Ok(conn) = app.db.lock() {
+        if let Ok(settings) = db::get_all_settings(&conn) {
+            if settings.get("system_mute_enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                let _ = platform::audio_ctrl::set_system_muted(false);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Get current pipeline state as a JSON string.
+#[napi]
+pub fn get_pipeline_state() -> Result<String> {
+    let app = ctx()?;
+    let pipeline = app.pipeline_state.lock()
+        .map_err(|e| Error::from_reason(format!("pipeline lock: {e}")))?;
+    let s = match *pipeline {
+        yumo_core::pipeline::PipelineState::Idle => "idle",
+        yumo_core::pipeline::PipelineState::Recording => "recording",
+        yumo_core::pipeline::PipelineState::Processing => "processing",
+        yumo_core::pipeline::PipelineState::Transcribing => "transcribing",
+        yumo_core::pipeline::PipelineState::Enhancing => "enhancing",
+        yumo_core::pipeline::PipelineState::Pasting => "pasting",
+    };
+    Ok(serde_json::json!({"state": s}).to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Recording playback
+// ---------------------------------------------------------------------------
+
+/// Read a recording WAV file and return it as a base64 data URI.
+#[napi]
+pub fn get_recording(recording_path: String) -> Result<String> {
+    let path = std::path::Path::new(&recording_path);
+    audio_io::read_recording_as_data_uri(path)
+        .map_err(|e| Error::from_reason(format!("read_recording: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Model download / delete
+// ---------------------------------------------------------------------------
+
+/// Download a whisper model by ID. Returns progress via polling (not streaming).
+/// For simplicity, this blocks until download completes.
+#[napi]
+pub async fn download_model(model_id: String) -> Result<()> {
+    let app = ctx()?;
+    let models = transcriber::predefined_models();
+    let model = models.iter().find(|m| m.id == model_id)
+        .ok_or_else(|| Error::from_reason(format!("Model {} not found", model_id)))?;
+
+    let dest = transcriber::model_path(&app.paths.models_dir, &model_id);
+    std::fs::create_dir_all(&app.paths.models_dir)
+        .map_err(|e| Error::from_reason(format!("create models dir: {e}")))?;
+
+    let url = model.download_url.clone();
+    yumo_core::downloader::download_file(&url, &dest, None).await
+        .map_err(|e| Error::from_reason(format!("download: {e}")))?;
+
+    Ok(())
+}
+
+/// Delete a model by ID (local whisper .bin or MLX cache directory).
+#[napi]
+pub fn delete_model(model_id: String) -> Result<()> {
+    let app = ctx()?;
+    let all = transcriber::all_models(&app.paths.models_dir);
+    let model_info = all.iter().find(|m| m.id == model_id);
+
+    if let Some(model) = model_info {
+        match model.provider {
+            transcriber::ModelProvider::MlxWhisper | transcriber::ModelProvider::MlxFunASR => {
+                // Delete HuggingFace cache directory
+                if let Some(repo) = &model.model_repo {
+                    let cache_name = repo.replace('/', "--");
+                    let cache_dir = app.paths.models_dir.join(format!("models--{}", cache_name));
+                    if cache_dir.exists() {
+                        std::fs::remove_dir_all(&cache_dir)
+                            .map_err(|e| Error::from_reason(format!("remove MLX cache: {e}")))?;
+                    }
+                }
+                // Unload if this model is currently loaded in daemon
+                if let Ok(d) = daemon() {
+                    if d.loaded_model().as_deref() == model.model_repo.as_deref() {
+                        let cmd = serde_json::json!({"action": "unload"});
+                        let _ = d.send_command(&cmd);
+                        d.set_loaded_model(None);
+                    }
+                }
+            }
+            _ => {
+                let path = transcriber::model_path(&app.paths.models_dir, &model_id);
+                if path.exists() {
+                    std::fs::remove_file(&path)
+                        .map_err(|e| Error::from_reason(format!("remove model: {e}")))?;
+                }
+            }
+        }
+    }
+
+    // Clear selected_model_id if this was the selected model
+    {
+        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+        let selected = db::get_setting(&conn, "selected_model_id")
+            .map_err(|e| Error::from_reason(format!("get_setting: {e}")))?;
+        if selected.as_ref().and_then(|v| v.as_str()) == Some(&model_id) {
+            db::update_setting(&conn, "selected_model_id", &serde_json::json!(""))
+                .map_err(|e| Error::from_reason(format!("update_setting: {e}")))?;
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Sprites
+// ---------------------------------------------------------------------------
+
+/// List all available sprite sheet manifests as a JSON array.
+#[napi]
+pub fn list_sprites() -> Result<String> {
+    let app = ctx()?;
+    let base = &app.paths.sprites_dir;
+    if !base.exists() {
+        return Ok("[]".to_string());
+    }
+    let mut results = Vec::new();
+    let entries = std::fs::read_dir(base)
+        .map_err(|e| Error::from_reason(format!("read sprites dir: {e}")))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| Error::from_reason(format!("read entry: {e}")))?;
+        if !entry.path().is_dir() { continue; }
+        let manifest_path = entry.path().join("manifest.json");
+        if manifest_path.exists() {
+            let data = std::fs::read_to_string(&manifest_path)
+                .map_err(|e| Error::from_reason(format!("read manifest: {e}")))?;
+            if let Ok(mut manifest) = serde_json::from_str::<serde_json::Value>(&data) {
+                let dir_name = entry.file_name().to_string_lossy().to_string();
+                manifest.as_object_mut().map(|m| {
+                    m.insert("dirId".into(), serde_json::Value::String(dir_name));
+                });
+                results.push(manifest);
+            }
+        }
+    }
+    serde_json::to_string(&results)
+        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+}
+
+/// Read a sprite sheet image file as base64 data URI.
+#[napi]
+pub fn get_sprite_image(dir_id: String, file_name: String) -> Result<String> {
+    let app = ctx()?;
+    let path = app.paths.sprites_dir.join(&dir_id).join(&file_name);
+    if !path.exists() {
+        // Try processed version
+        let processed = app.paths.sprites_dir.join(&dir_id).join("sprite_processed.png");
+        if processed.exists() {
+            let data = std::fs::read(&processed)
+                .map_err(|e| Error::from_reason(format!("read processed sprite: {e}")))?;
+            let b64 = audio_io::base64_encode(&data);
+            return Ok(format!("data:image/png;base64,{}", b64));
+        }
+        return Err(Error::from_reason(format!("Sprite image not found: {}", path.display())));
+    }
+    let data = std::fs::read(&path)
+        .map_err(|e| Error::from_reason(format!("read sprite: {e}")))?;
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
+    let mime = match ext {
+        "gif" => "image/gif",
+        "jpg" | "jpeg" => "image/jpeg",
+        _ => "image/png",
+    };
+    let b64 = audio_io::base64_encode(&data);
+    Ok(format!("data:{};base64,{}", mime, b64))
+}
+
+/// Import a sprite from a folder path. The folder must contain manifest.json.
+/// Returns the manifest JSON with dirId added.
+#[napi]
+pub fn import_sprite_folder(path: String) -> Result<String> {
+    let app = ctx()?;
+    let dir_path = std::path::Path::new(&path);
+    let manifest_path = dir_path.join("manifest.json");
+    if !manifest_path.exists() {
+        return Err(Error::from_reason("manifest.json not found in folder"));
+    }
+
+    let manifest_data = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| Error::from_reason(format!("read manifest: {e}")))?;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_data)
+        .map_err(|e| Error::from_reason(format!("parse manifest: {e}")))?;
+
+    let sprite_file = manifest.get("spriteFile")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::from_reason("manifest.json missing spriteFile"))?;
+
+    let sprite_path = dir_path.join(sprite_file);
+    if !sprite_path.exists() {
+        return Err(Error::from_reason(format!("Sprite file not found: {}", sprite_file)));
+    }
+
+    // Create destination
+    let dest_id = uuid::Uuid::new_v4().to_string().to_uppercase();
+    let dest_dir = app.paths.sprites_dir.join(&dest_id);
+    std::fs::create_dir_all(&dest_dir)
+        .map_err(|e| Error::from_reason(format!("create sprite dir: {e}")))?;
+
+    std::fs::copy(&manifest_path, dest_dir.join("manifest.json"))
+        .map_err(|e| Error::from_reason(format!("copy manifest: {e}")))?;
+    std::fs::copy(&sprite_path, dest_dir.join(sprite_file))
+        .map_err(|e| Error::from_reason(format!("copy sprite: {e}")))?;
+
+    // Copy processed version if exists
+    let processed = dir_path.join("sprite_processed.png");
+    if processed.exists() {
+        let _ = std::fs::copy(&processed, dest_dir.join("sprite_processed.png"));
+    }
+
+    let mut result = manifest;
+    result.as_object_mut().map(|m| {
+        m.insert("dirId".into(), serde_json::Value::String(dest_id));
+    });
+    serde_json::to_string(&result)
+        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+}
+
+/// Import a sprite from a .zip archive path.
+/// Returns the manifest JSON with dirId added.
+#[napi]
+pub fn import_sprite_zip(zip_path: String) -> Result<String> {
+    let app = ctx()?;
+    let file_path = std::path::Path::new(&zip_path);
+
+    // Extract to temp directory
+    let tmp_dir = std::env::temp_dir().join(format!("sprite-import-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&tmp_dir)
+        .map_err(|e| Error::from_reason(format!("create tmp dir: {e}")))?;
+
+    let zip_file = std::fs::File::open(file_path)
+        .map_err(|e| Error::from_reason(format!("open zip: {e}")))?;
+    let mut archive = zip::ZipArchive::new(zip_file)
+        .map_err(|e| Error::from_reason(format!("read zip: {e}")))?;
+    archive.extract(&tmp_dir)
+        .map_err(|e| Error::from_reason(format!("extract zip: {e}")))?;
+
+    // Find manifest.json recursively
+    let manifest_path = find_manifest_in_dir(&tmp_dir)
+        .ok_or_else(|| Error::from_reason("manifest.json not found in zip"))?;
+
+    let manifest_data = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| Error::from_reason(format!("read manifest: {e}")))?;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_data)
+        .map_err(|e| Error::from_reason(format!("parse manifest: {e}")))?;
+
+    let sprite_file = manifest.get("spriteFile")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::from_reason("manifest.json missing spriteFile"))?;
+
+    let manifest_dir = manifest_path.parent().unwrap_or(&tmp_dir);
+    let sprite_path = manifest_dir.join(sprite_file);
+    if !sprite_path.exists() {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err(Error::from_reason(format!("Sprite file not found: {}", sprite_file)));
+    }
+
+    // Create destination
+    let dest_id = uuid::Uuid::new_v4().to_string().to_uppercase();
+    let dest_dir = app.paths.sprites_dir.join(&dest_id);
+    std::fs::create_dir_all(&dest_dir)
+        .map_err(|e| Error::from_reason(format!("create sprite dir: {e}")))?;
+
+    std::fs::copy(&manifest_path, dest_dir.join("manifest.json"))
+        .map_err(|e| Error::from_reason(format!("copy manifest: {e}")))?;
+    std::fs::copy(&sprite_path, dest_dir.join(sprite_file))
+        .map_err(|e| Error::from_reason(format!("copy sprite: {e}")))?;
+
+    let processed = manifest_dir.join("sprite_processed.png");
+    if processed.exists() {
+        let _ = std::fs::copy(&processed, dest_dir.join("sprite_processed.png"));
+    }
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+
+    let mut result = manifest;
+    result.as_object_mut().map(|m| {
+        m.insert("dirId".into(), serde_json::Value::String(dest_id));
+    });
+    serde_json::to_string(&result)
+        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
+}
+
+/// Delete a sprite sheet by its directory ID.
+#[napi]
+pub fn delete_sprite(dir_id: String) -> Result<()> {
+    let app = ctx()?;
+    let dir = app.paths.sprites_dir.join(&dir_id);
+    if dir.exists() && dir.is_dir() {
+        std::fs::remove_dir_all(&dir)
+            .map_err(|e| Error::from_reason(format!("remove sprite dir: {e}")))?;
+    }
+    // Clear selected_sprite_id if it was the deleted one
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    if let Ok(Some(current)) = db::get_setting(&conn, "selected_sprite_id") {
+        if current.as_str() == Some(dir_id.as_str()) {
+            let _ = db::update_setting(&conn, "selected_sprite_id", &serde_json::Value::String(String::new()));
+        }
+    }
+    Ok(())
+}
+
+/// Recursively find manifest.json in a directory.
+fn find_manifest_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let direct = dir.join("manifest.json");
+    if direct.exists() {
+        return Some(direct);
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = find_manifest_in_dir(&path) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Legacy import
+// ---------------------------------------------------------------------------
+
+/// Auto-detect VoiceInk macOS data directory.
+#[napi]
+pub fn detect_voiceink_legacy_path() -> Option<String> {
+    let home = dirs::home_dir()?;
+    let store = home.join("Library/Application Support/com.prakashjoshipax.VoiceInk/default.store");
+    if store.exists() {
+        Some(store.to_string_lossy().to_string())
+    } else {
+        None
+    }
+}
+
+/// Import legacy VoiceInk data from a .store file path.
+/// Returns a JSON string with import results.
+#[napi]
+pub fn import_voiceink_legacy(store_path: String) -> Result<String> {
+    let app = ctx()?;
+    let store = std::path::Path::new(&store_path);
+    if !store.exists() {
+        return Err(Error::from_reason("VoiceInk database file not found"));
+    }
+
+    let dict_store = store.parent().map(|p| p.join("dictionary.store"));
+    let dict_ref = dict_store.as_deref().filter(|p| p.exists());
+
+    let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+    let result = db::import_voiceink_legacy(&conn, store, dict_ref, &app.paths.recordings_dir)
+        .map_err(|e| Error::from_reason(format!("import_legacy: {e}")))?;
+    serde_json::to_string(&result)
+        .map_err(|e| Error::from_reason(format!("JSON serialize: {e}")))
 }
