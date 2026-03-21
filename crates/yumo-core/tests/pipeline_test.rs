@@ -1,4 +1,4 @@
-use yumo_lib::pipeline;
+use yumo_core::pipeline;
 
 #[test]
 fn test_pipeline_state_transitions() {
