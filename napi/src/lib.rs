@@ -1239,6 +1239,32 @@ fn sprite_color_dist(a: &(f64, f64, f64), b: &(f64, f64, f64)) -> f64 {
     ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2) + (a.2 - b.2).powi(2)).sqrt()
 }
 
+// ---------------------------------------------------------------------------
+// Permissions
+// ---------------------------------------------------------------------------
+
+/// Check microphone and accessibility permissions (macOS-native checks).
+#[napi]
+pub async fn check_permissions() -> Result<String> {
+    tokio::task::spawn_blocking(|| {
+        let status = platform::permissions::check_all();
+        serde_json::to_string(&status)
+            .map_err(|e| Error::from_reason(format!("JSON: {e}")))
+    })
+    .await
+    .map_err(|e| Error::from_reason(format!("spawn: {e}")))?
+}
+
+/// Open system settings for a specific permission type.
+#[napi]
+pub fn request_permission(permission_type: String) {
+    match permission_type.as_str() {
+        "microphone" => platform::permissions::open_microphone_settings(),
+        "accessibility" => platform::permissions::open_accessibility_settings(),
+        _ => {}
+    }
+}
+
 /// Recursively find manifest.json in a directory.
 fn find_manifest_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let direct = dir.join("manifest.json");

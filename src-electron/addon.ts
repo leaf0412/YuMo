@@ -92,6 +92,10 @@ export type NapiAddon = {
   deleteSprite(dirId: string): Promise<void>;
   processSpriteBackground(dirId: string, threshold: number): Promise<void>;
 
+  // Permissions
+  checkPermissions(): Promise<string>;
+  requestPermission(permissionType: string): void;
+
   // Legacy import
   detectVoiceinkLegacyPath(): Promise<string | null>;
   importVoiceinkLegacy(storePath: string): Promise<string>;

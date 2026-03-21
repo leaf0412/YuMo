@@ -7,13 +7,18 @@ import {
 
 export function registerSystemHandlers(): void {
   // --- Permissions ---
-  ipcMain.handle("check-permissions", () => {
-    return { microphone: true, accessibility: true };
+  ipcMain.handle("check-permissions", async () => {
+    return JSON.parse(await getAddon().checkPermissions());
   });
 
-  ipcMain.handle("request-permission", () => {
-    // no-op in Electron (OS-level permissions)
-  });
+  ipcMain.handle(
+    "request-permission",
+    (_e, args?: { permissionType?: string }) => {
+      if (args?.permissionType) {
+        getAddon().requestPermission(args.permissionType);
+      }
+    },
+  );
 
   // --- Pipeline state ---
   ipcMain.handle("get-pipeline-state", () => {
