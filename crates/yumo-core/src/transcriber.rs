@@ -316,6 +316,12 @@ pub fn all_models(models_dir: &Path) -> Vec<ModelInfo> {
     let dirs = model_search_dirs(models_dir);
     let mut models = all_predefined_models();
 
+    // Filter out MLX models on non-macOS platforms (they require Apple Silicon + MLX framework)
+    #[cfg(not(target_os = "macos"))]
+    {
+        models.retain(|m| !m.provider.needs_daemon());
+    }
+
     for model in &mut models {
         match model.provider {
             ModelProvider::Local => {

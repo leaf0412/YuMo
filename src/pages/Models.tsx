@@ -33,7 +33,11 @@ export default function Models() {
   const { t } = useTranslation();
   const { models, settings, daemonStatus, fetchModels, fetchSettings, fetchDaemonStatus, setSettings: storeSetSettings, setDaemonStatus: storeSetDaemonStatus } = useAppStore();
   const [cloudApiKey, setCloudApiKey] = useState('');
-  const [activeTab, setActiveTab] = useState('mlx');
+  // Default to MLX tab on macOS, cloud tab on other platforms (MLX requires Apple Silicon)
+  const [activeTab, setActiveTab] = useState(() => {
+    const isMac = navigator.userAgent.includes('Macintosh') || navigator.platform?.includes('Mac');
+    return isMac ? 'mlx' : 'cloud';
+  });
   const [loadingModel, setLoadingModel] = useState<string | null>(null);
   const [daemonBusy, setDaemonBusy] = useState(false);
   const [setupMessage, setSetupMessage] = useState<string | null>(null);
@@ -435,7 +439,8 @@ export default function Models() {
       </div>
       <Tabs activeKey={activeTab} onChange={setActiveTab}
         items={[
-          { key: 'mlx', label: <span data-testid="local-models-tab">{t('models.tab.mlx', { count: mlxModels.length })}</span>, children: mlxTabContent },
+          // Only show MLX tab when MLX models are available (macOS Apple Silicon)
+          ...(mlxModels.length > 0 ? [{ key: 'mlx', label: <span data-testid="local-models-tab">{t('models.tab.mlx', { count: mlxModels.length })}</span>, children: mlxTabContent }] : []),
           { key: 'cloud', label: <span data-testid="cloud-models-tab">{t('models.tab.cloud', { count: cloudModels.length })}</span>, children: cloudTabContent },
         ]}
       />
