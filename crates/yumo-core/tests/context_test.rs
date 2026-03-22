@@ -93,14 +93,10 @@ fn test_app_paths_from_settings_custom_data_dir() {
         serde_json::json!("/tmp/yumo-test"),
     );
     let paths = AppPaths::from_settings(&settings);
-    assert_eq!(paths.data_dir.to_string_lossy(), "/tmp/yumo-test");
+    assert_eq!(paths.data_dir, std::path::PathBuf::from("/tmp/yumo-test"));
     // Derived dirs should follow data_dir
-    assert!(paths
-        .models_dir
-        .to_string_lossy()
-        .contains("/tmp/yumo-test/models"));
-    assert!(paths
-        .recordings_dir
-        .to_string_lossy()
-        .contains("/tmp/yumo-test/recordings"));
+    let expected_models = std::path::PathBuf::from("/tmp/yumo-test").join("models");
+    let expected_recordings = std::path::PathBuf::from("/tmp/yumo-test").join("recordings");
+    assert_eq!(paths.models_dir, expected_models);
+    assert_eq!(paths.recordings_dir, expected_recordings);
 }
