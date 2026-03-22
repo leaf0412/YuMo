@@ -275,6 +275,15 @@ export default function App() {
     fetchModels();
   }, [fetchSettings, fetchPermissions, fetchDaemonStatus, fetchModels]);
 
+  // Listen for backend daemon-status-changed event to keep sidebar in sync
+  useEffect(() => {
+    const unlisten = listen('daemon-status-changed', () => {
+      logEvent('App', 'daemon_status_changed_received');
+      fetchDaemonStatus();
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [fetchDaemonStatus]);
+
   // Global hotkey listener — works on any page
   useEffect(() => {
     const unlistenToggle = listen('toggle-recording', async () => {

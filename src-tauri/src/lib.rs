@@ -270,6 +270,8 @@ pub fn run() {
             // CSV
             commands::import_dictionary_csv,
             commands::export_dictionary_csv,
+            commands::import_dictionary_csv_dialog,
+            commands::export_dictionary_csv_dialog,
             // MLX Daemon
             commands::daemon_start,
             commands::daemon_stop,

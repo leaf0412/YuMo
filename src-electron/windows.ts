@@ -156,6 +156,14 @@ export function getRecorderWindow(): BrowserWindow | null {
   return recorderWindow && !recorderWindow.isDestroyed() ? recorderWindow : null;
 }
 
+export function emitDaemonStatusChanged(): void {
+  for (const win of [getMainWindow(), getRecorderWindow()]) {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send("daemon-status-changed");
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Window position persistence (mirrors Tauri WindowManager)
 // ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 import { registerAllHandlers } from "./ipc/index";
-import { createMainWindow, createRecorderWindow } from "./windows";
+import { createMainWindow, createRecorderWindow, emitDaemonStatusChanged } from "./windows";
 import { createTray } from "./tray";
 import { registerGlobalShortcut } from "./shortcuts";
 import { getAddon } from "./addon";
@@ -99,8 +99,10 @@ async function warmupDaemon(): Promise<void> {
 
     log.info(`[warmup] starting daemon for: ${model.model_repo}`);
     await getAddon().daemonStart();
+    emitDaemonStatusChanged();
     log.info("[warmup] daemon started, loading model...");
     await getAddon().daemonLoadModel(model.model_repo);
+    emitDaemonStatusChanged();
     log.info(`[warmup] model loaded: ${model.model_repo}`);
   } catch (err) {
     log.error("[warmup] failed (non-fatal):", err);

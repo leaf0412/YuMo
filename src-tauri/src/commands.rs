@@ -302,6 +302,7 @@ pub async fn stop_recording(
                 match daemon.send_command(&cmd) {
                     Ok(resp) if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" => {
                         daemon.set_loaded_model(model_repo.clone());
+                        let _ = app.emit("daemon-status-changed", ());
                         info!("[pipeline] MLX model loaded");
                     }
                     Ok(resp) => {
@@ -1079,18 +1080,100 @@ pub fn export_dictionary_csv(state: State<AppContext>, path: String, dict_type: 
     }
 }
 
+/// Let user pick a .csv file via file dialog, then import it into the dictionary.
+#[tauri::command]
+pub async fn import_dictionary_csv_dialog(
+    app: AppHandle,
+    state: State<'_, AppContext>,
+    dict_type: String,
+) -> Result<(), AppError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let file = app
+        .dialog()
+        .file()
+        .add_filter("CSV", &["csv"])
+        .set_title("选择 CSV 文件")
+        .blocking_pick_file();
+
+    let file = match file {
+        Some(f) => f,
+        None => return Err(AppError::Cancelled),
+    };
+
+    let path = file
+        .as_path()
+        .ok_or_else(|| AppError::Io("无法获取文件路径".into()))?;
+
+    info!("[cmd] import_dictionary_csv_dialog path={}, type={}", path.display(), dict_type);
+
+    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
+    match dict_type.as_str() {
+        "vocabulary" => db::import_vocabulary_csv(&conn, path),
+        "replacements" => db::import_replacements_csv(&conn, path),
+        _ => Err(AppError::InvalidInput("Unknown dict type".into())),
+    }
+}
+
+/// Let user choose a save path via file dialog, then export dictionary to CSV.
+#[tauri::command]
+pub async fn export_dictionary_csv_dialog(
+    app: AppHandle,
+    state: State<'_, AppContext>,
+    dict_type: String,
+) -> Result<(), AppError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let default_name = match dict_type.as_str() {
+        "vocabulary" => "vocabulary.csv",
+        "replacements" => "replacements.csv",
+        _ => "dictionary.csv",
+    };
+
+    let file = app
+        .dialog()
+        .file()
+        .add_filter("CSV", &["csv"])
+        .set_file_name(default_name)
+        .set_title("导出 CSV 文件")
+        .blocking_save_file();
+
+    let file = match file {
+        Some(f) => f,
+        None => return Err(AppError::Cancelled),
+    };
+
+    let path = file
+        .as_path()
+        .ok_or_else(|| AppError::Io("无法获取文件路径".into()))?;
+
+    info!("[cmd] export_dictionary_csv_dialog path={}, type={}", path.display(), dict_type);
+
+    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
+    match dict_type.as_str() {
+        "vocabulary" => db::export_vocabulary_csv(&conn, path),
+        "replacements" => db::export_replacements_csv(&conn, path),
+        _ => Err(AppError::InvalidInput("Unknown dict type".into())),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // MLX FunASR Daemon
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn daemon_start(daemon: State<DaemonManager>) -> Result<(), AppError> {
-    daemon.start()
+pub fn daemon_start(app: tauri::AppHandle, daemon: State<DaemonManager>) -> Result<(), AppError> {
+    let result = daemon.start();
+    if result.is_ok() {
+        let _ = app.emit("daemon-status-changed", ());
+    }
+    result
 }
 
 #[tauri::command]
-pub fn daemon_stop(daemon: State<DaemonManager>) -> Result<(), AppError> {
+pub fn daemon_stop(app: tauri::AppHandle, daemon: State<DaemonManager>) -> Result<(), AppError> {
     daemon.stop();
+    let _ = app.emit("daemon-status-changed", ());
     Ok(())
 }
 
@@ -1170,6 +1253,7 @@ pub async fn daemon_load_model(
 
     // Read responses on a blocking thread, emit progress events
     let repo_clone = model_repo.clone();
+    let app_for_blocking = app.clone();
     let final_resp = tokio::task::spawn_blocking(move || {
         let mut last_resp = None;
         let mut last_logged_pct: i64 = -1;
@@ -1186,7 +1270,7 @@ pub async fn daemon_load_model(
                     log::info!("[daemon] [load_model] downloading progress={}%", pct);
                     last_logged_pct = pct;
                 }
-                let _ = app.emit("model-download-progress", serde_json::json!({
+                let _ = app_for_blocking.emit("model-download-progress", serde_json::json!({
                     "model_repo": repo_clone,
                     "progress": progress,
                 }));
@@ -1217,6 +1301,7 @@ pub async fn daemon_load_model(
 
     if final_resp.status == "success" || final_resp.status == "loaded" {
         daemon.set_loaded_model(Some(model_repo));
+        let _ = app.emit("daemon-status-changed", ());
         Ok(())
     } else {
         Err(AppError::Transcription(
@@ -1226,10 +1311,11 @@ pub async fn daemon_load_model(
 }
 
 #[tauri::command]
-pub fn daemon_unload_model(daemon: State<DaemonManager>) -> Result<(), AppError> {
+pub fn daemon_unload_model(app: tauri::AppHandle, daemon: State<DaemonManager>) -> Result<(), AppError> {
     let cmd = serde_json::json!({"action": "unload"});
     daemon.send_command(&cmd)?;
     daemon.set_loaded_model(None);
+    let _ = app.emit("daemon-status-changed", ());
     Ok(())
 }
 
