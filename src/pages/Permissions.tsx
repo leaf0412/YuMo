@@ -1,26 +1,15 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import { Flex, Space, Button, Typography, message } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { invoke, formatError } from '../lib/logger';
+import useAppStore from '../stores/useAppStore';
 
 const { Text } = Typography;
 
-interface PermissionState {
-  microphone: boolean;
-  accessibility: boolean;
-}
-
 export default function Permissions() {
   const { t } = useTranslation();
-  const [permissions, setPermissions] = useState<PermissionState>({ microphone: false, accessibility: false });
-
-  const fetchPermissions = useCallback(async () => {
-    try {
-      const result = await invoke<PermissionState>('check_permissions');
-      setPermissions(result);
-    } catch { /* ignore */ }
-  }, []);
+  const { permissions, fetchPermissions } = useAppStore();
 
   useEffect(() => {
     fetchPermissions();
@@ -35,9 +24,9 @@ export default function Permissions() {
     try {
       await invoke('request_permission', { permissionType: type });
       const interval = setInterval(async () => {
-        const result = await invoke<PermissionState>('check_permissions');
-        setPermissions(result);
-        if ((type === 'microphone' && result.microphone) || (type === 'accessibility' && result.accessibility)) {
+        await fetchPermissions();
+        const current = useAppStore.getState().permissions;
+        if ((type === 'microphone' && current.microphone) || (type === 'accessibility' && current.accessibility)) {
           clearInterval(interval);
         }
       }, 1000);
@@ -45,7 +34,7 @@ export default function Permissions() {
     } catch (e) {
       message.error(formatError(e, t('settings.permissionRequestFailed')));
     }
-  }, [t]);
+  }, [fetchPermissions, t]);
 
   const settingRow = (label: string, control: React.ReactNode) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0' }}>
@@ -86,7 +75,7 @@ export default function Permissions() {
             )}
           </Space>,
         )}
-        <Button size="small" style={{ alignSelf: 'flex-start' }} onClick={fetchPermissions}>
+        <Button size="small" style={{ alignSelf: 'flex-start' }} onClick={() => fetchPermissions()}>
           {t('settings.permRefresh')}
         </Button>
       </Flex>

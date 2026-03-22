@@ -36,6 +36,7 @@ interface AppState {
   models: ModelInfo[];
   daemonStatus: DaemonStatus;
   downloadingModelId: string | null;
+  permissions: { microphone: boolean; accessibility: boolean };
   uiLocale: string;
 
   // Navigation
@@ -46,6 +47,7 @@ interface AppState {
   fetchSettings: () => Promise<void>;
   fetchModels: () => Promise<void>;
   fetchDaemonStatus: () => Promise<void>;
+  fetchPermissions: () => Promise<void>;
   updateSetting: (key: string, value: string) => Promise<void>;
   setSettings: (partial: Partial<AppSettings>) => void;
   setDaemonStatus: (status: DaemonStatus) => void;
@@ -67,6 +69,7 @@ const useAppStore = create<AppState>((set, get) => ({
   models: [],
   daemonStatus: { running: false, loaded_model: null },
   downloadingModelId: null,
+  permissions: { microphone: false, accessibility: false },
   uiLocale: 'system',
   activeKey: '/',
   setActiveKey: (key) => set({ activeKey: key }),
@@ -92,6 +95,13 @@ const useAppStore = create<AppState>((set, get) => ({
     try {
       const status = await invoke<DaemonStatus>('daemon_status');
       set({ daemonStatus: status });
+    } catch { /* logged */ }
+  }),
+
+  fetchPermissions: () => dedup('permissions', async () => {
+    try {
+      const result = await invoke<{ microphone: boolean; accessibility: boolean }>('check_permissions');
+      set({ permissions: result });
     } catch { /* logged */ }
   }),
 
