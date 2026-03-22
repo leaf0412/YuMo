@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { ipcMain, dialog } from "electron";
 import { getAddon } from "../addon";
 
 export function registerDictionaryHandlers(): void {
@@ -79,6 +79,36 @@ export function registerDictionaryHandlers(): void {
       if (args?.path && args?.dictType) {
         await getAddon().exportDictionaryCsv(args.path, args.dictType);
       }
+    },
+  );
+
+  // --- CSV Import/Export with Dialog ---
+  ipcMain.handle(
+    "import-dictionary-csv-dialog",
+    async (_e, args?: { dictType?: string }) => {
+      if (!args?.dictType) throw new Error("dictType is required");
+      const result = await dialog.showOpenDialog({
+        title: "选择 CSV 文件",
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+        properties: ["openFile"],
+      });
+      if (result.canceled || result.filePaths.length === 0) throw new Error("Cancelled");
+      await getAddon().importDictionaryCsv(result.filePaths[0], args.dictType);
+    },
+  );
+
+  ipcMain.handle(
+    "export-dictionary-csv-dialog",
+    async (_e, args?: { dictType?: string }) => {
+      if (!args?.dictType) throw new Error("dictType is required");
+      const defaultName = args.dictType === "vocabulary" ? "vocabulary.csv" : "replacements.csv";
+      const result = await dialog.showSaveDialog({
+        title: "导出 CSV 文件",
+        defaultPath: defaultName,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (result.canceled || !result.filePath) throw new Error("Cancelled");
+      await getAddon().exportDictionaryCsv(result.filePath, args.dictType);
     },
   );
 }

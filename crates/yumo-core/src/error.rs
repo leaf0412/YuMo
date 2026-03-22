@@ -19,6 +19,8 @@ pub enum AppError {
     NotFound(String),
     #[error("Invalid input: {0}")]
     InvalidInput(String),
+    #[error("Cancelled")]
+    Cancelled,
 }
 
 impl From<rusqlite::Error> for AppError {

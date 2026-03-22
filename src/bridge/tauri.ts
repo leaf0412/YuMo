@@ -233,6 +233,14 @@ export const tauriBridge: Bridge = {
     return invoke('export_dictionary_csv', { path, dictType });
   },
 
+  importDictionaryCsvDialog(dictType: 'vocabulary' | 'replacements'): Promise<void> {
+    return invoke('import_dictionary_csv_dialog', { dictType });
+  },
+
+  exportDictionaryCsvDialog(dictType: 'vocabulary' | 'replacements'): Promise<void> {
+    return invoke('export_dictionary_csv_dialog', { dictType });
+  },
+
   // --- Legacy Import ---
 
   detectVoiceinkLegacyPath(): Promise<string | null> {

@@ -97,12 +97,28 @@ export default function Dictionary() {
     }
   };
 
-  const handleExportCsv = (_type: 'vocabulary' | 'replacements') => {
-    message.info(t('dictionary.csvExportNotImpl'));
+  const handleExportCsv = async (type: 'vocabulary' | 'replacements') => {
+    try {
+      await invoke('export_dictionary_csv_dialog', { dictType: type });
+      message.success(t('dictionary.csvExportSuccess'));
+    } catch (e) {
+      const msg = formatError(e, '');
+      if (msg === 'Cancelled') return;
+      message.error(formatError(e, t('dictionary.csvExportFailed')));
+    }
   };
 
-  const handleImportCsv = (_type: 'vocabulary' | 'replacements') => {
-    message.info(t('dictionary.csvImportNotImpl'));
+  const handleImportCsv = async (type: 'vocabulary' | 'replacements') => {
+    try {
+      await invoke('import_dictionary_csv_dialog', { dictType: type });
+      message.success(t('dictionary.csvImportSuccess'));
+      if (type === 'vocabulary') loadVocabulary();
+      else loadReplacements();
+    } catch (e) {
+      const msg = formatError(e, '');
+      if (msg === 'Cancelled') return;
+      message.error(formatError(e, t('dictionary.csvImportFailed')));
+    }
   };
 
   const vocabularyTab = (

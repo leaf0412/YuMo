@@ -226,6 +226,8 @@ export interface Bridge {
   // --- Dictionary CSV Import / Export ---
   importDictionaryCsv(path: string, dictType: 'vocabulary' | 'replacements'): Promise<void>;
   exportDictionaryCsv(path: string, dictType: 'vocabulary' | 'replacements'): Promise<void>;
+  importDictionaryCsvDialog(dictType: 'vocabulary' | 'replacements'): Promise<void>;
+  exportDictionaryCsvDialog(dictType: 'vocabulary' | 'replacements'): Promise<void>;
 
   // --- Legacy Import ---
   detectVoiceinkLegacyPath(): Promise<string | null>;
