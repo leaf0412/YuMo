@@ -1,6 +1,7 @@
 use yumo_core::platform::keychain;
 
 #[test]
+#[ignore] // requires system keychain (macOS Keychain / D-Bus secret service)
 fn test_store_and_retrieve_api_key() {
     let service = "com.voiceink.test";
     let account = "openai-test";
@@ -16,12 +17,14 @@ fn test_store_and_retrieve_api_key() {
 }
 
 #[test]
+#[ignore] // requires system keychain
 fn test_get_nonexistent_key_returns_none() {
     let key = keychain::get_key("com.voiceink.test", "nonexistent-provider-xyz").unwrap();
     assert_eq!(key, None);
 }
 
 #[test]
+#[ignore] // requires system keychain
 fn test_update_existing_key() {
     let service = "com.voiceink.test";
     let account = "anthropic-test";
@@ -35,6 +38,7 @@ fn test_update_existing_key() {
 }
 
 #[test]
+#[ignore] // requires system keychain
 fn test_delete_nonexistent_key_is_ok() {
     // Should not error when deleting a key that doesn't exist
     let result = keychain::delete_key("com.voiceink.test", "never-existed-xyz");
