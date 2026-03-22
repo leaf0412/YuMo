@@ -31,16 +31,19 @@ pub fn run() {
     let startup_start = std::time::Instant::now();
     let log_path = defaults.data_dir.join("log.txt");
     let log_file = std::fs::File::create(&log_path).expect("Cannot create log file");
+    let log_config = simplelog::ConfigBuilder::new()
+        .set_time_offset(time::UtcOffset::from_hms(8, 0, 0).unwrap())
+        .build();
     simplelog::CombinedLogger::init(vec![
         simplelog::TermLogger::new(
             simplelog::LevelFilter::Info,
-            simplelog::Config::default(),
+            log_config.clone(),
             simplelog::TerminalMode::Mixed,
             simplelog::ColorChoice::Auto,
         ),
         simplelog::WriteLogger::new(
             simplelog::LevelFilter::Info,
-            simplelog::Config::default(),
+            log_config,
             log_file,
         ),
     ])
