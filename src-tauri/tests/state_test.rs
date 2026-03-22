@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use serde_json::Value;
 use yumo_lib::state::AppPaths;
 
@@ -6,10 +7,11 @@ use yumo_lib::state::AppPaths;
 fn test_app_paths_defaults() {
     let paths = AppPaths::defaults();
     let home = dirs::home_dir().unwrap();
+    let vi = home.join(".voiceink");
 
-    assert_eq!(paths.data_dir, home.join(".voiceink"));
-    assert_eq!(paths.models_dir, home.join(".voiceink/models"));
-    assert_eq!(paths.sprites_dir, home.join(".voiceink/sprites"));
+    assert_eq!(paths.data_dir, vi);
+    assert_eq!(paths.models_dir, vi.join("models"));
+    assert_eq!(paths.sprites_dir, vi.join("sprites"));
 }
 
 #[test]
@@ -29,10 +31,11 @@ fn test_app_paths_override_data_dir() {
     settings.insert("path_data".to_string(), Value::String("/tmp/voiceink-test".to_string()));
 
     let paths = AppPaths::from_settings(&settings);
+    let base = PathBuf::from("/tmp/voiceink-test");
 
-    assert_eq!(paths.data_dir.to_str().unwrap(), "/tmp/voiceink-test");
+    assert_eq!(paths.data_dir, base);
     // models_dir should follow data_dir when not explicitly set
-    assert_eq!(paths.models_dir.to_str().unwrap(), "/tmp/voiceink-test/models");
+    assert_eq!(paths.models_dir, base.join("models"));
 }
 
 #[test]
@@ -45,7 +48,7 @@ fn test_app_paths_override_models_dir() {
     // data_dir stays default, models_dir is overridden
     let home = dirs::home_dir().unwrap();
     assert_eq!(paths.data_dir, home.join(".voiceink"));
-    assert_eq!(paths.models_dir.to_str().unwrap(), "/opt/models");
+    assert_eq!(paths.models_dir, PathBuf::from("/opt/models"));
 }
 
 #[test]
@@ -54,7 +57,7 @@ fn test_app_paths_override_sprites_dir() {
     settings.insert("path_sprites".to_string(), Value::String("/my/sprites".to_string()));
 
     let paths = AppPaths::from_settings(&settings);
-    assert_eq!(paths.sprites_dir.to_str().unwrap(), "/my/sprites");
+    assert_eq!(paths.sprites_dir, PathBuf::from("/my/sprites"));
 }
 
 #[test]
@@ -66,9 +69,9 @@ fn test_app_paths_override_all() {
 
     let paths = AppPaths::from_settings(&settings);
 
-    assert_eq!(paths.data_dir.to_str().unwrap(), "/a");
-    assert_eq!(paths.models_dir.to_str().unwrap(), "/b");
-    assert_eq!(paths.sprites_dir.to_str().unwrap(), "/c");
+    assert_eq!(paths.data_dir, PathBuf::from("/a"));
+    assert_eq!(paths.models_dir, PathBuf::from("/b"));
+    assert_eq!(paths.sprites_dir, PathBuf::from("/c"));
 }
 
 #[test]

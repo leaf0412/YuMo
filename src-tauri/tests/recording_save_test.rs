@@ -9,7 +9,7 @@ use yumo_lib::platform::AudioData;
 fn test_default_recordings_dir() {
     let paths = AppPaths::defaults();
     let home = dirs::home_dir().unwrap();
-    assert_eq!(paths.recordings_dir, home.join(".voiceink/recordings"));
+    assert_eq!(paths.recordings_dir, home.join(".voiceink").join("recordings"));
 }
 
 #[test]
@@ -17,7 +17,7 @@ fn test_recordings_dir_follows_data_dir() {
     let mut settings = std::collections::HashMap::new();
     settings.insert("path_data".into(), serde_json::Value::String("/tmp/vi".into()));
     let paths = AppPaths::from_settings(&settings);
-    assert_eq!(paths.recordings_dir.to_str().unwrap(), "/tmp/vi/recordings");
+    assert_eq!(paths.recordings_dir, std::path::PathBuf::from("/tmp/vi").join("recordings"));
 }
 
 #[test]
@@ -25,7 +25,7 @@ fn test_recordings_dir_override() {
     let mut settings = std::collections::HashMap::new();
     settings.insert("path_recordings".into(), serde_json::Value::String("/my/recs".into()));
     let paths = AppPaths::from_settings(&settings);
-    assert_eq!(paths.recordings_dir.to_str().unwrap(), "/my/recs");
+    assert_eq!(paths.recordings_dir, std::path::PathBuf::from("/my/recs"));
 }
 
 // ---------------------------------------------------------------------------
