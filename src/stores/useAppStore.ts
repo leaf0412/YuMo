@@ -39,10 +39,6 @@ interface AppState {
   permissions: { microphone: boolean; accessibility: boolean };
   uiLocale: string;
 
-  // Navigation
-  activeKey: string;
-  setActiveKey: (key: string) => void;
-
   // Actions
   fetchSettings: () => Promise<void>;
   fetchModels: () => Promise<void>;
@@ -71,8 +67,6 @@ const useAppStore = create<AppState>((set, get) => ({
   downloadingModelId: null,
   permissions: { microphone: false, accessibility: false },
   uiLocale: 'system',
-  activeKey: '/',
-  setActiveKey: (key) => set({ activeKey: key }),
 
   fetchSettings: () => dedup('settings', async () => {
     try {
