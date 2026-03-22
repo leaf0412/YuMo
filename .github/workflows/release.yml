@@ -96,16 +96,23 @@ jobs:
       - name: Build Tauri app
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
 
-      - name: Collect artifacts
+      - name: Collect artifacts (Unix)
+        if: runner.os != 'Windows'
         run: |
           mkdir -p staging
-          echo "=== Bundle directory contents ==="
-          find target/${{ matrix.target }}/release/bundle -type f | sort
-          echo "=== Copying artifacts ==="
           find target/${{ matrix.target }}/release/bundle -type f \
             \( -name "*.dmg" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" \) \
             -exec cp {} staging/ \;
           ls -lh staging/
+
+      - name: Collect artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging
+          Get-ChildItem -Recurse "target/${{ matrix.target }}/release/bundle" -Include *.exe |
+            Copy-Item -Destination staging/
+          Get-ChildItem staging/
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
