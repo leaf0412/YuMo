@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
-import { ConfigProvider, Layout, Menu, Modal, Typography } from 'antd';
-import { useTranslation } from 'react-i18next';
-import zhCN from 'antd/locale/zh_CN';
-import enUS from 'antd/locale/en_US';
-import i18n from './i18n';
+import { useEffect, useRef, useMemo, useState } from 'react';
+import {
+  createHashRouter, RouterProvider, Outlet, useNavigate, useLocation,
+} from 'react-router-dom';
+import { ConfigProvider, Layout, Menu, Modal, Typography, Alert, Space } from 'antd';
 import {
   DashboardOutlined,
   HistoryOutlined,
@@ -11,88 +10,213 @@ import {
   BookOutlined,
   ThunderboltOutlined,
   SettingOutlined,
+  SafetyCertificateOutlined,
+  PictureOutlined,
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
+import zhCN from 'antd/locale/zh_CN';
+import enUS from 'antd/locale/en_US';
+import i18n from './i18n';
 import { listen } from './lib/events';
 import yumoIcon from './assets/yumo-icon.svg';
 import { invoke, logEvent } from './lib/logger';
 import { broadcast } from './lib/broadcast';
+import OnboardingWizard from './components/OnboardingWizard';
+import useAppStore from './stores/useAppStore';
+
 import Dashboard from './pages/Dashboard';
 import History from './pages/History';
 import Models from './pages/Models';
 import Dictionary from './pages/Dictionary';
 import Enhancement from './pages/Enhancement';
 import Settings from './pages/Settings';
-import OnboardingWizard from './components/OnboardingWizard';
-import useAppStore from './stores/useAppStore';
+import Permissions from './pages/Permissions';
+import Sprites from './pages/Sprites';
 
 const { Sider, Content } = Layout;
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
-const pageEntries: { key: string; render: () => ReactNode }[] = [
-  { key: '/', render: () => <Dashboard /> },
-  { key: '/history', render: () => <History /> },
-  { key: '/models', render: () => <Models /> },
-  { key: '/dictionary', render: () => <Dictionary /> },
-  { key: '/enhancement', render: () => <Enhancement /> },
-  { key: '/settings', render: () => <Settings /> },
-];
+/* ------------------------------------------------------------------ */
+/*  PermissionBanner — renders at the top of the window               */
+/* ------------------------------------------------------------------ */
 
-function AppLayout() {
+function PermissionBanner() {
   const { t } = useTranslation();
-  const { activeKey, setActiveKey } = useAppStore();
+  const navigate = useNavigate();
+  const { permissions } = useAppStore();
 
-  const menuItems = [
-    { key: '/', icon: <DashboardOutlined />, label: t('menu.dashboard') },
-    { key: '/history', icon: <HistoryOutlined />, label: t('menu.history') },
-    { key: '/models', icon: <CloudDownloadOutlined />, label: t('menu.models') },
-    { key: '/dictionary', icon: <BookOutlined />, label: t('menu.dictionary') },
-    { key: '/enhancement', icon: <ThunderboltOutlined />, label: t('menu.enhancement') },
-    { key: '/settings', icon: <SettingOutlined />, label: t('menu.settings') },
-  ];
-  // Track which pages have been visited — only render after first visit
-  const [mounted, setMounted] = useState<Set<string>>(() => new Set(['/']));
+  const missing: { key: string; msg: string }[] = [];
+  if (!permissions.microphone) missing.push({ key: 'mic', msg: t('banner.micPermission') });
+  if (!permissions.accessibility) missing.push({ key: 'acc', msg: t('banner.accPermission') });
 
-  const handleMenuClick = useCallback(({ key }: { key: string }) => {
-    logEvent('App', 'page_navigate', { to: key });
-    setActiveKey(key);
-    setMounted((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
-  }, [setActiveKey]);
-
-  // Sync mounted set when activeKey changes from store (e.g. from Dashboard link)
-  useEffect(() => {
-    setMounted((prev) => (prev.has(activeKey) ? prev : new Set(prev).add(activeKey)));
-  }, [activeKey]);
+  if (missing.length === 0) return null;
 
   return (
-    <Layout style={{ height: '100vh' }}>
-      <Sider width={200} theme="light" style={{ overflow: 'auto' }}>
-        <div style={{ padding: '16px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-          <img src={yumoIcon} alt="语墨" style={{ width: 28, height: 28 }} />
-          <Title level={4} style={{ margin: 0 }}>{t('app.name')}</Title>
-        </div>
-        <Menu
-          mode="inline"
-          selectedKeys={[activeKey]}
-          items={menuItems}
-          onClick={handleMenuClick}
+    <div style={{ flexShrink: 0 }}>
+      {missing.map(({ key, msg }) => (
+        <Alert
+          key={key}
+          type="warning"
+          showIcon
+          banner
+          message={
+            <Space>
+              <span>{msg}</span>
+              <a onClick={() => navigate('/permissions')}>{t('banner.grant')}</a>
+            </Space>
+          }
         />
-      </Sider>
-      <Content style={{ padding: '24px', overflow: 'auto' }}>
-        {pageEntries.map(({ key, render }) =>
-          mounted.has(key) ? (
-            <div key={key} style={{ display: activeKey === key ? 'block' : 'none' }}>
-              {render()}
-            </div>
-          ) : null
-        )}
-      </Content>
-    </Layout>
+      ))}
+    </div>
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  ModelStatus — sidebar bottom indicator                            */
+/* ------------------------------------------------------------------ */
+
+function ModelStatus() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { daemonStatus, models, settings } = useAppStore();
+
+  const modelName = useMemo(() => {
+    if (!daemonStatus.loaded_model) return null;
+    const m = models.find((m) => m.id === daemonStatus.loaded_model);
+    return m?.name || daemonStatus.loaded_model;
+  }, [daemonStatus.loaded_model, models]);
+
+  return (
+    <div
+      onClick={() => navigate('/models')}
+      style={{ borderTop: '1px solid #f0f0f0', padding: '12px 16px', cursor: 'pointer' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ color: daemonStatus.running ? '#52c41a' : '#8c8c8c', fontSize: 10 }}>●</span>
+        <Text strong ellipsis style={{ fontSize: 13, maxWidth: 140 }}>
+          {daemonStatus.running
+            ? (modelName || t('sidebar.modelRunning'))
+            : t('sidebar.modelStopped')}
+        </Text>
+      </div>
+      {daemonStatus.running && !modelName && (
+        <Text type="secondary" style={{ fontSize: 11 }}>{t('sidebar.noModel')}</Text>
+      )}
+      {settings.hotkey ? (
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          {String(settings.hotkey)}
+        </Text>
+      ) : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  AppLayout — grouped sidebar with 3 groups                         */
+/* ------------------------------------------------------------------ */
+
+function AppLayout() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Log page navigation (skip initial render)
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    logEvent('App', 'page_navigate', { to: location.pathname });
+  }, [location.pathname]);
+
+  // Note: group items have built-in visual separation via their label.
+  // If dividers cause double-separation, remove { type: 'divider' } entries.
+  const menuItems = [
+    {
+      type: 'group' as const,
+      label: t('menu.group.core'),
+      children: [
+        { key: '/', icon: <DashboardOutlined />, label: t('menu.dashboard') },
+        { key: '/history', icon: <HistoryOutlined />, label: t('menu.history') },
+      ],
+    },
+    { type: 'divider' as const },
+    {
+      type: 'group' as const,
+      label: t('menu.group.configuration'),
+      children: [
+        { key: '/models', icon: <CloudDownloadOutlined />, label: t('menu.models') },
+        { key: '/dictionary', icon: <BookOutlined />, label: t('menu.dictionary') },
+        { key: '/enhancement', icon: <ThunderboltOutlined />, label: t('menu.enhancement') },
+      ],
+    },
+    { type: 'divider' as const },
+    {
+      type: 'group' as const,
+      label: t('menu.group.system'),
+      children: [
+        { key: '/permissions', icon: <SafetyCertificateOutlined />, label: t('menu.permissions') },
+        { key: '/sprites', icon: <PictureOutlined />, label: t('menu.sprites') },
+        { key: '/settings', icon: <SettingOutlined />, label: t('menu.settings') },
+      ],
+    },
+  ];
+
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <PermissionBanner />
+      <Layout style={{ flex: 1, overflow: 'hidden' }}>
+        <Sider width={200} theme="light" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ padding: '16px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+            <img src={yumoIcon} alt="语墨" style={{ width: 28, height: 28 }} />
+            <Title level={4} style={{ margin: 0 }}>{t('app.name')}</Title>
+          </div>
+          <Menu
+            mode="inline"
+            selectedKeys={[location.pathname]}
+            items={menuItems}
+            onClick={({ key }) => navigate(key)}
+            style={{ flex: 1, overflow: 'auto', borderRight: 0 }}
+          />
+          <ModelStatus />
+        </Sider>
+        <Content style={{ padding: '24px', overflow: 'auto' }}>
+          <Outlet />
+        </Content>
+      </Layout>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Router                                                            */
+/* ------------------------------------------------------------------ */
+
+const router = createHashRouter([
+  {
+    path: '/',
+    element: <AppLayout />,
+    children: [
+      { index: true, element: <Dashboard /> },
+      { path: 'history', element: <History /> },
+      { path: 'models', element: <Models /> },
+      { path: 'dictionary', element: <Dictionary /> },
+      { path: 'enhancement', element: <Enhancement /> },
+      { path: 'settings', element: <Settings /> },
+      { path: 'permissions', element: <Permissions /> },
+      { path: 'sprites', element: <Sprites /> },
+    ],
+  },
+]);
+
+/* ------------------------------------------------------------------ */
+/*  checkModelReady — uses router.navigate() (outside components)     */
+/* ------------------------------------------------------------------ */
+
 /** Check if a downloaded model is selected; if not, show warning and return false */
 function checkModelReady(): boolean {
-  const { settings, models, setActiveKey } = useAppStore.getState();
+  const { settings, models } = useAppStore.getState();
   const t = i18n.t;
   const modelId = typeof settings.selected_model_id === 'string' ? settings.selected_model_id : '';
   if (!modelId) {
@@ -100,7 +224,7 @@ function checkModelReady(): boolean {
       title: t('app.selectModelFirst'),
       content: t('app.selectModelFirstDesc'),
       okText: t('app.goToModels'),
-      onOk: () => setActiveKey('/models'),
+      onOk: () => router.navigate('/models'),
     });
     logEvent('App', 'recording_blocked', { reason: 'no_model_selected' });
     return false;
@@ -111,7 +235,7 @@ function checkModelReady(): boolean {
       title: t('app.modelNotDownloaded'),
       content: t('app.modelNotDownloadedDesc', { name: model.name }),
       okText: t('app.goToModels'),
-      onOk: () => setActiveKey('/models'),
+      onOk: () => router.navigate('/models'),
     });
     logEvent('App', 'recording_blocked', { reason: 'model_not_downloaded', model_id: modelId });
     return false;
@@ -119,14 +243,18 @@ function checkModelReady(): boolean {
   return true;
 }
 
+/* ------------------------------------------------------------------ */
+/*  App root                                                          */
+/* ------------------------------------------------------------------ */
+
 export default function App() {
   const { i18n: i18nInstance } = useTranslation();
   const pipelineRef = useRef('idle');
-  const { fetchSettings } = useAppStore();
+  const { fetchSettings, fetchPermissions, fetchDaemonStatus, fetchModels } = useAppStore();
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
 
-  // Check onboarding status on mount
+  // Check onboarding status on mount + fetch sidebar data
   useEffect(() => {
     fetchSettings().then(() => {
       const s = useAppStore.getState().settings;
@@ -135,7 +263,11 @@ export default function App() {
       }
       setOnboardingChecked(true);
     });
-  }, [fetchSettings]);
+    // Fire-and-forget: sidebar shows loading state until data arrives
+    fetchPermissions();
+    fetchDaemonStatus();
+    fetchModels();
+  }, [fetchSettings, fetchPermissions, fetchDaemonStatus, fetchModels]);
 
   // Global hotkey listener — works on any page
   useEffect(() => {
@@ -213,7 +345,7 @@ export default function App() {
       {showOnboarding && (
         <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
       )}
-      <AppLayout />
+      <RouterProvider router={router} />
     </ConfigProvider>
   );
 }
