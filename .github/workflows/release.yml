@@ -100,9 +100,9 @@ jobs:
         run: |
           mkdir -p staging
           echo "=== Bundle directory contents ==="
-          find src-tauri/target/${{ matrix.target }}/release/bundle -type f | sort
+          find target/${{ matrix.target }}/release/bundle -type f | sort
           echo "=== Copying artifacts ==="
-          find src-tauri/target/${{ matrix.target }}/release/bundle -type f \
+          find target/${{ matrix.target }}/release/bundle -type f \
             \( -name "*.dmg" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" \) \
             -exec cp {} staging/ \;
           ls -lh staging/
