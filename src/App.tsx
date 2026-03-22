@@ -45,6 +45,10 @@ function PermissionBanner() {
   const navigate = useNavigate();
   const { permissions } = useAppStore();
 
+  // Only show on macOS — Windows/Linux don't have these permission prompts
+  const isMacOS = navigator.userAgent.includes('Macintosh');
+  if (!isMacOS) return null;
+
   const missing: { key: string; msg: string }[] = [];
   if (!permissions.microphone) missing.push({ key: 'mic', msg: t('banner.micPermission') });
   if (!permissions.accessibility) missing.push({ key: 'acc', msg: t('banner.accPermission') });
@@ -264,7 +268,9 @@ export default function App() {
       setOnboardingChecked(true);
     });
     // Fire-and-forget: sidebar shows loading state until data arrives
-    fetchPermissions();
+    if (navigator.userAgent.includes('Macintosh')) {
+      fetchPermissions();
+    }
     fetchDaemonStatus();
     fetchModels();
   }, [fetchSettings, fetchPermissions, fetchDaemonStatus, fetchModels]);
