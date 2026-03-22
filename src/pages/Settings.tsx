@@ -4,23 +4,17 @@ import {
   message, Popconfirm, InputNumber,
 } from 'antd';
 import {
-  AudioOutlined, ThunderboltOutlined, CopyOutlined,
-  FontSizeOutlined, DesktopOutlined, KeyOutlined, AppstoreOutlined,
-  HistoryOutlined, SettingOutlined, ClearOutlined, ImportOutlined,
-  PictureOutlined, FolderOpenOutlined, FileZipOutlined,
-  SafetyCertificateOutlined, CheckCircleOutlined, CloseCircleOutlined,
+  AudioOutlined, CopyOutlined,
+  DesktopOutlined, KeyOutlined,
+  HistoryOutlined, SettingOutlined, ClearOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { emit } from '../lib/events';
 import i18n from '../i18n';
 import { getResolvedLocale, type UiLocale } from '../i18n/utils';
 import { invoke, formatError, logEvent } from '../lib/logger';
-import type { SpriteManifest } from '../components/SpriteAnimation';
-import SpriteCard from '../components/SpriteCard';
 
 const { Text } = Typography;
-
-type SpriteEntry = SpriteManifest & { dirId: string };
 
 interface ImportResult {
   transcriptions_imported: number;
@@ -85,51 +79,11 @@ export default function Settings() {
     } catch { /* ignore */ }
   }, []);
 
-  const loadSprites = useCallback(async () => {
-    try {
-      const list = await invoke<SpriteEntry[]>('list_sprites');
-      setSprites(list);
-      const srcs: Record<string, string> = {};
-      await Promise.all(
-        list.map(async (s) => {
-          try {
-            srcs[s.dirId] = await invoke<string>('get_sprite_image', { dirId: s.dirId, fileName: 'sprite_processed.png' });
-          } catch {
-            try {
-              srcs[s.dirId] = await invoke<string>('get_sprite_image', { dirId: s.dirId, fileName: s.spriteFile });
-            } catch { /* skip */ }
-          }
-        })
-      );
-      setSpriteSrcs(srcs);
-    } catch (e) {
-      message.error(formatError(e, t('settings.spriteLoadFailed')));
-    }
-  }, [t]);
-
-  const loadPermissions = useCallback(async () => {
-    try {
-      const result = await invoke<{ microphone: boolean; accessibility: boolean }>('check_permissions');
-      setPermissions(result);
-    } catch { /* ignore */ }
-  }, []);
-
-  const loadSpriteSettings = useCallback(async () => {
-    try {
-      const s = await invoke<{ selected_sprite_id?: string; sprite_size?: number }>('get_settings');
-      if (s.selected_sprite_id) setSelectedSpriteId(s.selected_sprite_id);
-      if (s.sprite_size) setSpriteSize(s.sprite_size);
-    } catch { /* ignore */ }
-  }, []);
-
   useEffect(() => {
     loadSettings();
     loadDevices();
-    loadPermissions();
     detectLegacyPath();
-    loadSprites();
-    loadSpriteSettings();
-  }, [loadSettings, loadDevices, loadPermissions, detectLegacyPath, loadSprites, loadSpriteSettings]);
+  }, [loadSettings, loadDevices, detectLegacyPath]);
 
   const updateSetting = async (key: string, value: unknown) => {
     try {
@@ -143,20 +97,9 @@ export default function Settings() {
 
   const [recordingHotkey, setRecordingHotkey] = useState(false);
 
-  // Permission state
-  const [permissions, setPermissions] = useState<{ microphone: boolean; accessibility: boolean }>({ microphone: false, accessibility: false });
-
   // Data import state
   const [legacyPath, setLegacyPath] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
-
-  // Sprite state
-  const [sprites, setSprites] = useState<SpriteEntry[]>([]);
-  const [spriteSrcs, setSpriteSrcs] = useState<Record<string, string>>({});
-  const [selectedSpriteId, setSelectedSpriteId] = useState('');
-  const [spriteSize, setSpriteSize] = useState(180);
-  const [bgThreshold, setBgThreshold] = useState(0.18);
-  const [bgProcessing, setBgProcessing] = useState(false);
 
   const keyEventToShortcut = (e: React.KeyboardEvent): string | null => {
     const parts: string[] = [];
@@ -260,72 +203,6 @@ export default function Settings() {
     setImporting(false);
   };
 
-  const handleSpriteImportFolder = async () => {
-    try {
-      const result = await invoke<SpriteEntry | null>('import_sprite_folder');
-      if (result) {
-        logEvent('Sprite', 'import_folder', { name: result.name });
-        message.success(t('settings.spriteImportSuccess', { name: result.name }));
-        await loadSprites();
-      }
-    } catch (e) {
-      message.error(formatError(e, t('settings.spriteImportFailed')));
-    }
-  };
-
-  const handleSpriteImportZip = async () => {
-    try {
-      const result = await invoke<SpriteEntry | null>('import_sprite_zip');
-      if (result) {
-        logEvent('Sprite', 'import_zip', { name: result.name });
-        message.success(t('settings.spriteImportSuccess', { name: result.name }));
-        await loadSprites();
-      }
-    } catch (e) {
-      message.error(formatError(e, t('settings.spriteImportFailed')));
-    }
-  };
-
-  const handleSpriteDelete = async (dirId: string) => {
-    try {
-      await invoke('delete_sprite', { dirId });
-      logEvent('Sprite', 'delete', { dirId });
-      message.success(t('settings.spriteDeleteSuccess'));
-      if (selectedSpriteId === dirId) {
-        setSelectedSpriteId('');
-        updateSetting('selected_sprite_id', '');
-      }
-      await loadSprites();
-    } catch (e) {
-      message.error(formatError(e, t('settings.spriteImportFailed')));
-    }
-  };
-
-  const handleSpriteSelect = (dirId: string) => {
-    const newValue = dirId === selectedSpriteId ? '' : dirId;
-    setSelectedSpriteId(newValue);
-    updateSetting('selected_sprite_id', newValue);
-  };
-
-  const handleSpriteSizeChange = (size: number) => {
-    setSpriteSize(size);
-    updateSetting('sprite_size', size);
-  };
-
-  const handleBgThresholdCommit = async (value: number) => {
-    setBgThreshold(value);
-    if (!selectedSpriteId) return;
-    setBgProcessing(true);
-    try {
-      await invoke('process_sprite_background', { dirId: selectedSpriteId, threshold: value });
-      logEvent('Sprite', 'process_background', { dirId: selectedSpriteId, threshold: value });
-      await loadSprites();
-    } catch (e) {
-      message.error(formatError(e, t('settings.spriteProcessFailed')));
-    }
-    setBgProcessing(false);
-  };
-
   const settingRow = (label: string, control: React.ReactNode) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0' }}>
       <Text>{label}</Text>
@@ -333,69 +210,7 @@ export default function Settings() {
     </div>
   );
 
-  const permissionIcon = (granted: boolean) =>
-    granted
-      ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
-      : <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
-
-  const handleRequestPermission = async (type: string) => {
-    try {
-      await invoke('request_permission', { permissionType: type });
-      // Poll for permission changes
-      const interval = setInterval(async () => {
-        const result = await invoke<{ microphone: boolean; accessibility: boolean }>('check_permissions');
-        setPermissions(result);
-        if ((type === 'microphone' && result.microphone) || (type === 'accessibility' && result.accessibility)) {
-          clearInterval(interval);
-        }
-      }, 1000);
-      // Stop polling after 30s
-      setTimeout(() => clearInterval(interval), 30000);
-    } catch (e) {
-      message.error(formatError(e, t('settings.permissionRequestFailed')));
-    }
-  };
-
   const items = [
-    {
-      key: 'permissions',
-      label: <Space><SafetyCertificateOutlined />{t('settings.sectionPermissions')}</Space>,
-      children: (
-        <Flex vertical gap={8} style={{ width: '100%' }}>
-          {settingRow(
-            t('settings.permMicrophone'),
-            <Space>
-              {permissionIcon(permissions.microphone)}
-              <Text type={permissions.microphone ? 'success' : 'danger'}>
-                {permissions.microphone ? t('settings.permGranted') : t('settings.permDenied')}
-              </Text>
-              {!permissions.microphone && (
-                <Button size="small" type="link" onClick={() => handleRequestPermission('microphone')}>
-                  {t('settings.permGrant')}
-                </Button>
-              )}
-            </Space>,
-          )}
-          {settingRow(
-            t('settings.permAccessibility'),
-            <Space>
-              {permissionIcon(permissions.accessibility)}
-              <Text type={permissions.accessibility ? 'success' : 'danger'}>
-                {permissions.accessibility ? t('settings.permGranted') : t('settings.permDenied')}
-              </Text>
-              {!permissions.accessibility && (
-                <Button size="small" type="link" onClick={() => handleRequestPermission('accessibility')}>
-                  {t('settings.permGrant')}
-                </Button>
-              )}
-            </Space>,
-          )}
-          <Button size="small" style={{ alignSelf: 'flex-start' }} onClick={loadPermissions}>
-            {t('settings.permRefresh')}
-          </Button>
-        </Flex>
-      ),
-    },
     {
       key: 'audio',
       label: <Space data-testid="settings-recording"><AudioOutlined />{t('settings.sectionAudio')}</Space>,
@@ -425,14 +240,6 @@ export default function Settings() {
           {settingRow(t('settings.customSoundFile'),
             <Input value={settings.custom_sound_file || ''} onChange={(e) => updateSetting('custom_sound_file', e.target.value)} placeholder={t('settings.customSoundFilePlaceholder')} style={{ width: 250 }} />,
           )}
-        </Flex>
-      ),
-    },
-    {
-      key: 'vad',
-      label: <Space data-testid="settings-transcription"><ThunderboltOutlined />{t('settings.sectionVad')}</Space>,
-      children: (
-        <Flex vertical gap={8} style={{ width: '100%' }}>
           {settingRow(t('settings.enableVad'), <Switch checked={settings.vad_enabled} onChange={(v) => updateSetting('vad_enabled', v)} />)}
           <div style={{ padding: '8px 0' }}>
             <Text>{t('settings.vadSensitivity')}</Text>
@@ -455,18 +262,19 @@ export default function Settings() {
             <Text>{t('settings.pasteDelay')}</Text>
             <Slider min={0} max={1000} step={50} value={settings.paste_delay ?? 100} onChange={(v) => updateSetting('paste_delay', v)} />
           </div>
+          {settingRow(t('settings.autoCapitalize'), <Switch checked={settings.auto_capitalize} onChange={(v) => updateSetting('auto_capitalize', v)} />)}
         </Flex>
       ),
     },
     {
-      key: 'format',
-      label: <Space><FontSizeOutlined />{t('settings.sectionFormat')}</Space>,
-      children: settingRow(t('settings.autoCapitalize'), <Switch checked={settings.auto_capitalize} onChange={(v) => updateSetting('auto_capitalize', v)} />),
-    },
-    {
       key: 'system',
       label: <Space><DesktopOutlined />{t('settings.sectionSystem')}</Space>,
-      children: settingRow(t('settings.systemMute'), <Switch checked={settings.system_mute} onChange={(v) => updateSetting('system_mute', v)} />),
+      children: (
+        <Flex vertical gap={8} style={{ width: '100%' }}>
+          {settingRow(t('settings.systemMute'), <Switch checked={settings.system_mute} onChange={(v) => updateSetting('system_mute', v)} />)}
+          {settingRow(t('settings.menuBarMode'), <Switch checked={settings.menu_bar_mode} onChange={(v) => updateSetting('menu_bar_mode', v)} />)}
+        </Flex>
+      ),
     },
     {
       key: 'hotkey',
@@ -490,11 +298,6 @@ export default function Settings() {
       ),
     },
     {
-      key: 'tray',
-      label: <Space><AppstoreOutlined />{t('settings.sectionTray')}</Space>,
-      children: settingRow(t('settings.menuBarMode'), <Switch checked={settings.menu_bar_mode} onChange={(v) => updateSetting('menu_bar_mode', v)} />),
-    },
-    {
       key: 'history',
       label: <Space><HistoryOutlined />{t('settings.sectionHistory')}</Space>,
       children: (
@@ -504,98 +307,6 @@ export default function Settings() {
           <Popconfirm title={t('settings.confirmClearHistory')} onConfirm={handleClearAllHistory} okText={t('common.confirm')} cancelText={t('common.cancel')}>
             <Button danger icon={<ClearOutlined />}>{t('settings.clearAllHistory')}</Button>
           </Popconfirm>
-        </Flex>
-      ),
-    },
-    {
-      key: 'import',
-      label: <Space><ImportOutlined />{t('settings.sectionImport')}</Space>,
-      children: (
-        <Flex vertical gap={8} style={{ width: '100%' }}>
-          {legacyPath ? (
-            <>
-              <Text type="success">{t('settings.importLegacyDetected')}</Text>
-              <Text type="secondary" copyable style={{ fontSize: 12 }}>{legacyPath}</Text>
-              <Space>
-                <Button type="primary" onClick={handleImportLegacyAuto} loading={importing}>
-                  {t('settings.importLegacyAuto')}
-                </Button>
-                <Button onClick={handleImportLegacyManual} loading={importing}>
-                  {t('settings.importLegacyManual')}
-                </Button>
-              </Space>
-            </>
-          ) : (
-            <>
-              <Text type="secondary">{t('settings.importLegacyNotDetected')}</Text>
-              <Button onClick={handleImportLegacyManual} loading={importing}>
-                {t('settings.importLegacyManual')}
-              </Button>
-            </>
-          )}
-        </Flex>
-      ),
-    },
-    {
-      key: 'sprite',
-      label: <Space><PictureOutlined />{t('settings.sectionSprite')}</Space>,
-      children: (
-        <Flex vertical gap={12} style={{ width: '100%' }}>
-          <Space>
-            <Button icon={<FolderOpenOutlined />} onClick={handleSpriteImportFolder}>
-              {t('settings.spriteImportFolder')}
-            </Button>
-            <Button icon={<FileZipOutlined />} onClick={handleSpriteImportZip}>
-              {t('settings.spriteImportZip')}
-            </Button>
-          </Space>
-
-          {sprites.length === 0 ? (
-            <Text type="secondary">{t('settings.spriteNoData')}</Text>
-          ) : (
-            <Flex wrap="wrap" gap={12}>
-              {sprites.map((sprite) =>
-                spriteSrcs[sprite.dirId] && (
-                  <SpriteCard
-                    key={sprite.dirId}
-                    manifest={sprite}
-                    imageSrc={spriteSrcs[sprite.dirId]}
-                    isSelected={selectedSpriteId === sprite.dirId}
-                    onSelect={() => handleSpriteSelect(sprite.dirId)}
-                    onDelete={() => handleSpriteDelete(sprite.dirId)}
-                  />
-                )
-              )}
-            </Flex>
-          )}
-
-          {sprites.length > 0 && (
-            <Flex vertical gap={16} style={{ maxWidth: 400 }}>
-              <div>
-                <Flex justify="space-between" align="center">
-                  <Text>{t('settings.spriteSize')}</Text>
-                  <Text type="secondary">{spriteSize}px</Text>
-                </Flex>
-                <Slider min={80} max={300} step={10} value={spriteSize} onChange={handleSpriteSizeChange} />
-              </div>
-              <div>
-                <Flex justify="space-between" align="center">
-                  <Text>{t('settings.spriteBgRemoval')}</Text>
-                  <Text type="secondary">{bgThreshold.toFixed(2)}</Text>
-                </Flex>
-                <Slider
-                  min={0.01} max={0.50} step={0.01}
-                  value={bgThreshold}
-                  onChange={setBgThreshold}
-                  onChangeComplete={handleBgThresholdCommit}
-                  disabled={!selectedSpriteId || bgProcessing}
-                />
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {t('settings.spriteBgRemovalHint')}
-                </Text>
-              </div>
-            </Flex>
-          )}
         </Flex>
       ),
     },
@@ -624,6 +335,30 @@ export default function Settings() {
           )}
           {settingRow(t('settings.autostart'), <Switch checked={settings.autostart} onChange={(v) => updateSetting('autostart', v)} />)}
           {settingRow(t('settings.dataPath'), <Text type="secondary" copyable>{settings.data_path || t('settings.dataPathNotSet')}</Text>)}
+          <div style={{ padding: '8px 0' }}>
+            <Text strong>{t('settings.sectionImport')}</Text>
+          </div>
+          {legacyPath ? (
+            <>
+              <Text type="success">{t('settings.importLegacyDetected')}</Text>
+              <Text type="secondary" copyable style={{ fontSize: 12 }}>{legacyPath}</Text>
+              <Space>
+                <Button type="primary" onClick={handleImportLegacyAuto} loading={importing}>
+                  {t('settings.importLegacyAuto')}
+                </Button>
+                <Button onClick={handleImportLegacyManual} loading={importing}>
+                  {t('settings.importLegacyManual')}
+                </Button>
+              </Space>
+            </>
+          ) : (
+            <>
+              <Text type="secondary">{t('settings.importLegacyNotDetected')}</Text>
+              <Button onClick={handleImportLegacyManual} loading={importing}>
+                {t('settings.importLegacyManual')}
+              </Button>
+            </>
+          )}
         </Flex>
       ),
     },
