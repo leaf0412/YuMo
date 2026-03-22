@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 
 // Simulate Tauri environment so platformInvoke uses the mocked @tauri-apps/api/core
-(window as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
 
 // Must use factory function (no external refs) since vi.mock is hoisted
 vi.mock('@tauri-apps/api/core', () => ({
@@ -17,7 +17,7 @@ async function getMockInvoke() {
 }
 
 afterAll(() => {
-  delete (window as Record<string, unknown>).__TAURI_INTERNALS__;
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 });
 
 describe('formatError', () => {
