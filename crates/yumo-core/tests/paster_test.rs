@@ -5,6 +5,7 @@ use yumo_core::platform::paster;
 static CLIPBOARD_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
+#[ignore] // 需要窗口环境（CI 无 display server）
 fn test_clipboard_write_and_read() {
     let _guard = CLIPBOARD_LOCK.lock().unwrap();
 
@@ -21,6 +22,7 @@ fn test_clipboard_write_and_read() {
 }
 
 #[test]
+#[ignore] // 需要窗口环境（CI 无 display server）
 fn test_save_and_restore_clipboard() {
     let _guard = CLIPBOARD_LOCK.lock().unwrap();
 
@@ -42,6 +44,7 @@ fn test_save_and_restore_clipboard() {
 }
 
 #[test]
+#[ignore] // 需要窗口环境（CI 无 display server）
 fn test_write_empty_string() {
     let _guard = CLIPBOARD_LOCK.lock().unwrap();
 

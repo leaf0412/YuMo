@@ -646,7 +646,7 @@ pub fn get_statistics(conn: &Connection, days: Option<i64>) -> Result<Statistics
 
     let date_filter = days.map(|d| format!("-{} days", d));
 
-    let (total_sessions, total_duration): (i64, f64) = if let Some(ref df) = date_filter {
+    let (_total_sessions, total_duration): (i64, f64) = if let Some(ref df) = date_filter {
         conn.query_row(
             "SELECT COUNT(*), COALESCE(SUM(duration), 0.0)
              FROM transcriptions WHERE timestamp >= datetime('now', ?1) AND duration > 1.0",

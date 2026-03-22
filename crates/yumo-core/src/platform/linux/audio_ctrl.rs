@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::platform::traits::PlatformAudioCtrl;
 
 // ---------------------------------------------------------------------------
