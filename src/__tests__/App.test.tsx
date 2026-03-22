@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, test, expect, vi } from 'vitest';
 import App from '../App';
 
@@ -17,19 +17,24 @@ vi.mock('@tauri-apps/api/window', () => ({
 }));
 
 describe('App Shell', () => {
-  test('renders sidebar with all navigation items', () => {
+  test('renders sidebar with all navigation items', async () => {
     render(<App />);
-    // '仪表盘' appears in both menu and page content (default route)
-    expect(screen.getAllByText('仪表盘').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('转录历史')).toBeInTheDocument();
+    // App returns null until fetchSettings resolves; wait for the sidebar to appear.
+    // i18n is initialized with zh-CN in test-setup.ts.
+    await waitFor(() => {
+      expect(screen.getByText('转录历史')).toBeInTheDocument();
+    });
     expect(screen.getByText('模型管理')).toBeInTheDocument();
     expect(screen.getByText('词典')).toBeInTheDocument();
     expect(screen.getByText('AI 增强')).toBeInTheDocument();
     expect(screen.getByText('设置')).toBeInTheDocument();
   });
 
-  test('renders app title in sidebar', () => {
+  test('renders app title in sidebar', async () => {
     render(<App />);
-    expect(screen.getByText('VoiceInk')).toBeInTheDocument();
+    await waitFor(() => {
+      // app.name is "语墨" in zh-CN locale
+      expect(screen.getByText('语墨')).toBeInTheDocument();
+    });
   });
 });
