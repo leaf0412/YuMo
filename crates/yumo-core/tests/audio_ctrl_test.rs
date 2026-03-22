@@ -8,6 +8,7 @@ fn test_is_system_muted_returns_ok() {
 }
 
 #[test]
+#[ignore] // requires real audio device — skip in headless CI
 fn test_mute_unmute_roundtrip() {
     let original = audio_ctrl::is_system_muted().unwrap();
 

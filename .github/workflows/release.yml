@@ -45,6 +45,7 @@ jobs:
             libsecret-1-dev \
             libayatana-appindicator3-dev \
             libasound2-dev \
+            libssl-dev \
             cmake \
             build-essential \
             libdbus-1-dev \
@@ -83,6 +84,14 @@ jobs:
       - name: Make uv executable (Unix)
         if: matrix.os != 'windows-latest'
         run: chmod +x src-tauri/resources/uv || true
+
+      - name: Set macOS deployment target
+        if: runner.os == 'macOS'
+        run: |
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          echo "CMAKE_OSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          echo "CFLAGS=-mmacosx-version-min=11.0" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=-mmacosx-version-min=11.0" >> "$GITHUB_ENV"
 
       - name: Build Tauri app
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}

@@ -70,6 +70,14 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Set macOS deployment target
+        if: runner.os == 'macOS'
+        run: |
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          echo "CMAKE_OSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          echo "CFLAGS=-mmacosx-version-min=11.0" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=-mmacosx-version-min=11.0" >> "$GITHUB_ENV"
+
       - name: Frontend build
         run: pnpm vite build
 

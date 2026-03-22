@@ -28,6 +28,7 @@ linux:
     - deb
   artifactName: ${productName}-${version}-linux.${ext}
   category: Utility
+  maintainer: yumo@yumo.app
 win:
   target:
     - nsis
