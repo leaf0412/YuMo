@@ -178,7 +178,7 @@ jobs:
         run: pnpm electron:build
 
       - name: Package Electron app
-        run: pnpm electron-builder --linux AppImage deb
+        run: pnpm electron-builder --linux AppImage deb --publish never
 
       - name: Upload Electron artifacts
         uses: softprops/action-gh-release@v2
