@@ -54,6 +54,10 @@ export function registerAudioHandlers(): void {
       hideRecorder();
       emitToRenderers("recording-state", { state: "idle" });
       emitToRenderers("transcription-result", result);
+      if (result.paste_error) {
+        log.warn("[audio] paste failed:", result.paste_error);
+        emitToRenderers("paste-failed", { error: result.paste_error });
+      }
       return result;
     } catch (err) {
       hideRecorder();

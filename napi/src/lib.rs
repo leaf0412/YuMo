@@ -29,6 +29,11 @@ fn ctx() -> Result<&'static AppContext> {
 /// Must be called once before any other function.
 #[napi]
 pub fn init(data_dir: String) -> Result<()> {
+    // Initialize Rust logging so paster/core logs go to stderr (visible in Electron console)
+    let _ = env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
+
     let mut paths = AppPaths::defaults();
     paths.data_dir = data_dir.clone().into();
     paths.models_dir = std::path::PathBuf::from(&data_dir).join("models");
@@ -746,14 +751,25 @@ pub async fn stop_recording() -> Result<String> {
 
     let final_text = &processed_text;
 
-    if platform::permissions::check_accessibility() {
+    let paste_error: Option<String> = if platform::permissions::check_accessibility() {
         let restore_delay = settings_map.get("clipboard_restore_delay")
             .and_then(|v| v.as_f64())
             .unwrap_or(1500.0) as u64;
-        platform::paster::paste_text(final_text, restore_delay);
+        #[cfg(target_os = "linux")]
+        {
+            platform::paster::paste_text(final_text, restore_delay)
+                .err()
+                .map(|e| e.to_string())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            platform::paster::paste_text(final_text, restore_delay);
+            None
+        }
     } else {
         platform::paster::write_clipboard(final_text);
-    }
+        None
+    };
 
     // 8. Save to DB
     let word_count = db::count_words(final_text) as i32;
@@ -795,6 +811,7 @@ pub async fn stop_recording() -> Result<String> {
     let result_json = serde_json::json!({
         "text": processed_text,
         "enhanced_text": serde_json::Value::Null,
+        "paste_error": paste_error,
     });
     Ok(result_json.to_string())
 }

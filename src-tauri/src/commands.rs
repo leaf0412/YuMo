@@ -454,17 +454,31 @@ pub async fn stop_recording(
 
     let final_text = enhanced_text.as_deref().unwrap_or(&processed_text);
 
-    if permissions::check_accessibility() {
+    let paste_error: Option<String> = if permissions::check_accessibility() {
         let restore_delay = settings_map
             .get("clipboard_restore_delay")
             .and_then(|v| v.as_f64())
             .unwrap_or(1500.0) as u64;
         info!("[pipeline] accessibility=true, paste+restore (delay={}ms)", restore_delay);
-        paster::paste_text(final_text, restore_delay);
+        #[cfg(target_os = "linux")]
+        {
+            paster::paste_text(final_text, restore_delay)
+                .err()
+                .map(|e| {
+                    error!("[pipeline] paste_text failed: {}", e);
+                    e.to_string()
+                })
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            paster::paste_text(final_text, restore_delay);
+            None
+        }
     } else {
         info!("[pipeline] accessibility=false, writing to clipboard only");
         paster::write_clipboard(final_text);
-    }
+        None
+    };
 
     // 9. Save to DB
     let word_count = db::count_words(final_text) as i32;
@@ -521,6 +535,9 @@ pub async fn stop_recording(
             "enhanced_text": enhanced_text,
         }),
     );
+    if let Some(ref err) = paste_error {
+        let _ = app.emit("paste-failed", serde_json::json!({"error": err}));
+    }
     info!("[pipeline] stop_recording complete, state -> Idle");
 
     // Unregister Escape shortcut

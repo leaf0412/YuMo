@@ -324,6 +324,17 @@ export default function App() {
       }
     });
 
+    // Paste failure notification (Linux: xdotool/wtype not installed)
+    const unlistenPaste = listen<{ error: string }>('paste-failed', () => {
+      import('antd').then(({ notification }) => {
+        notification.warning({
+          message: i18n.t('app.pasteFailed'),
+          description: i18n.t('app.pasteFailedHint'),
+          duration: 8,
+        });
+      });
+    });
+
     // Fallback: in-window ESC for when global shortcut isn't registered
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && pipelineRef.current !== 'idle') {
@@ -347,6 +358,7 @@ export default function App() {
       unlistenToggle.then((fn) => fn());
       unlistenState.then((fn) => fn());
       unlistenEscape.then((fn) => fn());
+      unlistenPaste.then((fn) => fn());
       window.removeEventListener('keydown', onKeyDown);
     };
   }, []);
