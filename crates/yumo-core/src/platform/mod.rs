@@ -15,6 +15,7 @@ pub use traits::*;
 pub use macos::recorder;
 #[cfg(target_os = "macos")]
 pub use macos::recorder::RecordingHandle;
+pub use types::PreparedRecordingHandle;
 #[cfg(target_os = "macos")]
 pub use macos::audio_ctrl;
 #[cfg(target_os = "macos")]

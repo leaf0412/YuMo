@@ -20,6 +20,13 @@ pub struct AudioData {
     pub channels: u16,
 }
 
+/// Opaque handle for a pre-initialized recording session.
+/// The platform stores its own prepared state inside `inner`.
+pub struct PreparedRecordingHandle {
+    pub(crate) inner: Box<dyn std::any::Any + Send>,
+    pub device_id: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionStatus {
     pub microphone: bool,
