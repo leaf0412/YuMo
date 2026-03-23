@@ -619,12 +619,13 @@ fn start_prepared_impl(
     }
 
     // Transfer fields to RecordingHandle.
-    // We use ptr::read for level_rx and Arc::clone for buffer since we
-    // suppressed Drop via ManuallyDrop.
+    // Transfer ownership via ptr::read since ManuallyDrop suppresses Drop.
+    // Using .clone() on Arc would leak the refcount.
     let level_rx = unsafe { std::ptr::read(&prepared.level_rx) };
+    let buffer = unsafe { std::ptr::read(&prepared.buffer) };
     let handle = RecordingHandle {
         audio_unit: prepared.audio_unit,
-        buffer: prepared.buffer.clone(),
+        buffer,
         _callback_box: prepared.callback_box,
         disposed: false,
     };

@@ -51,16 +51,24 @@ fn check_model_ready(ctx: &AppContext) -> Result<(), serde_json::Value> {
 
 /// Core start-recording logic shared by the Tauri command and hotkey toggle.
 fn start_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), AppError> {
-    // 1. Check idle
+    // 1. Check idle and immediately claim the Recording state to prevent double-tap race
     {
-        let pipeline = ctx.pipeline_state.lock()
+        let mut pipeline = ctx.pipeline_state.lock()
             .map_err(|e| AppError::Recording(e.to_string()))?;
         info!("[pipeline] current state: {:?}", *pipeline);
         if *pipeline != PipelineState::Idle {
             error!("[pipeline] not idle, rejecting start_recording");
             return Err(AppError::Recording("Already recording".into()));
         }
+        *pipeline = PipelineState::Recording;
     }
+
+    // Helper to reset state on error
+    let reset_on_error = |ctx: &AppContext| {
+        if let Ok(mut p) = ctx.pipeline_state.lock() {
+            *p = PipelineState::Idle;
+        }
+    };
 
     // 2. Read settings from cache + mute BEFORE recording to avoid capturing system sound
     let settings = ctx.settings_cache.read()
@@ -79,6 +87,7 @@ fn start_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), App
     let dev_id = ctx.resolve_device_id();
     if dev_id == 0 {
         error!("[pipeline] no audio device available");
+        reset_on_error(ctx);
         return Err(AppError::Recording("No audio device available".into()));
     }
     info!("[pipeline] using device_id={}", dev_id);
@@ -96,6 +105,7 @@ fn start_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), App
                         warn!("[pipeline] start_prepared failed: {}, cold start", e);
                         platform::recorder::start_recording(dev_id).map_err(|e| {
                             error!("[pipeline] recorder::start_recording failed: {}", e);
+                            reset_on_error(ctx);
                             AppError::Recording(e.to_string())
                         })?
                     }
@@ -105,6 +115,7 @@ fn start_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), App
                 drop(prepared);
                 platform::recorder::start_recording(dev_id).map_err(|e| {
                     error!("[pipeline] recorder::start_recording failed: {}", e);
+                    reset_on_error(ctx);
                     AppError::Recording(e.to_string())
                 })?
             }
@@ -112,24 +123,19 @@ fn start_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), App
             info!("[pipeline] no prepared recording, cold start");
             platform::recorder::start_recording(dev_id).map_err(|e| {
                 error!("[pipeline] recorder::start_recording failed: {}", e);
+                reset_on_error(ctx);
                 AppError::Recording(e.to_string())
             })?
         }
     };
     info!("[pipeline] recording started successfully");
 
-    // 5. Store handle and update state
+    // 5. Store handle (state already set to Recording in step 1)
     {
         let mut rec = ctx.recording_handle.lock()
             .map_err(|e| AppError::Recording(e.to_string()))?;
         *rec = Some(handle);
     }
-    {
-        let mut pipeline = ctx.pipeline_state.lock()
-            .map_err(|e| AppError::Recording(e.to_string()))?;
-        *pipeline = PipelineState::Recording;
-    }
-    info!("[pipeline] state -> Recording");
 
     // 6. Emit state change
     let _ = app.emit(
