@@ -14,7 +14,32 @@ fn test_list_audio_devices() {
     }
 }
 
-// Recording tests need microphone permission — mark as ignore for CI
+// Recording tests need microphone permission -- mark as ignore for CI
+#[test]
+#[ignore]
+fn test_prepare_and_start_prepared() {
+    let devices = recorder::list_input_devices().unwrap();
+    let device_id = devices[0].id;
+
+    // Phase 1: prepare (AudioUnit initialized but not started)
+    let prepared = recorder::prepare_recording(device_id)
+        .expect("prepare_recording failed")
+        .expect("prepare_recording returned None");
+    assert_eq!(prepared.device_id, device_id);
+
+    // Phase 2: start the prepared session (only AudioOutputUnitStart)
+    let (handle, _rx) = recorder::start_prepared_recording(prepared).unwrap();
+
+    // Let it capture briefly
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // Phase 3: stop and verify audio data
+    let audio_data = recorder::stop_recording(handle).unwrap();
+    assert!(audio_data.pcm_samples.len() > 100);
+    assert_eq!(audio_data.sample_rate, 16000);
+    assert_eq!(audio_data.channels, 1);
+}
+
 #[test]
 #[ignore]
 fn test_record_short_audio() {
