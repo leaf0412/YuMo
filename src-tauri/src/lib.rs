@@ -191,13 +191,19 @@ pub fn run() {
                 }
             }
 
-            // Restore saved hotkey
+            // Restore saved hotkey — calls toggle_recording_internal directly
             if let Some(shortcut) = &saved_hotkey {
                 let handle = app.handle().clone();
                 match hotkey::register_shortcut(app.handle(), shortcut, move || {
-                    use tauri::Emitter;
-                    info!("[hotkey] triggered! emitting toggle-recording");
-                    let _ = handle.emit("toggle-recording", ());
+                    let h = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        use tauri::Manager;
+                        let ctx = h.state::<state::AppContext>();
+                        info!("[hotkey] triggered! calling toggle_recording_internal");
+                        if let Err(e) = commands::toggle_recording_internal(&h, &ctx) {
+                            log::error!("[hotkey] toggle failed: {}", e);
+                        }
+                    });
                 }) {
                     Ok(()) => info!("Restored hotkey: {}", shortcut),
                     Err(e) => info!("Failed to restore hotkey {}: {}", shortcut, e),

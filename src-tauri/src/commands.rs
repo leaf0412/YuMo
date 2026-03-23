@@ -30,19 +30,30 @@ pub fn frontend_log(level: String, message: String) {
 // Recording pipeline
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-pub async fn start_recording(
-    app: AppHandle,
-    state: State<'_, AppContext>,
-    device_id: Option<u32>,
-) -> Result<(), AppError> {
-    info!("[pipeline] start_recording called, device_id={:?}", device_id);
+/// Check if a transcription model is selected and downloaded (for local models).
+fn check_model_ready(ctx: &AppContext) -> Result<(), serde_json::Value> {
+    let cache = ctx.settings_cache.read()
+        .map_err(|_| serde_json::json!({"type": "internal_error"}))?;
+    let model_id = cache.get("selected_model_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if model_id.is_empty() {
+        return Err(serde_json::json!({"type": "no_model_selected"}));
+    }
+    let all = transcriber::all_models(&ctx.paths.models_dir);
+    if let Some(model) = all.iter().find(|m| m.id == model_id) {
+        if model.provider.is_local() && !model.is_downloaded {
+            return Err(serde_json::json!({"type": "model_not_downloaded", "name": model.name}));
+        }
+    }
+    Ok(())
+}
 
-    // 1. Check we're idle
+/// Core start-recording logic shared by the Tauri command and hotkey toggle.
+fn start_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), AppError> {
+    // 1. Check idle
     {
-        let pipeline = state
-            .pipeline_state
-            .lock()
+        let pipeline = ctx.pipeline_state.lock()
             .map_err(|e| AppError::Recording(e.to_string()))?;
         info!("[pipeline] current state: {:?}", *pipeline);
         if *pipeline != PipelineState::Idle {
@@ -52,7 +63,7 @@ pub async fn start_recording(
     }
 
     // 2. Read settings from cache + mute BEFORE recording to avoid capturing system sound
-    let settings = state.settings_cache.read()
+    let settings = ctx.settings_cache.read()
         .map_err(|e| AppError::Recording(e.to_string()))?
         .clone();
     let mute = settings
@@ -64,45 +75,17 @@ pub async fn start_recording(
         let _ = audio_ctrl::set_system_muted(true);
     }
 
-    // 3. Resolve target device from cache (fallback to fresh enumeration)
-    let devices = {
-        let cached = state.device_cache.read()
-            .map_err(|e| AppError::Recording(e.to_string()))?;
-        if cached.is_empty() {
-            drop(cached);
-            let fresh = platform::recorder::list_input_devices()?;
-            info!("[pipeline] cache empty, enumerated {} devices", fresh.len());
-            let mut cache = state.device_cache.write()
-                .map_err(|e| AppError::Recording(e.to_string()))?;
-            *cache = fresh.clone();
-            fresh
-        } else {
-            cached.clone()
-        }
-    };
-    info!("[pipeline] found {} input devices", devices.len());
-    if devices.is_empty() {
-        error!("[pipeline] no input devices found");
-        return Err(AppError::Recording("No input devices found".into()));
+    // 3. Resolve target device from cache
+    let dev_id = ctx.resolve_device_id();
+    if dev_id == 0 {
+        error!("[pipeline] no audio device available");
+        return Err(AppError::Recording("No audio device available".into()));
     }
-    let dev_id = device_id.unwrap_or_else(|| {
-        // Prefer saved device if still available
-        let saved = settings.get("audio_device")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
-        if let Some(id) = saved {
-            if devices.iter().any(|d| d.id == id) {
-                return id;
-            }
-            info!("[pipeline] saved device_id={} not found, using default", id);
-        }
-        devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(devices[0].id)
-    });
     info!("[pipeline] using device_id={}", dev_id);
 
-    // Try prepared recording first, fall back to cold start
+    // 4. Try prepared recording first, fall back to cold start
     let (handle, _level_rx) = {
-        let mut prepared_slot = state.prepared_recording.lock()
+        let mut prepared_slot = ctx.prepared_recording.lock()
             .map_err(|e| AppError::Recording(e.to_string()))?;
         if let Some(prepared) = prepared_slot.take() {
             if prepared.device_id == dev_id {
@@ -135,18 +118,14 @@ pub async fn start_recording(
     };
     info!("[pipeline] recording started successfully");
 
-    // 4. Store handle and update state
+    // 5. Store handle and update state
     {
-        let mut rec = state
-            .recording_handle
-            .lock()
+        let mut rec = ctx.recording_handle.lock()
             .map_err(|e| AppError::Recording(e.to_string()))?;
         *rec = Some(handle);
     }
     {
-        let mut pipeline = state
-            .pipeline_state
-            .lock()
+        let mut pipeline = ctx.pipeline_state.lock()
             .map_err(|e| AppError::Recording(e.to_string()))?;
         *pipeline = PipelineState::Recording;
     }
@@ -162,7 +141,7 @@ pub async fn start_recording(
     // 7. Register Escape as global shortcut for cancel during recording
     {
         let app_esc = app.clone();
-        let _ = hotkey::register_escape(&app, move || {
+        let _ = hotkey::register_escape(app, move || {
             use tauri::Emitter;
             info!("[hotkey] Escape pressed during recording");
             let _ = app_esc.emit("escape-pressed", ());
@@ -173,6 +152,105 @@ pub async fn start_recording(
     crate::window_manager::WindowManager::new(app.clone()).show("recorder");
 
     Ok(())
+}
+
+/// Core cancel-recording logic shared by the Tauri command and hotkey toggle.
+fn cancel_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), AppError> {
+    info!("[cmd] cancel_recording_internal");
+    let handle = ctx.recording_handle.lock()
+        .map_err(|e| AppError::Recording(e.to_string()))?
+        .take();
+    if let Some(h) = handle {
+        let _ = platform::recorder::cancel_recording(h);
+    }
+
+    {
+        let mut pipeline = ctx.pipeline_state.lock()
+            .map_err(|e| AppError::Recording(e.to_string()))?;
+        *pipeline = PipelineState::Idle;
+    }
+
+    // Unmute if needed
+    let mute = ctx.settings_cache.read()
+        .map(|c| c.get("system_mute_enabled").and_then(|v| v.as_bool()).unwrap_or(false))
+        .unwrap_or(false);
+    if mute {
+        let _ = audio_ctrl::set_system_muted(false);
+    }
+
+    // Unregister Escape shortcut
+    let _ = hotkey::unregister_escape(app);
+
+    let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
+    crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
+
+    // Background re-prepare for next recording
+    {
+        let app_bg = app.clone();
+        std::thread::spawn(move || {
+            let ctx = app_bg.state::<AppContext>();
+            let dev_id = ctx.resolve_device_id();
+            if dev_id > 0 {
+                match platform::recorder::prepare_recording(dev_id) {
+                    Ok(Some(prepared)) => {
+                        info!("[pipeline] background prepare complete for device_id={}", dev_id);
+                        *ctx.prepared_recording.lock().unwrap() = Some(prepared);
+                    }
+                    Ok(None) => info!("[pipeline] platform does not support pre-warming"),
+                    Err(e) => warn!("[pipeline] background prepare failed: {}", e),
+                }
+            }
+        });
+    }
+
+    Ok(())
+}
+
+/// Toggle recording state: idle -> start, recording -> stop, other -> cancel.
+/// Called directly from the hotkey callback to eliminate frontend roundtrip.
+pub(crate) fn toggle_recording_internal(
+    app: &AppHandle,
+    ctx: &AppContext,
+) -> Result<(), AppError> {
+    let current_state = {
+        *ctx.pipeline_state.lock()
+            .map_err(|e| AppError::Recording(e.to_string()))?
+    };
+    info!("[toggle] current state: {:?}", current_state);
+
+    match current_state {
+        PipelineState::Idle => {
+            if let Err(reason) = check_model_ready(ctx) {
+                let _ = app.emit("recording-error", reason);
+                return Ok(());
+            }
+            start_recording_internal(app, ctx)
+        }
+        PipelineState::Recording => {
+            // Stop requires async (transcription pipeline). Spawn on async runtime.
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                use tauri::Manager;
+                let ctx = app_clone.state::<AppContext>();
+                let daemon = app_clone.state::<DaemonManager>();
+                if let Err(e) = stop_recording(app_clone.clone(), ctx, daemon).await {
+                    error!("[toggle] stop_recording failed: {}", e);
+                }
+            });
+            Ok(())
+        }
+        _ => cancel_recording_internal(app, ctx),
+    }
+}
+
+#[tauri::command]
+pub async fn start_recording(
+    app: AppHandle,
+    state: State<'_, AppContext>,
+    _device_id: Option<u32>,
+) -> Result<(), AppError> {
+    info!("[pipeline] start_recording command called");
+    start_recording_internal(&app, &state)
 }
 
 #[tauri::command]
@@ -616,63 +694,7 @@ pub fn cancel_recording(
     app: AppHandle,
     state: State<AppContext>,
 ) -> Result<(), AppError> {
-    info!("[cmd] cancel_recording");
-    let handle = state
-        .recording_handle
-        .lock()
-        .map_err(|e| AppError::Recording(e.to_string()))?
-        .take();
-    if let Some(h) = handle {
-        let _ = platform::recorder::cancel_recording(h);
-    }
-
-    {
-        let mut pipeline = state
-            .pipeline_state
-            .lock()
-            .map_err(|e| AppError::Recording(e.to_string()))?;
-        *pipeline = PipelineState::Idle;
-    }
-
-    // Unmute if needed
-    if let Ok(conn) = state.db.lock() {
-        if let Ok(settings) = db::get_all_settings(&conn) {
-            if settings
-                .get("system_mute_enabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-            {
-                let _ = audio_ctrl::set_system_muted(false);
-            }
-        }
-    }
-
-    // Unregister Escape shortcut
-    let _ = hotkey::unregister_escape(&app);
-
-    let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
-    crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
-
-    // Background re-prepare for next recording
-    {
-        let app_bg = app.clone();
-        std::thread::spawn(move || {
-            let ctx = app_bg.state::<AppContext>();
-            let dev_id = ctx.resolve_device_id();
-            if dev_id > 0 {
-                match platform::recorder::prepare_recording(dev_id) {
-                    Ok(Some(prepared)) => {
-                        info!("[pipeline] background prepare complete for device_id={}", dev_id);
-                        *ctx.prepared_recording.lock().unwrap() = Some(prepared);
-                    }
-                    Ok(None) => info!("[pipeline] platform does not support pre-warming"),
-                    Err(e) => warn!("[pipeline] background prepare failed: {}", e),
-                }
-            }
-        });
-    }
-
-    Ok(())
+    cancel_recording_internal(&app, &state)
 }
 
 #[tauri::command]
@@ -1141,8 +1163,15 @@ pub fn register_hotkey(
     })?;
     let app_clone = app.clone();
     hotkey::register_shortcut(&app, &shortcut, move || {
-        info!("[hotkey] shortcut triggered, emitting toggle-recording");
-        let _ = app_clone.emit("toggle-recording", ());
+        let h = app_clone.clone();
+        tauri::async_runtime::spawn(async move {
+            use tauri::Manager;
+            let ctx = h.state::<AppContext>();
+            info!("[hotkey] shortcut triggered, calling toggle_recording_internal");
+            if let Err(e) = toggle_recording_internal(&h, &ctx) {
+                error!("[hotkey] toggle failed: {}", e);
+            }
+        });
     })
     .map_err(|e| {
         error!("[hotkey] register_shortcut failed: {:?} error: {}", shortcut, e);
