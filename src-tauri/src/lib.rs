@@ -17,7 +17,7 @@ pub use yumo_core::transcriber;
 pub use yumo_core::vad;
 pub mod window_manager;
 
-use log::info;
+use log::{info, warn};
 use tauri::Emitter;
 use state::AppPaths;
 
@@ -96,6 +96,27 @@ pub fn run() {
                         *ctx.device_cache.write().unwrap() = devices;
                     }
                     Err(e) => info!("[startup] device enumeration failed: {}", e),
+                }
+            }
+
+            // Pre-warm AudioUnit in background for fast first recording
+            {
+                use tauri::Manager;
+                let ctx = app.state::<state::AppContext>();
+                let dev_id = ctx.resolve_device_id();
+                if dev_id > 0 {
+                    let app_handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        let ctx = app_handle.state::<state::AppContext>();
+                        match platform::recorder::prepare_recording(dev_id) {
+                            Ok(Some(prepared)) => {
+                                info!("[startup] AudioUnit pre-warmed for device_id={}", dev_id);
+                                *ctx.prepared_recording.lock().unwrap() = Some(prepared);
+                            }
+                            Ok(None) => info!("[startup] platform does not support pre-warming"),
+                            Err(e) => warn!("[startup] pre-warm failed: {}", e),
+                        }
+                    });
                 }
             }
 

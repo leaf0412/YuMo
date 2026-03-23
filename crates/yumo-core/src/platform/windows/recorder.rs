@@ -69,6 +69,16 @@ pub fn cancel_recording(handle: RecordingHandle) -> AppResult<()> {
     WindowsRecorder::cancel(handle)
 }
 
+pub fn prepare_recording(_device_id: u32) -> AppResult<Option<PreparedRecordingHandle>> {
+    Ok(None)
+}
+
+pub fn start_prepared_recording(
+    _prepared: PreparedRecordingHandle,
+) -> AppResult<(RecordingHandle, Receiver<AudioLevel>)> {
+    Err(AppError::Recording("prepared recording not supported on Windows".into()))
+}
+
 // ---------------------------------------------------------------------------
 // List input devices (implementation)
 // ---------------------------------------------------------------------------

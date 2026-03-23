@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, RwLock};
 
 use crate::pipeline::PipelineState;
-use crate::platform::{AudioInputDevice, RecordingHandle};
+use crate::platform::{AudioInputDevice, PreparedRecordingHandle, RecordingHandle};
 
 /// All configurable paths with defaults.
 /// Each can be overridden via DB setting `path_<name>`.
@@ -76,6 +76,7 @@ pub struct AppContext {
     pub paths: AppPaths,
     pub settings_cache: RwLock<HashMap<String, Value>>,
     pub device_cache: RwLock<Vec<AudioInputDevice>>,
+    pub prepared_recording: Mutex<Option<PreparedRecordingHandle>>,
 }
 
 impl AppContext {
@@ -87,6 +88,7 @@ impl AppContext {
             paths,
             settings_cache: RwLock::new(initial_settings),
             device_cache: RwLock::new(Vec::new()),
+            prepared_recording: Mutex::new(None),
         }
     }
 

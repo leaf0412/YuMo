@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use log::{info, error};
+use log::{info, error, warn};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::db::{self, PaginatedResult, Prompt, Replacement, VocabularyWord};
 use crate::error::AppError;
@@ -100,11 +100,39 @@ pub async fn start_recording(
     });
     info!("[pipeline] using device_id={}", dev_id);
 
-    info!("[pipeline] calling recorder::start_recording...");
-    let (handle, _level_rx) = platform::recorder::start_recording(dev_id).map_err(|e| {
-        error!("[pipeline] recorder::start_recording failed: {}", e);
-        AppError::Recording(e.to_string())
-    })?;
+    // Try prepared recording first, fall back to cold start
+    let (handle, _level_rx) = {
+        let mut prepared_slot = state.prepared_recording.lock()
+            .map_err(|e| AppError::Recording(e.to_string()))?;
+        if let Some(prepared) = prepared_slot.take() {
+            if prepared.device_id == dev_id {
+                info!("[pipeline] using prepared recording for device_id={}", dev_id);
+                match platform::recorder::start_prepared_recording(prepared) {
+                    Ok(result) => result,
+                    Err(e) => {
+                        warn!("[pipeline] start_prepared failed: {}, cold start", e);
+                        platform::recorder::start_recording(dev_id).map_err(|e| {
+                            error!("[pipeline] recorder::start_recording failed: {}", e);
+                            AppError::Recording(e.to_string())
+                        })?
+                    }
+                }
+            } else {
+                info!("[pipeline] device mismatch (prepared={} requested={}), cold start", prepared.device_id, dev_id);
+                drop(prepared);
+                platform::recorder::start_recording(dev_id).map_err(|e| {
+                    error!("[pipeline] recorder::start_recording failed: {}", e);
+                    AppError::Recording(e.to_string())
+                })?
+            }
+        } else {
+            info!("[pipeline] no prepared recording, cold start");
+            platform::recorder::start_recording(dev_id).map_err(|e| {
+                error!("[pipeline] recorder::start_recording failed: {}", e);
+                AppError::Recording(e.to_string())
+            })?
+        }
+    };
     info!("[pipeline] recording started successfully");
 
     // 4. Store handle and update state
@@ -560,6 +588,26 @@ pub async fn stop_recording(
     crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
 
     info!("[pipeline] [complete] total_ms={}", pipeline_start.elapsed().as_millis());
+
+    // Background re-prepare for next recording
+    {
+        let app_bg = app.clone();
+        std::thread::spawn(move || {
+            let ctx = app_bg.state::<AppContext>();
+            let dev_id = ctx.resolve_device_id();
+            if dev_id > 0 {
+                match platform::recorder::prepare_recording(dev_id) {
+                    Ok(Some(prepared)) => {
+                        info!("[pipeline] background prepare complete for device_id={}", dev_id);
+                        *ctx.prepared_recording.lock().unwrap() = Some(prepared);
+                    }
+                    Ok(None) => info!("[pipeline] platform does not support pre-warming"),
+                    Err(e) => warn!("[pipeline] background prepare failed: {}", e),
+                }
+            }
+        });
+    }
+
     Ok(())
 }
 
@@ -604,6 +652,26 @@ pub fn cancel_recording(
 
     let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
     crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
+
+    // Background re-prepare for next recording
+    {
+        let app_bg = app.clone();
+        std::thread::spawn(move || {
+            let ctx = app_bg.state::<AppContext>();
+            let dev_id = ctx.resolve_device_id();
+            if dev_id > 0 {
+                match platform::recorder::prepare_recording(dev_id) {
+                    Ok(Some(prepared)) => {
+                        info!("[pipeline] background prepare complete for device_id={}", dev_id);
+                        *ctx.prepared_recording.lock().unwrap() = Some(prepared);
+                    }
+                    Ok(None) => info!("[pipeline] platform does not support pre-warming"),
+                    Err(e) => warn!("[pipeline] background prepare failed: {}", e),
+                }
+            }
+        });
+    }
+
     Ok(())
 }
 
