@@ -120,6 +120,35 @@ pub fn run() {
                 }
             }
 
+            // Register macOS device change listener to auto-refresh cache on plug/unplug
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Manager;
+                let app_handle = app.handle().clone();
+                platform::recorder::register_device_change_listener(move || {
+                    info!("[device-listener] device change detected, refreshing cache");
+                    let ctx = app_handle.state::<state::AppContext>();
+                    if let Ok(devices) = platform::recorder::list_input_devices() {
+                        if let Ok(mut cache) = ctx.device_cache.write() {
+                            *cache = devices;
+                        }
+                    }
+                    let dev_id = ctx.resolve_device_id();
+                    if dev_id > 0 {
+                        match platform::recorder::prepare_recording(dev_id) {
+                            Ok(Some(prepared)) => {
+                                *ctx.prepared_recording.lock().unwrap() = Some(prepared);
+                                info!("[device-listener] re-prepared for device_id={}", dev_id);
+                            }
+                            _ => {
+                                *ctx.prepared_recording.lock().unwrap() = None;
+                            }
+                        }
+                    }
+                })
+                .unwrap_or_else(|e| info!("[startup] device listener failed: {}", e));
+            }
+
             // Sync bundled resources (daemon script + uv) to ~/.voiceink/
             // Uses Tauri's resource_dir() which works in both dev and production builds.
             {
@@ -330,6 +359,12 @@ pub fn run() {
             // System locale
             commands::get_system_locale,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Exit = event {
+                platform::recorder::unregister_device_change_listener();
+            }
+        });
 }
