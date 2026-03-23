@@ -1061,11 +1061,36 @@ pub fn get_settings(state: State<AppContext>) -> Result<HashMap<String, Value>, 
 
 #[tauri::command]
 pub fn update_setting(
+    app: AppHandle,
     state: State<AppContext>,
     key: String,
     value: Value,
 ) -> Result<(), AppError> {
-    state.set_setting_cached(&key, &value)
+    state.set_setting_cached(&key, &value)?;
+
+    if key == "audio_device" {
+        // Invalidate current prepared recording immediately
+        if let Ok(mut slot) = state.prepared_recording.lock() {
+            *slot = None;
+        }
+        // Re-prepare in background with the new device
+        let app_bg = app.clone();
+        std::thread::spawn(move || {
+            let ctx = app_bg.state::<AppContext>();
+            let dev_id = ctx.resolve_device_id();
+            if dev_id > 0 {
+                match platform::recorder::prepare_recording(dev_id) {
+                    Ok(Some(prepared)) => {
+                        *ctx.prepared_recording.lock().unwrap() = Some(prepared);
+                        info!("[settings] re-prepared for new device_id={}", dev_id);
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
