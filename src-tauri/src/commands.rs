@@ -51,11 +51,10 @@ pub async fn start_recording(
         }
     }
 
-    // 2. Read settings + mute BEFORE recording to avoid capturing system sound
-    let settings = {
-        let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
-        db::get_all_settings(&conn)?
-    };
+    // 2. Read settings from cache + mute BEFORE recording to avoid capturing system sound
+    let settings = state.settings_cache.read()
+        .map_err(|e| AppError::Recording(e.to_string()))?
+        .clone();
     let mute = settings
         .get("system_mute_enabled")
         .and_then(|v| v.as_bool())
