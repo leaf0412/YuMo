@@ -125,15 +125,22 @@ jobs:
   # =========================================================================
   electron:
     name: electron (linux-compat)
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    container:
+      image: ubuntu:20.04
+      options: --user root
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
+      - name: Install base tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y \
+            curl \
+            git \
+            ca-certificates \
+            gnupg \
             libpulse-dev \
             libsecret-1-dev \
             libasound2-dev \
@@ -141,7 +148,10 @@ jobs:
             build-essential \
             libdbus-1-dev \
             libxdo-dev \
-            pkg-config
+            pkg-config \
+            libfuse2
+
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
