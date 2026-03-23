@@ -149,6 +149,7 @@ jobs:
             libdbus-1-dev \
             libxdo-dev \
             pkg-config \
+            libssl-dev \
             libfuse2
 
       - uses: actions/checkout@v4
