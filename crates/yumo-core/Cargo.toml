@@ -37,7 +37,6 @@ security-framework = "2"
 enigo = "0.2"       # 按键模拟（Ctrl+V）
 
 [target.'cfg(target_os = "linux")'.dependencies]
-enigo = "0.2"       # 按键模拟（Ctrl+V）
 
 [dev-dependencies]
 tempfile = "3"
