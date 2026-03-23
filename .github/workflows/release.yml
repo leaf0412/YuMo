@@ -150,6 +150,7 @@ jobs:
             libxdo-dev \
             pkg-config \
             libssl-dev \
+            libclang-dev \
             libfuse2
 
       - uses: actions/checkout@v4
