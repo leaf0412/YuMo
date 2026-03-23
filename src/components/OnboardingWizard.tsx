@@ -157,42 +157,65 @@ export default function OnboardingWizard({ onComplete }: Props) {
   };
 
   // --- Hotkey ---
+  const hadNonModifierRef = useRef(false);
+
+  const MODIFIER_KEYS = ['Meta', 'Control', 'Alt', 'Shift'];
+
+  const KEY_MAP: Record<string, string> = {
+    ' ': 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+    Enter: 'Enter', Backspace: 'Backspace', Delete: 'Delete', Escape: 'Escape',
+    Tab: 'Tab', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+  };
+
+  const modifierKeyToShortcut = (key: string): string => {
+    if (key === 'Meta' || key === 'Control') return 'CommandOrControl';
+    if (key === 'Alt') return 'Alt';
+    return 'Shift';
+  };
+
   const keyEventToShortcut = (e: React.KeyboardEvent): string | null => {
     const parts: string[] = [];
     if (e.metaKey || e.ctrlKey) parts.push('CommandOrControl');
     if (e.altKey) parts.push('Alt');
     if (e.shiftKey) parts.push('Shift');
     const key = e.key;
-    if (['Meta', 'Control', 'Alt', 'Shift'].includes(key)) return null;
-    const keyMap: Record<string, string> = {
-      ' ': 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
-      Enter: 'Enter', Backspace: 'Backspace', Delete: 'Delete', Escape: 'Escape',
-      Tab: 'Tab', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
-    };
-    const mapped = keyMap[key] || (key.length === 1 ? key.toUpperCase() : key);
+    if (MODIFIER_KEYS.includes(key)) return null;
+    const mapped = KEY_MAP[key] || (key.length === 1 ? key.toUpperCase() : key);
     parts.push(mapped);
-    if (parts.length < 2) return null;
     return parts.join('+');
+  };
+
+  const registerShortcut = async (shortcut: string) => {
+    setHotkeyValue(shortcut);
+    setRecordingHotkey(false);
+    try {
+      await invoke('register_hotkey', { shortcut });
+      await updateSetting('hotkey', shortcut);
+      setHotkeySet(true);
+      logEvent('Onboarding', 'hotkey_set', { shortcut });
+      message.success(t('onboarding.hotkeySet', { shortcut }));
+    } catch (e) {
+      message.error(formatError(e, t('onboarding.hotkeyRegisterFailed')));
+    }
   };
 
   const handleHotkeyKeyDown = (e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (MODIFIER_KEYS.includes(e.key)) {
+      hadNonModifierRef.current = false;
+      return;
+    }
+    hadNonModifierRef.current = true;
     const shortcut = keyEventToShortcut(e);
-    if (shortcut) {
-      setHotkeyValue(shortcut);
-      setRecordingHotkey(false);
-      (async () => {
-        try {
-          await invoke('register_hotkey', { shortcut });
-          await updateSetting('hotkey', shortcut);
-          setHotkeySet(true);
-          logEvent('Onboarding', 'hotkey_set', { shortcut });
-          message.success(t('onboarding.hotkeySet', { shortcut }));
-        } catch (e) {
-          message.error(formatError(e, t('onboarding.hotkeyRegisterFailed')));
-        }
-      })();
+    if (shortcut) registerShortcut(shortcut);
+  };
+
+  const handleHotkeyKeyUp = (e: React.KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (MODIFIER_KEYS.includes(e.key) && !hadNonModifierRef.current) {
+      registerShortcut(modifierKeyToShortcut(e.key));
     }
   };
 
@@ -317,6 +340,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
                   onFocus={() => setRecordingHotkey(true)}
                   onBlur={() => setRecordingHotkey(false)}
                   onKeyDown={recordingHotkey ? handleHotkeyKeyDown : undefined}
+                  onKeyUp={recordingHotkey ? handleHotkeyKeyUp : undefined}
                   prefix={recordingHotkey ? <LoadingOutlined /> : <ThunderboltOutlined />}
                   style={{ maxWidth: 300 }}
                   data-testid="hotkey-record-btn"

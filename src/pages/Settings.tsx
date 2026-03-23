@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Collapse, Switch, Slider, Select, Input, Button, Flex, Space, Typography,
   message, Popconfirm, InputNumber,
@@ -96,10 +96,25 @@ export default function Settings() {
   };
 
   const [recordingHotkey, setRecordingHotkey] = useState(false);
+  const hadNonModifierRef = useRef(false);
 
   // Data import state
   const [legacyPath, setLegacyPath] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+
+  const MODIFIER_KEYS = ['Meta', 'Control', 'Alt', 'Shift'];
+
+  const KEY_MAP: Record<string, string> = {
+    ' ': 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+    Enter: 'Enter', Backspace: 'Backspace', Delete: 'Delete', Escape: 'Escape',
+    Tab: 'Tab', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+  };
+
+  const modifierKeyToShortcut = (key: string): string => {
+    if (key === 'Meta' || key === 'Control') return 'CommandOrControl';
+    if (key === 'Alt') return 'Alt';
+    return 'Shift';
+  };
 
   const keyEventToShortcut = (e: React.KeyboardEvent): string | null => {
     const parts: string[] = [];
@@ -108,37 +123,45 @@ export default function Settings() {
     if (e.shiftKey) parts.push('Shift');
 
     const key = e.key;
-    if (['Meta', 'Control', 'Alt', 'Shift'].includes(key)) return null;
+    if (MODIFIER_KEYS.includes(key)) return null;
 
-    const keyMap: Record<string, string> = {
-      ' ': 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
-      Enter: 'Enter', Backspace: 'Backspace', Delete: 'Delete', Escape: 'Escape',
-      Tab: 'Tab', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
-    };
-    const mapped = keyMap[key] || (key.length === 1 ? key.toUpperCase() : key);
+    const mapped = KEY_MAP[key] || (key.length === 1 ? key.toUpperCase() : key);
     parts.push(mapped);
 
     return parts.join('+') || null;
   };
 
+  const registerShortcut = async (shortcut: string) => {
+    setHotkeyInput(shortcut);
+    setRecordingHotkey(false);
+    logEvent('Settings', 'hotkey_captured', { shortcut });
+    try {
+      await invoke('register_hotkey', { shortcut });
+      updateSetting('hotkey', shortcut);
+      logEvent('Settings', 'hotkey_registered', { shortcut });
+      message.success(t('settings.hotkeySet', { shortcut }));
+    } catch (e: unknown) {
+      message.error(formatError(e, t('settings.registerFailed')));
+    }
+  };
+
   const handleHotkeyKeyDown = (e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (MODIFIER_KEYS.includes(e.key)) {
+      hadNonModifierRef.current = false;
+      return;
+    }
+    hadNonModifierRef.current = true;
     const shortcut = keyEventToShortcut(e);
-    if (shortcut) {
-      setHotkeyInput(shortcut);
-      setRecordingHotkey(false);
-      logEvent('Settings', 'hotkey_captured', { shortcut });
-      (async () => {
-        try {
-          await invoke('register_hotkey', { shortcut });
-          updateSetting('hotkey', shortcut);
-          logEvent('Settings', 'hotkey_registered', { shortcut });
-          message.success(t('settings.hotkeySet', { shortcut }));
-        } catch (e: unknown) {
-          message.error(formatError(e, t('settings.registerFailed')));
-        }
-      })();
+    if (shortcut) registerShortcut(shortcut);
+  };
+
+  const handleHotkeyKeyUp = (e: React.KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (MODIFIER_KEYS.includes(e.key) && !hadNonModifierRef.current) {
+      registerShortcut(modifierKeyToShortcut(e.key));
     }
   };
 
@@ -287,6 +310,7 @@ export default function Settings() {
               value={hotkeyInput}
               readOnly
               onKeyDown={recordingHotkey ? handleHotkeyKeyDown : undefined}
+              onKeyUp={recordingHotkey ? handleHotkeyKeyUp : undefined}
               style={recordingHotkey ? { borderColor: '#1677ff', boxShadow: '0 0 0 2px rgba(22,119,255,0.2)' } : {}}
             />
             <Button type={recordingHotkey ? 'default' : 'primary'} onClick={() => setRecordingHotkey(!recordingHotkey)}>
