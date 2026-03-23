@@ -15,9 +15,15 @@ export interface AudioInputDevice {
   is_default: boolean;
 }
 
+export interface PasteToolsStatus {
+  xdotool: boolean;
+  wtype: boolean;
+}
+
 export interface PermissionStatus {
   microphone: boolean;
   accessibility: boolean;
+  paste_tools?: PasteToolsStatus;
 }
 
 /** Provider discriminant — mirrors Rust's ModelProvider enum (serde camelCase). */

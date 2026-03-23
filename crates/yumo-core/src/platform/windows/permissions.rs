@@ -14,7 +14,7 @@ impl PlatformPermissions for WindowsPermissions {
     }
 
     fn check_all() -> PermissionStatus {
-        PermissionStatus { microphone: true, accessibility: true }
+        PermissionStatus { microphone: true, accessibility: true, paste_tools: None }
     }
 
     fn request_microphone() -> AppResult<()> {

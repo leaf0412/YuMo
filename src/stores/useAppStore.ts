@@ -36,7 +36,7 @@ interface AppState {
   models: ModelInfo[];
   daemonStatus: DaemonStatus;
   downloadingModelId: string | null;
-  permissions: { microphone: boolean; accessibility: boolean };
+  permissions: { microphone: boolean; accessibility: boolean; paste_tools?: { xdotool: boolean; wtype: boolean } };
   uiLocale: string;
 
   // Actions
@@ -94,7 +94,7 @@ const useAppStore = create<AppState>((set, get) => ({
 
   fetchPermissions: () => dedup('permissions', async () => {
     try {
-      const result = await invoke<{ microphone: boolean; accessibility: boolean }>('check_permissions');
+      const result = await invoke<{ microphone: boolean; accessibility: boolean; paste_tools?: { xdotool: boolean; wtype: boolean } }>('check_permissions');
       set({ permissions: result });
     } catch { /* logged */ }
   }),

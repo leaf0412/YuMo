@@ -24,4 +24,15 @@ pub struct AudioData {
 pub struct PermissionStatus {
     pub microphone: bool,
     pub accessibility: bool,
+    /// Linux only: availability of paste tools (xdotool, wtype).
+    /// None on macOS/Windows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paste_tools: Option<PasteToolsStatus>,
+}
+
+/// Which paste simulation tools are available on Linux.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PasteToolsStatus {
+    pub xdotool: bool,
+    pub wtype: bool,
 }

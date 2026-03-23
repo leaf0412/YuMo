@@ -24,6 +24,7 @@ impl PlatformPermissions for MacosPermissions {
         PermissionStatus {
             microphone: check_microphone_impl(),
             accessibility: check_accessibility_impl(),
+            paste_tools: None,
         }
     }
 

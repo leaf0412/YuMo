@@ -1,6 +1,8 @@
+use std::process::Command;
+
 use crate::error::AppResult;
 use crate::platform::traits::PlatformPermissions;
-use crate::platform::types::PermissionStatus;
+use crate::platform::types::{PasteToolsStatus, PermissionStatus};
 
 pub struct LinuxPermissions;
 
@@ -14,7 +16,11 @@ impl PlatformPermissions for LinuxPermissions {
     }
 
     fn check_all() -> PermissionStatus {
-        PermissionStatus { microphone: true, accessibility: true }
+        PermissionStatus {
+            microphone: true,
+            accessibility: true,
+            paste_tools: Some(check_paste_tools()),
+        }
     }
 
     fn request_microphone() -> AppResult<()> {
@@ -47,3 +53,19 @@ pub fn request_microphone() {}
 pub fn open_microphone_settings() {}
 
 pub fn open_accessibility_settings() {}
+
+/// Check whether xdotool / wtype are installed.
+fn check_paste_tools() -> PasteToolsStatus {
+    PasteToolsStatus {
+        xdotool: is_command_available("xdotool"),
+        wtype: is_command_available("wtype"),
+    }
+}
+
+fn is_command_available(cmd: &str) -> bool {
+    Command::new("which")
+        .arg(cmd)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
