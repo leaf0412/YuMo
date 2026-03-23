@@ -87,4 +87,19 @@ impl AppContext {
             settings_cache: RwLock::new(initial_settings),
         }
     }
+
+    /// Write a setting to both the DB and the in-memory cache atomically.
+    pub fn set_setting_cached(&self, key: &str, value: &Value) -> Result<(), crate::error::AppError> {
+        {
+            let conn = self.db.lock()
+                .map_err(|e| crate::error::AppError::Database(e.to_string()))?;
+            crate::db::update_setting(&conn, key, value)?;
+        }
+        {
+            let mut cache = self.settings_cache.write()
+                .map_err(|e| crate::error::AppError::Database(e.to_string()))?;
+            cache.insert(key.to_string(), value.clone());
+        }
+        Ok(())
+    }
 }

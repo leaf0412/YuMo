@@ -821,7 +821,8 @@ pub fn delete_model(state: State<AppContext>, daemon: State<DaemonManager>, mode
         let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
         let selected = db::get_setting(&conn, "selected_model_id")?;
         if selected.as_ref().and_then(|v| v.as_str()) == Some(&model_id) {
-            db::update_setting(&conn, "selected_model_id", &serde_json::json!(""))?;
+            drop(conn);
+            state.set_setting_cached("selected_model_id", &serde_json::json!(""))?;
         }
     }
 
@@ -954,8 +955,7 @@ pub fn update_setting(
     key: String,
     value: Value,
 ) -> Result<(), AppError> {
-    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
-    db::update_setting(&conn, &key, &value)
+    state.set_setting_cached(&key, &value)
 }
 
 // ---------------------------------------------------------------------------
@@ -1003,14 +1003,12 @@ pub fn delete_prompt(state: State<AppContext>, id: String) -> Result<(), AppErro
 
 #[tauri::command]
 pub fn select_prompt(state: State<AppContext>, id: String) -> Result<(), AppError> {
-    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
-    db::update_setting(&conn, "selected_prompt_id", &Value::String(id))
+    state.set_setting_cached("selected_prompt_id", &Value::String(id))
 }
 
 #[tauri::command]
 pub fn select_model(state: State<AppContext>, model_id: String) -> Result<(), AppError> {
-    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
-    db::update_setting(&conn, "selected_model_id", &Value::String(model_id))
+    state.set_setting_cached("selected_model_id", &Value::String(model_id))
 }
 
 // ---------------------------------------------------------------------------
@@ -1046,9 +1044,7 @@ pub fn register_hotkey(
     info!("[hotkey] register_hotkey called: {:?}", shortcut);
 
     // Persist the shortcut string in settings
-    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
-    db::update_setting(&conn, "hotkey", &Value::String(shortcut.clone()))?;
-    drop(conn);
+    state.set_setting_cached("hotkey", &Value::String(shortcut.clone()))?;
 
     // Clear any previously registered shortcuts, then register the new one.
     hotkey::unregister_all(&app).map_err(|e| {
@@ -1577,10 +1573,13 @@ pub fn delete_sprite(state: State<AppContext>, dir_id: String) -> Result<(), App
         info!("[sprite] deleted {}", dir_id);
     }
     // Clear selected_sprite_id if it was the deleted one
-    let db = state.db.lock().unwrap();
-    if let Ok(Some(current)) = db::get_setting(&db, "selected_sprite_id") {
-        if current.as_str() == Some(dir_id.as_str()) {
-            let _ = db::update_setting(&db, "selected_sprite_id", &serde_json::Value::String(String::new()));
+    {
+        let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
+        if let Ok(Some(current)) = db::get_setting(&conn, "selected_sprite_id") {
+            if current.as_str() == Some(dir_id.as_str()) {
+                drop(conn);
+                let _ = state.set_setting_cached("selected_sprite_id", &serde_json::Value::String(String::new()));
+            }
         }
     }
     Ok(())

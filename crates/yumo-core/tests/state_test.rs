@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use serde_json::Value;
+use serde_json::{json, Value};
 use yumo_core::state::{AppContext, AppPaths};
+use yumo_core::db;
 
 #[test]
 fn test_app_paths_defaults() {
@@ -134,4 +135,72 @@ fn test_settings_cache_write_and_read() {
         cache.get("hotkey").and_then(|v| v.as_str()),
         Some("Cmd+Shift+R")
     );
+}
+
+/// Helper: create an in-memory DB with the settings table.
+fn in_memory_db() -> rusqlite::Connection {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );",
+    )
+    .unwrap();
+    conn
+}
+
+fn test_paths() -> AppPaths {
+    AppPaths {
+        data_dir: PathBuf::from("/tmp/test-data"),
+        models_dir: PathBuf::from("/tmp/test-data/models"),
+        sprites_dir: PathBuf::from("/tmp/test-data/sprites"),
+        recordings_dir: PathBuf::from("/tmp/test-data/recordings"),
+    }
+}
+
+#[test]
+fn test_set_setting_cached_syncs_db_and_cache() {
+    let conn = in_memory_db();
+    let ctx = AppContext::new(conn, test_paths(), HashMap::new());
+
+    // Call set_setting_cached
+    ctx.set_setting_cached("test_key", &json!("hello")).unwrap();
+
+    // Verify cache has the value
+    {
+        let cache = ctx.settings_cache.read().unwrap();
+        assert_eq!(cache.get("test_key"), Some(&json!("hello")));
+    }
+
+    // Verify DB has the value
+    {
+        let conn = ctx.db.lock().unwrap();
+        let all = db::get_all_settings(&conn).unwrap();
+        assert_eq!(all.get("test_key"), Some(&json!("hello")));
+    }
+}
+
+#[test]
+fn test_set_setting_cached_overwrites_existing() {
+    let conn = in_memory_db();
+    let mut initial = HashMap::new();
+    initial.insert("lang".to_string(), json!("en"));
+    let ctx = AppContext::new(conn, test_paths(), initial);
+
+    // Seed DB so it matches cache
+    {
+        let conn = ctx.db.lock().unwrap();
+        db::update_setting(&conn, "lang", &json!("en")).unwrap();
+    }
+
+    // Overwrite
+    ctx.set_setting_cached("lang", &json!("zh")).unwrap();
+
+    let cache = ctx.settings_cache.read().unwrap();
+    assert_eq!(cache.get("lang"), Some(&json!("zh")));
+
+    let conn = ctx.db.lock().unwrap();
+    let all = db::get_all_settings(&conn).unwrap();
+    assert_eq!(all.get("lang"), Some(&json!("zh")));
 }

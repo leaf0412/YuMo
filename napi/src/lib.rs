@@ -161,11 +161,10 @@ pub async fn list_available_models() -> Result<String> {
 pub async fn update_setting(key: String, value: String) -> Result<()> {
     tokio::task::spawn_blocking(move || {
         let app = ctx()?;
-        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
         let json_value: serde_json::Value = serde_json::from_str(&value)
             .unwrap_or_else(|_| serde_json::Value::String(value));
-        db::update_setting(&conn, &key, &json_value)
-            .map_err(|e| Error::from_reason(format!("update_setting: {e}")))
+        app.set_setting_cached(&key, &json_value)
+            .map_err(|e| Error::from_reason(format!("set_setting_cached: {e}")))
     }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
@@ -950,8 +949,9 @@ pub async fn delete_model(model_id: String) -> Result<()> {
             let selected = db::get_setting(&conn, "selected_model_id")
                 .map_err(|e| Error::from_reason(format!("get_setting: {e}")))?;
             if selected.as_ref().and_then(|v| v.as_str()) == Some(&model_id) {
-                db::update_setting(&conn, "selected_model_id", &serde_json::json!(""))
-                    .map_err(|e| Error::from_reason(format!("update_setting: {e}")))?;
+                drop(conn);
+                app.set_setting_cached("selected_model_id", &serde_json::json!(""))
+                    .map_err(|e| Error::from_reason(format!("set_setting_cached: {e}")))?;
             }
         }
 
@@ -1156,10 +1156,13 @@ pub async fn delete_sprite(dir_id: String) -> Result<()> {
                 .map_err(|e| Error::from_reason(format!("remove sprite dir: {e}")))?;
         }
         // Clear selected_sprite_id if it was the deleted one
-        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-        if let Ok(Some(current)) = db::get_setting(&conn, "selected_sprite_id") {
-            if current.as_str() == Some(dir_id.as_str()) {
-                let _ = db::update_setting(&conn, "selected_sprite_id", &serde_json::Value::String(String::new()));
+        {
+            let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+            if let Ok(Some(current)) = db::get_setting(&conn, "selected_sprite_id") {
+                if current.as_str() == Some(dir_id.as_str()) {
+                    drop(conn);
+                    let _ = app.set_setting_cached("selected_sprite_id", &serde_json::Value::String(String::new()));
+                }
             }
         }
         Ok(())
