@@ -288,11 +288,17 @@ export default function App() {
       }
       // Start and cancel now handled by backend toggle_recording_internal
     });
+    const isLinux = navigator.userAgent.includes('Linux');
     const unlistenState = listen<{ state: string }>('recording-state', (event) => {
+      const prevState = pipelineRef.current;
       const { state } = event.payload;
       logEvent('App', 'recording_state_changed', { state });
       pipelineRef.current = state;
       broadcast('pipeline-state', state);
+      // Linux clipboard-only mode: show toast when transcription completes
+      if (isLinux && prevState === 'processing' && state === 'idle') {
+        import('antd').then(({ message }) => message.success(i18n.t('app.copiedToClipboard'), 3));
+      }
     });
 
     // Global ESC double-press to cancel recording (works even without window focus)

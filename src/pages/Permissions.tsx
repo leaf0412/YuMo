@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { Flex, Space, Button, Typography, Alert, message } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, CloseCircleOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { invoke, formatError } from '../lib/logger';
 import useAppStore from '../stores/useAppStore';
@@ -46,51 +46,18 @@ export default function Permissions() {
     </div>
   );
 
-  // Linux: show paste tool dependency status
+  // Linux: clipboard-only mode, no permissions needed
   if (isLinux) {
-    const pasteTools = permissions.paste_tools;
-    const hasAnyTool = pasteTools?.xdotool || pasteTools?.wtype;
-
     return (
       <Flex vertical gap="large" style={{ width: '100%' }}>
         <Typography.Title level={3}>{t('permissions.linuxTitle')}</Typography.Title>
-        <Text type="secondary">{t('permissions.linuxDesc')}</Text>
-
-        <Flex vertical gap={8} style={{ width: '100%' }}>
-          {settingRow(
-            t('permissions.xdotool'),
-            <Space>
-              {permissionIcon(!!pasteTools?.xdotool)}
-              <Text type={pasteTools?.xdotool ? 'success' : 'danger'}>
-                {pasteTools?.xdotool ? t('permissions.installed') : t('permissions.notInstalled')}
-              </Text>
-            </Space>,
-          )}
-          {settingRow(
-            t('permissions.wtype'),
-            <Space>
-              {permissionIcon(!!pasteTools?.wtype)}
-              <Text type={pasteTools?.wtype ? 'success' : 'danger'}>
-                {pasteTools?.wtype ? t('permissions.installed') : t('permissions.notInstalled')}
-              </Text>
-            </Space>,
-          )}
-        </Flex>
-
-        {!hasAnyTool && (
-          <Alert
-            type="warning"
-            showIcon
-            message={t('permissions.linuxNoTool')}
-            description={
-              <Text code copyable>{t('permissions.installHint')}</Text>
-            }
-          />
-        )}
-
-        <Button size="small" style={{ alignSelf: 'flex-start' }} onClick={() => fetchPermissions()}>
-          {t('settings.permRefresh')}
-        </Button>
+        <Alert
+          type="info"
+          showIcon
+          icon={<InfoCircleOutlined />}
+          message={t('permissions.linuxClipboardMode')}
+          description={t('permissions.linuxClipboardDesc')}
+        />
       </Flex>
     );
   }
