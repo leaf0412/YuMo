@@ -47,7 +47,8 @@ pub fn init(data_dir: String) -> Result<()> {
     let conn = db::init_database(&db_path)
         .map_err(|e| Error::from_reason(format!("Failed to init database: {e}")))?;
 
-    let app_ctx = AppContext::new(conn, paths);
+    let saved_settings = db::get_all_settings(&conn).unwrap_or_default();
+    let app_ctx = AppContext::new(conn, paths, saved_settings);
 
     let daemon_script = std::path::PathBuf::from(&data_dir).join("mlx_funasr_daemon.py");
     let daemon = DaemonManager::new(daemon_script, data_dir.clone().into());

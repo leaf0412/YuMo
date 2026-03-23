@@ -23,7 +23,7 @@ fn test_app_context_construction() {
     ).unwrap();
 
     let paths = AppPaths::defaults();
-    let ctx = AppContext::new(conn, paths);
+    let ctx = AppContext::new(conn, paths, std::collections::HashMap::new());
 
     // Verify initial pipeline state is Idle
     let pipeline = ctx.pipeline_state.lock().unwrap();
@@ -53,7 +53,7 @@ fn test_app_context_db_access() {
         );"
     ).unwrap();
 
-    let ctx = AppContext::new(conn, paths);
+    let ctx = AppContext::new(conn, paths, std::collections::HashMap::new());
 
     // Verify DB is accessible through the Mutex
     let db = ctx.db.lock().unwrap();
@@ -71,7 +71,7 @@ fn test_app_context_db_access() {
 fn test_app_context_pipeline_state_mutation() {
     let paths = AppPaths::defaults();
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    let ctx = AppContext::new(conn, paths);
+    let ctx = AppContext::new(conn, paths, std::collections::HashMap::new());
 
     // Mutate pipeline state through the Mutex
     {

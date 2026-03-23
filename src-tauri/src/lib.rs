@@ -63,6 +63,11 @@ pub fn run() {
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    let saved_selected_model = saved_settings
+        .get("selected_model_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     info!("Paths: data={} models={} sprites={}",
         paths.data_dir.display(), paths.models_dir.display(), paths.sprites_dir.display());
 
@@ -78,7 +83,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
-        .manage(state::AppContext::new(conn, paths))
+        .manage(state::AppContext::new(conn, paths, saved_settings))
         .manage(daemon)
         .setup(move |app| {
             // Sync bundled resources (daemon script + uv) to ~/.voiceink/
@@ -169,11 +174,7 @@ pub fn run() {
             {
                 use tauri::Manager;
                 let app_state = app.handle().state::<state::AppContext>();
-                let selected_model = saved_settings
-                    .get("selected_model_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let selected_model = saved_selected_model.clone();
 
                 let mut warmup_repo: Option<String> = None;
                 if !selected_model.is_empty() {

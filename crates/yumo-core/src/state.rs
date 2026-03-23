@@ -1,6 +1,8 @@
 use rusqlite::Connection;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 
 use crate::pipeline::PipelineState;
 use crate::platform::RecordingHandle;
@@ -72,15 +74,17 @@ pub struct AppContext {
     pub pipeline_state: Mutex<PipelineState>,
     pub recording_handle: Mutex<Option<RecordingHandle>>,
     pub paths: AppPaths,
+    pub settings_cache: RwLock<HashMap<String, Value>>,
 }
 
 impl AppContext {
-    pub fn new(conn: Connection, paths: AppPaths) -> Self {
+    pub fn new(conn: Connection, paths: AppPaths, initial_settings: HashMap<String, Value>) -> Self {
         Self {
             db: Mutex::new(conn),
             pipeline_state: Mutex::new(PipelineState::Idle),
             recording_handle: Mutex::new(None),
             paths,
+            settings_cache: RwLock::new(initial_settings),
         }
     }
 }
