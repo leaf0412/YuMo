@@ -6,6 +6,7 @@ use log::{error, info, warn};
 use std::mem;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 // ---------------------------------------------------------------------------
 // Device change listener
@@ -102,6 +103,7 @@ pub struct RecordingHandle {
     /// Set to `true` after explicit stop/cancel cleanup to prevent double-free
     /// when Drop runs.
     disposed: bool,
+    start_time: Instant,
 }
 
 unsafe impl Send for RecordingHandle {}
@@ -430,6 +432,36 @@ unsafe fn cfstring_to_string(cf: CFStringRef) -> Option<String> {
     String::from_utf8(buf).ok()
 }
 
+/// Query the hardware's native nominal sample rate for the given device.
+fn device_native_sample_rate(device_id: AudioDeviceID) -> u32 {
+    let address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut sample_rate: f64 = 0.0;
+    let mut size = mem::size_of::<f64>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            &address,
+            0,
+            std::ptr::null(),
+            &mut size,
+            &mut sample_rate as *mut _ as *mut _,
+        )
+    };
+    if status == 0 && sample_rate > 0.0 {
+        sample_rate as u32
+    } else {
+        warn!(
+            "[recorder] cannot query native sample rate for device {} (status={}), assuming 48000",
+            device_id, status
+        );
+        48000
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Recording via AUHAL (implementation)
 // ---------------------------------------------------------------------------
@@ -508,9 +540,18 @@ fn prepare_impl(device_id: u32) -> Result<MacosPreparedRecording, AppError> {
             )));
         }
 
-        // 4. Set desired output format on input bus (output scope, bus 1)
+        // 4. Query device native sample rate and request (native - 1) Hz.
+        //    This forces AUHAL to create its internal converter. Without a
+        //    converter (exact format match), AUHAL delivers silence on some
+        //    devices (MacBook Pro built-in mic). The 1 Hz offset is inaudible.
+        let native_rate = device_native_sample_rate(device_id);
+        let request_rate = if native_rate > 1 { native_rate - 1 } else { native_rate };
+        info!(
+            "[recorder] device native rate={} requesting={}",
+            native_rate, request_rate
+        );
         let desired_format = AudioStreamBasicDescription {
-            mSampleRate: 16000.0,
+            mSampleRate: request_rate as f64,
             mFormatID: kAudioFormatLinearPCM,
             mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
             mBytesPerPacket: 4,
@@ -520,7 +561,10 @@ fn prepare_impl(device_id: u32) -> Result<MacosPreparedRecording, AppError> {
             mBitsPerChannel: 32,
             mReserved: 0,
         };
-        info!("[recorder] setting stream format: sample_rate=16000 channels=1 bits=32 (f32)");
+        info!(
+            "[recorder] setting stream format: sample_rate={} channels=1 bits=32 (f32)",
+            request_rate
+        );
         let status = AudioUnitSetProperty(
             audio_unit,
             kAudioUnitProperty_StreamFormat,
@@ -628,6 +672,7 @@ fn start_prepared_impl(
         buffer,
         _callback_box: prepared.callback_box,
         disposed: false,
+        start_time: Instant::now(),
     };
 
     info!(
@@ -667,15 +712,24 @@ fn stop_recording_impl(mut handle: RecordingHandle) -> Result<AudioData, AppErro
             AppError::Recording(e.to_string())
         })?
         .clone();
-    let duration_secs = samples.len() as f64 / 16000.0;
+    // Detect actual delivery rate from elapsed time.
+    let elapsed_secs = handle.start_time.elapsed().as_secs_f64();
+    let actual_rate = if elapsed_secs > 0.1 {
+        let raw = samples.len() as f64 / elapsed_secs;
+        if raw > 40000.0 { 48000u32 } else if raw > 30000.0 { 44100 } else { 16000 }
+    } else {
+        48000
+    };
+    let duration_secs = samples.len() as f64 / actual_rate as f64;
     info!(
-        "[recorder] stop_recording samples={} duration={:.2}s",
+        "[recorder] stop_recording samples={} duration={:.2}s actual_rate={}",
         samples.len(),
-        duration_secs
+        duration_secs,
+        actual_rate
     );
     Ok(AudioData {
         pcm_samples: samples,
-        sample_rate: 16000,
+        sample_rate: actual_rate,
         channels: 1,
     })
 }
