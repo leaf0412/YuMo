@@ -5,7 +5,89 @@ use coreaudio_sys::*;
 use log::{error, info, warn};
 use std::mem;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+// ---------------------------------------------------------------------------
+// Device change listener
+// ---------------------------------------------------------------------------
+
+struct DeviceListenerContext {
+    callback: Box<dyn Fn() + Send + Sync>,
+}
+
+/// Wrapper to allow storing a raw pointer in a static Mutex.
+/// SAFETY: The pointer is only accessed under the Mutex lock, and the
+/// DeviceListenerContext it points to contains only Send+Sync data.
+struct SendPtr(*mut DeviceListenerContext);
+unsafe impl Send for SendPtr {}
+
+static DEVICE_LISTENER_CTX: OnceLock<Mutex<Option<SendPtr>>> = OnceLock::new();
+
+fn get_listener_store() -> &'static Mutex<Option<SendPtr>> {
+    DEVICE_LISTENER_CTX.get_or_init(|| Mutex::new(None))
+}
+
+unsafe extern "C" fn device_change_callback(
+    _id: AudioObjectID,
+    _num_addresses: UInt32,
+    _addresses: *const AudioObjectPropertyAddress,
+    client_data: *mut std::os::raw::c_void,
+) -> OSStatus {
+    let ctx = &*(client_data as *const DeviceListenerContext);
+    (ctx.callback)();
+    0
+}
+
+pub fn register_device_change_listener(
+    on_change: impl Fn() + Send + Sync + 'static,
+) -> AppResult<()> {
+    let address = AudioObjectPropertyAddress {
+        mSelector: kAudioHardwarePropertyDevices,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let ctx = Box::new(DeviceListenerContext {
+        callback: Box::new(on_change),
+    });
+    let ctx_ptr = Box::into_raw(ctx);
+    unsafe {
+        let status = AudioObjectAddPropertyListener(
+            kAudioObjectSystemObject,
+            &address,
+            Some(device_change_callback),
+            ctx_ptr as *mut _,
+        );
+        if status != 0 {
+            let _ = Box::from_raw(ctx_ptr);
+            return Err(AppError::Recording(format!(
+                "Failed to register device change listener: {status}"
+            )));
+        }
+    }
+    *get_listener_store().lock().unwrap() = Some(SendPtr(ctx_ptr));
+    info!("[recorder] device change listener registered");
+    Ok(())
+}
+
+pub fn unregister_device_change_listener() {
+    let address = AudioObjectPropertyAddress {
+        mSelector: kAudioHardwarePropertyDevices,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    if let Some(SendPtr(ctx_ptr)) = get_listener_store().lock().unwrap().take() {
+        unsafe {
+            AudioObjectRemovePropertyListener(
+                kAudioObjectSystemObject,
+                &address,
+                Some(device_change_callback),
+                ctx_ptr as *mut _,
+            );
+            let _ = Box::from_raw(ctx_ptr);
+        }
+        info!("[recorder] device change listener unregistered");
+    }
+}
 
 // ---------------------------------------------------------------------------
 // macOS-specific types
@@ -17,9 +99,52 @@ pub struct RecordingHandle {
     buffer: Arc<Mutex<Vec<f32>>>,
     /// Prevent the callback data from being freed until we stop.
     _callback_box: *mut InputCallbackData,
+    /// Set to `true` after explicit stop/cancel cleanup to prevent double-free
+    /// when Drop runs.
+    disposed: bool,
 }
 
 unsafe impl Send for RecordingHandle {}
+
+impl Drop for RecordingHandle {
+    fn drop(&mut self) {
+        if !self.disposed {
+            warn!("[recorder] RecordingHandle dropped without explicit stop/cancel, cleaning up");
+            unsafe {
+                AudioOutputUnitStop(self.audio_unit);
+                AudioUnitUninitialize(self.audio_unit);
+                AudioComponentInstanceDispose(self.audio_unit);
+                let _ = Box::from_raw(self._callback_box);
+            }
+        }
+    }
+}
+
+/// Pre-initialized recording session ready for instant start.
+/// Holds an initialized AudioUnit that only needs `AudioOutputUnitStart()`.
+pub struct MacosPreparedRecording {
+    audio_unit: AudioUnit,
+    buffer: Arc<Mutex<Vec<f32>>>,
+    callback_box: *mut InputCallbackData,
+    level_rx: Receiver<AudioLevel>,
+    device_id: u32,
+}
+
+unsafe impl Send for MacosPreparedRecording {}
+
+impl Drop for MacosPreparedRecording {
+    fn drop(&mut self) {
+        info!(
+            "[recorder] MacosPreparedRecording dropped, cleaning up device_id={}",
+            self.device_id
+        );
+        unsafe {
+            AudioUnitUninitialize(self.audio_unit);
+            AudioComponentInstanceDispose(self.audio_unit);
+            let _ = Box::from_raw(self.callback_box);
+        }
+    }
+}
 
 struct InputCallbackData {
     audio_unit: AudioUnit,
@@ -28,7 +153,7 @@ struct InputCallbackData {
 }
 
 // ---------------------------------------------------------------------------
-// MacosRecorder — PlatformRecorder implementation
+// MacosRecorder -- PlatformRecorder implementation
 // ---------------------------------------------------------------------------
 
 pub struct MacosRecorder;
@@ -50,6 +175,24 @@ impl PlatformRecorder for MacosRecorder {
 
     fn cancel(handle: Self::Handle) -> AppResult<()> {
         cancel_recording_impl(handle)
+    }
+
+    fn prepare(device_id: u32) -> AppResult<Option<PreparedRecordingHandle>> {
+        let prepared = prepare_impl(device_id)?;
+        Ok(Some(PreparedRecordingHandle {
+            inner: Box::new(prepared),
+            device_id,
+        }))
+    }
+
+    fn start_prepared(
+        prepared: PreparedRecordingHandle,
+    ) -> AppResult<(Self::Handle, Receiver<AudioLevel>)> {
+        let macos_prepared = prepared
+            .inner
+            .downcast::<MacosPreparedRecording>()
+            .map_err(|_| AppError::Recording("Invalid prepared recording handle".into()))?;
+        start_prepared_impl(*macos_prepared)
     }
 }
 
@@ -73,6 +216,16 @@ pub fn stop_recording(handle: RecordingHandle) -> Result<AudioData, AppError> {
 
 pub fn cancel_recording(handle: RecordingHandle) -> Result<(), AppError> {
     MacosRecorder::cancel(handle)
+}
+
+pub fn prepare_recording(device_id: u32) -> AppResult<Option<PreparedRecordingHandle>> {
+    MacosRecorder::prepare(device_id)
+}
+
+pub fn start_prepared_recording(
+    prepared: PreparedRecordingHandle,
+) -> Result<(RecordingHandle, Receiver<AudioLevel>), AppError> {
+    MacosRecorder::start_prepared(prepared)
 }
 
 // ---------------------------------------------------------------------------
@@ -281,14 +434,10 @@ unsafe fn cfstring_to_string(cf: CFStringRef) -> Option<String> {
 // Recording via AUHAL (implementation)
 // ---------------------------------------------------------------------------
 
-/// Start recording from the given device at 16 kHz mono f32.
-///
-/// Returns a handle to stop/cancel the recording and a receiver for
-/// real-time audio level updates.
-fn start_recording_impl(
-    device_id: u32,
-) -> Result<(RecordingHandle, Receiver<AudioLevel>), AppError> {
-    info!("[recorder] start_recording device_id={}", device_id);
+/// Pre-initialize an AudioUnit for recording without starting capture.
+/// Does everything `start_recording_impl` does except `AudioOutputUnitStart()`.
+fn prepare_impl(device_id: u32) -> Result<MacosPreparedRecording, AppError> {
+    info!("[recorder] prepare_impl device_id={}", device_id);
     let (level_tx, level_rx) = mpsc::channel();
     let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -418,7 +567,7 @@ fn start_recording_impl(
             )));
         }
 
-        // 7. Initialize and start
+        // 7. Initialize (but do NOT start)
         let status = AudioUnitInitialize(audio_unit);
         if status != 0 {
             error!("[recorder] AudioUnitInitialize failed: {}", status);
@@ -429,32 +578,81 @@ fn start_recording_impl(
             )));
         }
 
-        let status = AudioOutputUnitStart(audio_unit);
+        info!(
+            "[recorder] AudioUnit prepared (not started) for device_id={}",
+            device_id
+        );
+        Ok(MacosPreparedRecording {
+            audio_unit,
+            buffer,
+            callback_box: cb_ptr,
+            level_rx,
+            device_id,
+        })
+    }
+}
+
+/// Start a pre-initialized recording session. Only calls `AudioOutputUnitStart()`.
+///
+/// Uses `ManuallyDrop` to safely transfer ownership of resources from
+/// `MacosPreparedRecording` to `RecordingHandle` without triggering
+/// the prepared recording's Drop cleanup.
+fn start_prepared_impl(
+    prepared: MacosPreparedRecording,
+) -> Result<(RecordingHandle, Receiver<AudioLevel>), AppError> {
+    info!(
+        "[recorder] start_prepared_impl device_id={}",
+        prepared.device_id
+    );
+    let mut prepared = std::mem::ManuallyDrop::new(prepared);
+
+    unsafe {
+        let status = AudioOutputUnitStart(prepared.audio_unit);
         if status != 0 {
             error!("[recorder] AudioOutputUnitStart failed: {}", status);
-            AudioUnitUninitialize(audio_unit);
-            let _ = Box::from_raw(cb_ptr);
-            AudioComponentInstanceDispose(audio_unit);
+            // Let MacosPreparedRecording::Drop clean up
+            std::mem::ManuallyDrop::drop(&mut prepared);
             return Err(AppError::Recording(format!(
                 "AudioOutputUnitStart failed: {status}"
             )));
         }
-
-        info!("[recorder] recording started on device_id={}", device_id);
-        Ok((
-            RecordingHandle {
-                audio_unit,
-                buffer,
-                _callback_box: cb_ptr,
-            },
-            level_rx,
-        ))
     }
+
+    // Transfer fields to RecordingHandle.
+    // Transfer ownership via ptr::read since ManuallyDrop suppresses Drop.
+    // Using .clone() on Arc would leak the refcount.
+    let level_rx = unsafe { std::ptr::read(&prepared.level_rx) };
+    let buffer = unsafe { std::ptr::read(&prepared.buffer) };
+    let handle = RecordingHandle {
+        audio_unit: prepared.audio_unit,
+        buffer,
+        _callback_box: prepared.callback_box,
+        disposed: false,
+    };
+
+    info!(
+        "[recorder] recording started (from prepared) on device_id={}",
+        prepared.device_id
+    );
+    Ok((handle, level_rx))
+}
+
+/// Start recording from the given device at 16 kHz mono f32.
+///
+/// Internally uses `prepare_impl` + `start_prepared_impl` (DRY).
+fn start_recording_impl(
+    device_id: u32,
+) -> Result<(RecordingHandle, Receiver<AudioLevel>), AppError> {
+    info!("[recorder] start_recording device_id={}", device_id);
+    let prepared = prepare_impl(device_id)?;
+    start_prepared_impl(prepared)
 }
 
 /// Stop recording and return the captured audio data.
-fn stop_recording_impl(handle: RecordingHandle) -> Result<AudioData, AppError> {
+fn stop_recording_impl(mut handle: RecordingHandle) -> Result<AudioData, AppError> {
     info!("[recorder] stop_recording");
+    // Mark as disposed BEFORE manual cleanup to prevent double-free in Drop
+    handle.disposed = true;
     unsafe {
         AudioOutputUnitStop(handle.audio_unit);
         AudioUnitUninitialize(handle.audio_unit);
@@ -489,7 +687,7 @@ fn cancel_recording_impl(handle: RecordingHandle) -> Result<(), AppError> {
     Ok(())
 }
 
-/// CoreAudio input render callback — called on the audio I/O thread.
+/// CoreAudio input render callback -- called on the audio I/O thread.
 unsafe extern "C" fn input_callback(
     in_ref_con: *mut std::os::raw::c_void,
     io_action_flags: *mut AudioUnitRenderActionFlags,
@@ -537,7 +735,7 @@ unsafe extern "C" fn input_callback(
     }
     let rms = (sum_sq / in_number_frames as f32).sqrt();
 
-    // Send level (ignore errors — receiver might be dropped)
+    // Send level (ignore errors -- receiver might be dropped)
     let _ = cb_data.level_tx.send(AudioLevel { rms, peak });
 
     // Append samples to buffer

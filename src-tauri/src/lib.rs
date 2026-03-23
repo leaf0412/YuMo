@@ -17,7 +17,7 @@ pub use yumo_core::transcriber;
 pub use yumo_core::vad;
 pub mod window_manager;
 
-use log::info;
+use log::{info, warn};
 use tauri::Emitter;
 use state::AppPaths;
 
@@ -63,6 +63,11 @@ pub fn run() {
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    let saved_selected_model = saved_settings
+        .get("selected_model_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     info!("Paths: data={} models={} sprites={}",
         paths.data_dir.display(), paths.models_dir.display(), paths.sprites_dir.display());
 
@@ -78,9 +83,72 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
-        .manage(state::AppContext::new(conn, paths))
+        .manage(state::AppContext::new(conn, paths, saved_settings))
         .manage(daemon)
         .setup(move |app| {
+            // Cache audio devices at startup to avoid CoreAudio scan on recording hot path
+            {
+                use tauri::Manager;
+                let ctx = app.state::<state::AppContext>();
+                match platform::recorder::list_input_devices() {
+                    Ok(devices) => {
+                        info!("[startup] cached {} audio devices", devices.len());
+                        *ctx.device_cache.write().unwrap() = devices;
+                    }
+                    Err(e) => info!("[startup] device enumeration failed: {}", e),
+                }
+            }
+
+            // Pre-warm AudioUnit in background for fast first recording
+            {
+                use tauri::Manager;
+                let ctx = app.state::<state::AppContext>();
+                let dev_id = ctx.resolve_device_id();
+                if dev_id > 0 {
+                    let app_handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        let ctx = app_handle.state::<state::AppContext>();
+                        match platform::recorder::prepare_recording(dev_id) {
+                            Ok(Some(prepared)) => {
+                                info!("[startup] AudioUnit pre-warmed for device_id={}", dev_id);
+                                *ctx.prepared_recording.lock().unwrap() = Some(prepared);
+                            }
+                            Ok(None) => info!("[startup] platform does not support pre-warming"),
+                            Err(e) => warn!("[startup] pre-warm failed: {}", e),
+                        }
+                    });
+                }
+            }
+
+            // Register macOS device change listener to auto-refresh cache on plug/unplug
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Manager;
+                let app_handle = app.handle().clone();
+                platform::recorder::register_device_change_listener(move || {
+                    info!("[device-listener] device change detected, refreshing cache");
+                    let ctx = app_handle.state::<state::AppContext>();
+                    if let Ok(devices) = platform::recorder::list_input_devices() {
+                        if let Ok(mut cache) = ctx.device_cache.write() {
+                            *cache = devices;
+                        }
+                    }
+                    let dev_id = ctx.resolve_device_id();
+                    if dev_id > 0 {
+                        match platform::recorder::prepare_recording(dev_id) {
+                            Ok(Some(prepared)) => {
+                                *ctx.prepared_recording.lock().unwrap() = Some(prepared);
+                                info!("[device-listener] re-prepared for device_id={}", dev_id);
+                            }
+                            _ => {
+                                *ctx.prepared_recording.lock().unwrap() = None;
+                            }
+                        }
+                    }
+                })
+                .unwrap_or_else(|e| info!("[startup] device listener failed: {}", e));
+            }
+
             // Sync bundled resources (daemon script + uv) to ~/.voiceink/
             // Uses Tauri's resource_dir() which works in both dev and production builds.
             {
@@ -152,13 +220,19 @@ pub fn run() {
                 }
             }
 
-            // Restore saved hotkey
+            // Restore saved hotkey — calls toggle_recording_internal directly
             if let Some(shortcut) = &saved_hotkey {
                 let handle = app.handle().clone();
                 match hotkey::register_shortcut(app.handle(), shortcut, move || {
-                    use tauri::Emitter;
-                    info!("[hotkey] triggered! emitting toggle-recording");
-                    let _ = handle.emit("toggle-recording", ());
+                    let h = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        use tauri::Manager;
+                        let ctx = h.state::<state::AppContext>();
+                        info!("[hotkey] triggered! calling toggle_recording_internal");
+                        if let Err(e) = commands::toggle_recording_internal(&h, &ctx) {
+                            log::error!("[hotkey] toggle failed: {}", e);
+                        }
+                    });
                 }) {
                     Ok(()) => info!("Restored hotkey: {}", shortcut),
                     Err(e) => info!("Failed to restore hotkey {}: {}", shortcut, e),
@@ -169,11 +243,7 @@ pub fn run() {
             {
                 use tauri::Manager;
                 let app_state = app.handle().state::<state::AppContext>();
-                let selected_model = saved_settings
-                    .get("selected_model_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let selected_model = saved_selected_model.clone();
 
                 let mut warmup_repo: Option<String> = None;
                 if !selected_model.is_empty() {
@@ -289,6 +359,12 @@ pub fn run() {
             // System locale
             commands::get_system_locale,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Exit = event {
+                platform::recorder::unregister_device_change_listener();
+            }
+        });
 }

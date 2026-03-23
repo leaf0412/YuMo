@@ -47,10 +47,20 @@ pub fn init(data_dir: String) -> Result<()> {
     let conn = db::init_database(&db_path)
         .map_err(|e| Error::from_reason(format!("Failed to init database: {e}")))?;
 
-    let app_ctx = AppContext::new(conn, paths);
+    let saved_settings = db::get_all_settings(&conn).unwrap_or_default();
+    let app_ctx = AppContext::new(conn, paths, saved_settings);
 
     let daemon_script = std::path::PathBuf::from(&data_dir).join("mlx_funasr_daemon.py");
     let daemon = DaemonManager::new(daemon_script, data_dir.clone().into());
+
+    // Cache audio devices at startup
+    match platform::recorder::list_input_devices() {
+        Ok(devices) => {
+            log::info!("[startup] cached {} audio devices", devices.len());
+            *app_ctx.device_cache.write().unwrap() = devices;
+        }
+        Err(e) => log::info!("[startup] device enumeration failed: {}", e),
+    }
 
     APP_CTX
         .set(app_ctx)
@@ -58,6 +68,23 @@ pub fn init(data_dir: String) -> Result<()> {
     DAEMON
         .set(Mutex::new(daemon))
         .map_err(|_| Error::from_reason("Daemon already initialized"))?;
+
+    // Pre-warm AudioUnit in background for fast first recording
+    std::thread::spawn(|| {
+        if let Ok(ctx) = ctx() {
+            let dev_id = ctx.resolve_device_id();
+            if dev_id > 0 {
+                match platform::recorder::prepare_recording(dev_id) {
+                    Ok(Some(prepared)) => {
+                        log::info!("[startup] AudioUnit pre-warmed for device_id={}", dev_id);
+                        *ctx.prepared_recording.lock().unwrap() = Some(prepared);
+                    }
+                    Ok(None) => log::info!("[startup] platform does not support pre-warming"),
+                    Err(e) => log::info!("[startup] pre-warm failed: {}", e),
+                }
+            }
+        }
+    });
 
     Ok(())
 }
@@ -77,9 +104,13 @@ pub struct NapiAudioDevice {
 #[napi]
 pub async fn list_audio_devices() -> Result<Vec<NapiAudioDevice>> {
     tokio::task::spawn_blocking(|| {
+        let app = ctx()?;
         let devices = yumo_core::platform::recorder::list_input_devices()
             .map_err(|e| Error::from_reason(format!("Failed to list devices: {e}")))?;
-
+        // Refresh device cache
+        if let Ok(mut cache) = app.device_cache.write() {
+            *cache = devices.clone();
+        }
         Ok(devices
             .into_iter()
             .map(|d| NapiAudioDevice {
@@ -160,11 +191,10 @@ pub async fn list_available_models() -> Result<String> {
 pub async fn update_setting(key: String, value: String) -> Result<()> {
     tokio::task::spawn_blocking(move || {
         let app = ctx()?;
-        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
         let json_value: serde_json::Value = serde_json::from_str(&value)
             .unwrap_or_else(|_| serde_json::Value::String(value));
-        db::update_setting(&conn, &key, &json_value)
-            .map_err(|e| Error::from_reason(format!("update_setting: {e}")))
+        app.set_setting_cached(&key, &json_value)
+            .map_err(|e| Error::from_reason(format!("set_setting_cached: {e}")))
     }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
@@ -497,12 +527,10 @@ pub fn start_recording(device_id: Option<u32>) -> Result<String> {
         }
     }
 
-    // 2. Read settings and handle system mute
-    let settings = {
-        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-        db::get_all_settings(&conn)
-            .map_err(|e| Error::from_reason(format!("get_all_settings: {e}")))?
-    };
+    // 2. Read settings from cache and handle system mute
+    let settings = app.settings_cache.read()
+        .map_err(|e| Error::from_reason(format!("settings lock: {e}")))?
+        .clone();
     let mute = settings.get("system_mute_enabled")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
@@ -510,9 +538,22 @@ pub fn start_recording(device_id: Option<u32>) -> Result<String> {
         let _ = platform::audio_ctrl::set_system_muted(true);
     }
 
-    // 3. Resolve device
-    let devices = platform::recorder::list_input_devices()
-        .map_err(|e| Error::from_reason(format!("list devices: {e}")))?;
+    // 3. Resolve device from cache (fallback to fresh enumeration)
+    let devices = {
+        let cached = app.device_cache.read()
+            .map_err(|e| Error::from_reason(format!("device cache lock: {e}")))?;
+        if cached.is_empty() {
+            drop(cached);
+            let fresh = platform::recorder::list_input_devices()
+                .map_err(|e| Error::from_reason(format!("list devices: {e}")))?;
+            if let Ok(mut cache) = app.device_cache.write() {
+                *cache = fresh.clone();
+            }
+            fresh
+        } else {
+            cached.clone()
+        }
+    };
     if devices.is_empty() {
         return Err(Error::from_reason("No input devices found"));
     }
@@ -528,9 +569,33 @@ pub fn start_recording(device_id: Option<u32>) -> Result<String> {
         devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(devices[0].id)
     });
 
-    // 4. Start recording
-    let (handle, _level_rx) = platform::recorder::start_recording(dev_id)
-        .map_err(|e| Error::from_reason(format!("start_recording: {e}")))?;
+    // 4. Start recording (try prepared path first)
+    let (handle, _level_rx) = {
+        let mut prepared_slot = app.prepared_recording.lock()
+            .map_err(|e| Error::from_reason(format!("prepared lock: {e}")))?;
+        if let Some(prepared) = prepared_slot.take() {
+            if prepared.device_id == dev_id {
+                log::info!("[pipeline] using prepared recording for device_id={}", dev_id);
+                match platform::recorder::start_prepared_recording(prepared) {
+                    Ok(result) => result,
+                    Err(e) => {
+                        log::warn!("[pipeline] start_prepared failed: {}, cold start", e);
+                        platform::recorder::start_recording(dev_id)
+                            .map_err(|e| Error::from_reason(format!("start_recording: {e}")))?
+                    }
+                }
+            } else {
+                log::info!("[pipeline] device mismatch, cold start");
+                drop(prepared);
+                platform::recorder::start_recording(dev_id)
+                    .map_err(|e| Error::from_reason(format!("start_recording: {e}")))?
+            }
+        } else {
+            log::info!("[pipeline] no prepared recording, cold start");
+            platform::recorder::start_recording(dev_id)
+                .map_err(|e| Error::from_reason(format!("start_recording: {e}")))?
+        }
+    };
 
     // 5. Store handle and update state
     {
@@ -808,6 +873,23 @@ pub async fn stop_recording() -> Result<String> {
         *pipeline = yumo_core::pipeline::PipelineState::Idle;
     }
 
+    // Background re-prepare for next recording
+    std::thread::spawn(move || {
+        if let Ok(ctx) = ctx() {
+            let dev_id = ctx.resolve_device_id();
+            if dev_id > 0 {
+                match platform::recorder::prepare_recording(dev_id) {
+                    Ok(Some(prepared)) => {
+                        log::info!("[pipeline] background prepare complete for device_id={}", dev_id);
+                        *ctx.prepared_recording.lock().unwrap() = Some(prepared);
+                    }
+                    Ok(None) => log::info!("[pipeline] platform does not support pre-warming"),
+                    Err(e) => log::warn!("[pipeline] background prepare failed: {}", e),
+                }
+            }
+        }
+    });
+
     let result_json = serde_json::json!({
         "text": processed_text,
         "enhanced_text": serde_json::Value::Null,
@@ -845,6 +927,23 @@ pub fn cancel_recording() -> Result<()> {
             }
         }
     }
+
+    // Background re-prepare for next recording
+    std::thread::spawn(move || {
+        if let Ok(ctx) = ctx() {
+            let dev_id = ctx.resolve_device_id();
+            if dev_id > 0 {
+                match platform::recorder::prepare_recording(dev_id) {
+                    Ok(Some(prepared)) => {
+                        log::info!("[pipeline] background prepare complete for device_id={}", dev_id);
+                        *ctx.prepared_recording.lock().unwrap() = Some(prepared);
+                    }
+                    Ok(None) => log::info!("[pipeline] platform does not support pre-warming"),
+                    Err(e) => log::warn!("[pipeline] background prepare failed: {}", e),
+                }
+            }
+        }
+    });
 
     Ok(())
 }
@@ -949,8 +1048,9 @@ pub async fn delete_model(model_id: String) -> Result<()> {
             let selected = db::get_setting(&conn, "selected_model_id")
                 .map_err(|e| Error::from_reason(format!("get_setting: {e}")))?;
             if selected.as_ref().and_then(|v| v.as_str()) == Some(&model_id) {
-                db::update_setting(&conn, "selected_model_id", &serde_json::json!(""))
-                    .map_err(|e| Error::from_reason(format!("update_setting: {e}")))?;
+                drop(conn);
+                app.set_setting_cached("selected_model_id", &serde_json::json!(""))
+                    .map_err(|e| Error::from_reason(format!("set_setting_cached: {e}")))?;
             }
         }
 
@@ -1155,10 +1255,13 @@ pub async fn delete_sprite(dir_id: String) -> Result<()> {
                 .map_err(|e| Error::from_reason(format!("remove sprite dir: {e}")))?;
         }
         // Clear selected_sprite_id if it was the deleted one
-        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-        if let Ok(Some(current)) = db::get_setting(&conn, "selected_sprite_id") {
-            if current.as_str() == Some(dir_id.as_str()) {
-                let _ = db::update_setting(&conn, "selected_sprite_id", &serde_json::Value::String(String::new()));
+        {
+            let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
+            if let Ok(Some(current)) = db::get_setting(&conn, "selected_sprite_id") {
+                if current.as_str() == Some(dir_id.as_str()) {
+                    drop(conn);
+                    let _ = app.set_setting_cached("selected_sprite_id", &serde_json::Value::String(String::new()));
+                }
             }
         }
         Ok(())

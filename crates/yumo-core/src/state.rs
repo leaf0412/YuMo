@@ -1,9 +1,11 @@
 use rusqlite::Connection;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 
 use crate::pipeline::PipelineState;
-use crate::platform::RecordingHandle;
+use crate::platform::{AudioInputDevice, PreparedRecordingHandle, RecordingHandle};
 
 /// All configurable paths with defaults.
 /// Each can be overridden via DB setting `path_<name>`.
@@ -72,15 +74,53 @@ pub struct AppContext {
     pub pipeline_state: Mutex<PipelineState>,
     pub recording_handle: Mutex<Option<RecordingHandle>>,
     pub paths: AppPaths,
+    pub settings_cache: RwLock<HashMap<String, Value>>,
+    pub device_cache: RwLock<Vec<AudioInputDevice>>,
+    pub prepared_recording: Mutex<Option<PreparedRecordingHandle>>,
 }
 
 impl AppContext {
-    pub fn new(conn: Connection, paths: AppPaths) -> Self {
+    pub fn new(conn: Connection, paths: AppPaths, initial_settings: HashMap<String, Value>) -> Self {
         Self {
             db: Mutex::new(conn),
             pipeline_state: Mutex::new(PipelineState::Idle),
             recording_handle: Mutex::new(None),
             paths,
+            settings_cache: RwLock::new(initial_settings),
+            device_cache: RwLock::new(Vec::new()),
+            prepared_recording: Mutex::new(None),
         }
+    }
+
+    /// Write a setting to both the DB and the in-memory cache atomically.
+    pub fn set_setting_cached(&self, key: &str, value: &Value) -> Result<(), crate::error::AppError> {
+        {
+            let conn = self.db.lock()
+                .map_err(|e| crate::error::AppError::Database(e.to_string()))?;
+            crate::db::update_setting(&conn, key, value)?;
+        }
+        {
+            let mut cache = self.settings_cache.write()
+                .map_err(|e| crate::error::AppError::Database(e.to_string()))?;
+            cache.insert(key.to_string(), value.clone());
+        }
+        Ok(())
+    }
+
+    /// Resolve the target audio device ID from cache.
+    ///
+    /// Priority: explicit `device_id` > saved `audio_device` setting > default device > 0.
+    pub fn resolve_device_id(&self) -> u32 {
+        let settings = self.settings_cache.read().unwrap_or_else(|e| e.into_inner());
+        let devices = self.device_cache.read().unwrap_or_else(|e| e.into_inner());
+        let saved = settings.get("audio_device")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        if let Some(id) = saved {
+            if devices.iter().any(|d| d.id == id) {
+                return id;
+            }
+        }
+        devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(0)
     }
 }

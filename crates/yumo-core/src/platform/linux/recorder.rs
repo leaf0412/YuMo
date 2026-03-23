@@ -215,6 +215,16 @@ pub fn cancel_recording(handle: RecordingHandle) -> AppResult<()> {
     LinuxRecorder::cancel(handle)
 }
 
+pub fn prepare_recording(_device_id: u32) -> AppResult<Option<PreparedRecordingHandle>> {
+    Ok(None)
+}
+
+pub fn start_prepared_recording(
+    _prepared: PreparedRecordingHandle,
+) -> AppResult<(RecordingHandle, Receiver<AudioLevel>)> {
+    Err(AppError::Recording("prepared recording not supported on Linux".into()))
+}
+
 /// Simple linear interpolation resampling.
 fn linear_resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     if from_rate == to_rate || samples.is_empty() {
