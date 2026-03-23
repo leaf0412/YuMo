@@ -16,8 +16,11 @@ fn test_permission_status_serializes() {
     let status = PermissionStatus {
         microphone: true,
         accessibility: false,
+        paste_tools: None,
     };
     let json = serde_json::to_string(&status).unwrap();
     assert!(json.contains("\"microphone\":true"));
     assert!(json.contains("\"accessibility\":false"));
+    // paste_tools is None → skip_serializing_if skips it
+    assert!(!json.contains("paste_tools"));
 }
