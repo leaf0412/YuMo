@@ -93,6 +93,14 @@ jobs:
           echo "CFLAGS=-mmacosx-version-min=11.0" >> "$GITHUB_ENV"
           echo "CXXFLAGS=-mmacosx-version-min=11.0" >> "$GITHUB_ENV"
 
+      - name: Set Linux whisper.cpp compat flags
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          echo "GGML_AVX2=OFF" >> "$GITHUB_ENV"
+          echo "GGML_AVX512=OFF" >> "$GITHUB_ENV"
+          echo "GGML_FMA=OFF" >> "$GITHUB_ENV"
+          echo "GGML_F16C=OFF" >> "$GITHUB_ENV"
+
       - name: Build Tauri app
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
 
@@ -177,6 +185,13 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install
+
+      - name: Set whisper.cpp compat flags
+        run: |
+          echo "GGML_AVX2=OFF" >> "$GITHUB_ENV"
+          echo "GGML_AVX512=OFF" >> "$GITHUB_ENV"
+          echo "GGML_FMA=OFF" >> "$GITHUB_ENV"
+          echo "GGML_F16C=OFF" >> "$GITHUB_ENV"
 
       - name: Build napi addon
         run: cargo build --release -p yumo-napi
