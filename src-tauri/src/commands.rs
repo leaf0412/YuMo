@@ -64,8 +64,22 @@ pub async fn start_recording(
         let _ = audio_ctrl::set_system_muted(true);
     }
 
-    // 3. Enumerate devices and resolve target device
-    let devices = platform::recorder::list_input_devices()?;
+    // 3. Resolve target device from cache (fallback to fresh enumeration)
+    let devices = {
+        let cached = state.device_cache.read()
+            .map_err(|e| AppError::Recording(e.to_string()))?;
+        if cached.is_empty() {
+            drop(cached);
+            let fresh = platform::recorder::list_input_devices()?;
+            info!("[pipeline] cache empty, enumerated {} devices", fresh.len());
+            let mut cache = state.device_cache.write()
+                .map_err(|e| AppError::Recording(e.to_string()))?;
+            *cache = fresh.clone();
+            fresh
+        } else {
+            cached.clone()
+        }
+    };
     info!("[pipeline] found {} input devices", devices.len());
     if devices.is_empty() {
         error!("[pipeline] no input devices found");
@@ -712,9 +726,16 @@ pub async fn import_voiceink_from_dialog(
 }
 
 #[tauri::command]
-pub fn list_audio_devices() -> Result<Vec<platform::AudioInputDevice>, AppError> {
+pub fn list_audio_devices(
+    state: State<AppContext>,
+) -> Result<Vec<platform::AudioInputDevice>, AppError> {
     info!("[cmd] list_audio_devices");
-    platform::recorder::list_input_devices()
+    let devices = platform::recorder::list_input_devices()?;
+    // Refresh device cache
+    if let Ok(mut cache) = state.device_cache.write() {
+        *cache = devices.clone();
+    }
+    Ok(devices)
 }
 
 #[tauri::command]

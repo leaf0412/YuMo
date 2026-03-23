@@ -86,6 +86,19 @@ pub fn run() {
         .manage(state::AppContext::new(conn, paths, saved_settings))
         .manage(daemon)
         .setup(move |app| {
+            // Cache audio devices at startup to avoid CoreAudio scan on recording hot path
+            {
+                use tauri::Manager;
+                let ctx = app.state::<state::AppContext>();
+                match platform::recorder::list_input_devices() {
+                    Ok(devices) => {
+                        info!("[startup] cached {} audio devices", devices.len());
+                        *ctx.device_cache.write().unwrap() = devices;
+                    }
+                    Err(e) => info!("[startup] device enumeration failed: {}", e),
+                }
+            }
+
             // Sync bundled resources (daemon script + uv) to ~/.voiceink/
             // Uses Tauri's resource_dir() which works in both dev and production builds.
             {

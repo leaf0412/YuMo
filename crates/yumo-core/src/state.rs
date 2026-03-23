@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, RwLock};
 
 use crate::pipeline::PipelineState;
-use crate::platform::RecordingHandle;
+use crate::platform::{AudioInputDevice, RecordingHandle};
 
 /// All configurable paths with defaults.
 /// Each can be overridden via DB setting `path_<name>`.
@@ -75,6 +75,7 @@ pub struct AppContext {
     pub recording_handle: Mutex<Option<RecordingHandle>>,
     pub paths: AppPaths,
     pub settings_cache: RwLock<HashMap<String, Value>>,
+    pub device_cache: RwLock<Vec<AudioInputDevice>>,
 }
 
 impl AppContext {
@@ -85,6 +86,7 @@ impl AppContext {
             recording_handle: Mutex::new(None),
             paths,
             settings_cache: RwLock::new(initial_settings),
+            device_cache: RwLock::new(Vec::new()),
         }
     }
 
@@ -101,5 +103,22 @@ impl AppContext {
             cache.insert(key.to_string(), value.clone());
         }
         Ok(())
+    }
+
+    /// Resolve the target audio device ID from cache.
+    ///
+    /// Priority: explicit `device_id` > saved `audio_device` setting > default device > 0.
+    pub fn resolve_device_id(&self) -> u32 {
+        let settings = self.settings_cache.read().unwrap_or_else(|e| e.into_inner());
+        let devices = self.device_cache.read().unwrap_or_else(|e| e.into_inner());
+        let saved = settings.get("audio_device")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        if let Some(id) = saved {
+            if devices.iter().any(|d| d.id == id) {
+                return id;
+            }
+        }
+        devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(0)
     }
 }

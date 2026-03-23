@@ -53,6 +53,15 @@ pub fn init(data_dir: String) -> Result<()> {
     let daemon_script = std::path::PathBuf::from(&data_dir).join("mlx_funasr_daemon.py");
     let daemon = DaemonManager::new(daemon_script, data_dir.clone().into());
 
+    // Cache audio devices at startup
+    match platform::recorder::list_input_devices() {
+        Ok(devices) => {
+            log::info!("[startup] cached {} audio devices", devices.len());
+            *app_ctx.device_cache.write().unwrap() = devices;
+        }
+        Err(e) => log::info!("[startup] device enumeration failed: {}", e),
+    }
+
     APP_CTX
         .set(app_ctx)
         .map_err(|_| Error::from_reason("AppContext already initialized"))?;
@@ -78,9 +87,13 @@ pub struct NapiAudioDevice {
 #[napi]
 pub async fn list_audio_devices() -> Result<Vec<NapiAudioDevice>> {
     tokio::task::spawn_blocking(|| {
+        let app = ctx()?;
         let devices = yumo_core::platform::recorder::list_input_devices()
             .map_err(|e| Error::from_reason(format!("Failed to list devices: {e}")))?;
-
+        // Refresh device cache
+        if let Ok(mut cache) = app.device_cache.write() {
+            *cache = devices.clone();
+        }
         Ok(devices
             .into_iter()
             .map(|d| NapiAudioDevice {
@@ -497,12 +510,10 @@ pub fn start_recording(device_id: Option<u32>) -> Result<String> {
         }
     }
 
-    // 2. Read settings and handle system mute
-    let settings = {
-        let conn = app.db.lock().map_err(|e| Error::from_reason(format!("DB lock: {e}")))?;
-        db::get_all_settings(&conn)
-            .map_err(|e| Error::from_reason(format!("get_all_settings: {e}")))?
-    };
+    // 2. Read settings from cache and handle system mute
+    let settings = app.settings_cache.read()
+        .map_err(|e| Error::from_reason(format!("settings lock: {e}")))?
+        .clone();
     let mute = settings.get("system_mute_enabled")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
@@ -510,9 +521,22 @@ pub fn start_recording(device_id: Option<u32>) -> Result<String> {
         let _ = platform::audio_ctrl::set_system_muted(true);
     }
 
-    // 3. Resolve device
-    let devices = platform::recorder::list_input_devices()
-        .map_err(|e| Error::from_reason(format!("list devices: {e}")))?;
+    // 3. Resolve device from cache (fallback to fresh enumeration)
+    let devices = {
+        let cached = app.device_cache.read()
+            .map_err(|e| Error::from_reason(format!("device cache lock: {e}")))?;
+        if cached.is_empty() {
+            drop(cached);
+            let fresh = platform::recorder::list_input_devices()
+                .map_err(|e| Error::from_reason(format!("list devices: {e}")))?;
+            if let Ok(mut cache) = app.device_cache.write() {
+                *cache = fresh.clone();
+            }
+            fresh
+        } else {
+            cached.clone()
+        }
+    };
     if devices.is_empty() {
         return Err(Error::from_reason("No input devices found"));
     }
