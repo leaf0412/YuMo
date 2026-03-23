@@ -182,7 +182,7 @@ jobs:
         run: cargo build --release -p yumo-napi
 
       - name: Copy napi addon
-        run: cp target/release/libyumo_napi.so napi/yumo-napi.linux-x64-gnu.node
+        run: cp target/release/libyumo_napi.so napi/yumo-napi.linux-x64.node
 
       - name: Build frontend + Electron
         run: pnpm electron:build
