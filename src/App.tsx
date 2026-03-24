@@ -277,16 +277,50 @@ export default function App() {
     return () => { unlisten.then((fn) => fn()); };
   }, []);
 
-  // Global hotkey listener — toggle-recording is now mostly handled by backend,
-  // but keep as fallback for stop (frontend-initiated stop via older code paths)
+  // Global hotkey listener — Tauri handles start via toggle_recording_internal,
+  // but Electron still needs frontend to invoke start/stop/cancel.
   useEffect(() => {
+    /** Electron-only: check if a downloaded model is selected before recording */
+    const canStartRecording = (): boolean => {
+      const { settings, models } = useAppStore.getState();
+      const t = i18n.t;
+      const modelId = typeof settings.selected_model_id === 'string' ? settings.selected_model_id : '';
+      if (!modelId) {
+        Modal.warning({
+          title: t('app.selectModelFirst'),
+          content: t('app.selectModelFirstDesc'),
+          okText: t('app.goToModels'),
+          onOk: () => router.navigate('/models'),
+        });
+        logEvent('App', 'recording_blocked', { reason: 'no_model_selected' });
+        return false;
+      }
+      const model = models.find(m => m.id === modelId);
+      if (model && !model.is_downloaded && ['local', 'mlxWhisper', 'mlxFunASR'].includes(model.provider)) {
+        Modal.warning({
+          title: t('app.modelNotDownloaded'),
+          content: t('app.modelNotDownloadedDesc', { name: model.name }),
+          okText: t('app.goToModels'),
+          onOk: () => router.navigate('/models'),
+        });
+        logEvent('App', 'recording_blocked', { reason: 'model_not_downloaded', model_id: modelId });
+        return false;
+      }
+      return true;
+    };
+
     const unlistenToggle = listen('toggle-recording', async () => {
       const s = pipelineRef.current;
       logEvent('App', 'hotkey_toggle', { current_state: s });
       if (s === 'recording') {
         await invoke('stop_recording').catch(() => {});
+      } else if (s === 'idle') {
+        if (!canStartRecording()) return;
+        await invoke('start_recording').catch(() => {});
+      } else {
+        // transcribing/enhancing/pasting — force cancel to recover
+        await invoke('cancel_recording').catch(() => {});
       }
-      // Start and cancel now handled by backend toggle_recording_internal
     });
     const isLinux = navigator.userAgent.includes('Linux');
     const unlistenState = listen<{ state: string }>('recording-state', (event) => {
