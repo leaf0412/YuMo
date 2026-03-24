@@ -16,6 +16,21 @@ export function registerAudioHandlers(): void {
     return await getAddon().listAudioDevices();
   });
 
+  // Register device change listener (macOS: CoreAudio callback)
+  try {
+    getAddon().registerDeviceChangeCallback((devicesJson: string) => {
+      try {
+        const devices = JSON.parse(devicesJson);
+        log.info("[audio] devices changed, notifying renderers");
+        emitToRenderers("devices-changed", devices);
+      } catch (e) {
+        log.warn("[audio] failed to parse device change payload:", e);
+      }
+    });
+  } catch (e) {
+    log.info("[audio] device change listener not available:", e);
+  }
+
   ipcMain.handle("start-recording", (_e, args?: { deviceId?: number }) => {
     const result = getAddon().startRecording(args?.deviceId ?? null);
     showRecorder();

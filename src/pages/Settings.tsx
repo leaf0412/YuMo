@@ -9,7 +9,7 @@ import {
   HistoryOutlined, SettingOutlined, ClearOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { emit } from '../lib/events';
+import { emit, listen } from '../lib/events';
 import i18n from '../i18n';
 import { getResolvedLocale, type UiLocale } from '../i18n/utils';
 import { invoke, formatError, logEvent } from '../lib/logger';
@@ -93,6 +93,19 @@ export default function Settings() {
     loadSettings();
     loadDevices();
     detectLegacyPath();
+
+    // Refresh device list + settings when devices are plugged/unplugged
+    const unlistenPromise = listen<AudioDevice[]>('devices-changed', (event) => {
+      if (Array.isArray(event.payload)) {
+        setAudioDevices(event.payload);
+      }
+      // Reload settings since audio_device may have been auto-switched to default
+      loadSettings();
+    });
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
   }, [loadSettings, loadDevices, detectLegacyPath]);
 
   const updateSetting = async (key: string, value: unknown) => {

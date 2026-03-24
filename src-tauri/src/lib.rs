@@ -128,11 +128,33 @@ pub fn run() {
                 platform::recorder::register_device_change_listener(move || {
                     info!("[device-listener] device change detected, refreshing cache");
                     let ctx = app_handle.state::<state::AppContext>();
-                    if let Ok(devices) = platform::recorder::list_input_devices() {
-                        if let Ok(mut cache) = ctx.device_cache.write() {
-                            *cache = devices;
+                    let devices = match platform::recorder::list_input_devices() {
+                        Ok(devs) => {
+                            if let Ok(mut cache) = ctx.device_cache.write() {
+                                *cache = devs.clone();
+                            }
+                            devs
+                        }
+                        Err(e) => {
+                            warn!("[device-listener] failed to list devices: {}", e);
+                            return;
+                        }
+                    };
+
+                    // If saved device is gone, auto-fallback to default
+                    let saved = ctx.settings_cache.read().ok()
+                        .and_then(|s| s.get("audio_device").and_then(|v| v.as_u64()).map(|v| v as u32));
+                    if let Some(saved_id) = saved {
+                        if !devices.iter().any(|d| d.id == saved_id) {
+                            let default_id = devices.iter().find(|d| d.is_default).map(|d| d.id as i64).unwrap_or(0);
+                            info!("[device-listener] saved device {} gone, switching to default {}", saved_id, default_id);
+                            let _ = ctx.set_setting_cached("audio_device", &serde_json::json!(default_id));
                         }
                     }
+
+                    // Notify frontend of device list change
+                    let _ = app_handle.emit("devices-changed", &devices);
+
                     let dev_id = ctx.resolve_device_id();
                     if dev_id > 0 {
                         match platform::recorder::prepare_recording(dev_id) {
