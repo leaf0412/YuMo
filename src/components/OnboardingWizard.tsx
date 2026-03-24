@@ -69,9 +69,14 @@ export default function OnboardingWizard({ onComplete }: Props) {
         setModelReady(true);
         setSelectedModel(model);
       }
-      const hotkey = typeof s.settings.hotkey === 'string' ? s.settings.hotkey : '';
-      if (hotkey) {
-        setHotkeyValue(hotkey);
+      const rawHotkey = typeof s.settings.hotkey === 'string' ? s.settings.hotkey : '';
+      if (rawHotkey) {
+        try {
+          const parsed = JSON.parse(rawHotkey) as HotkeyConfig;
+          setHotkeyValue(parsed.key);
+        } catch {
+          setHotkeyValue(rawHotkey); // Backward compat with old accelerator format
+        }
         setHotkeySet(true);
       }
       setReady(true);
@@ -157,43 +162,44 @@ export default function OnboardingWizard({ onComplete }: Props) {
   };
 
   // --- Hotkey ---
-  const hadNonModifierRef = useRef(false);
+  interface HotkeyConfig {
+    code: string;
+    key: string;
+    is_modifier: boolean;
+  }
 
-  const MODIFIER_KEYS = ['Meta', 'Control', 'Alt', 'Shift'];
+  const MODIFIER_CODES = new Set([
+    'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight',
+    'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight',
+  ]);
 
-  const KEY_MAP: Record<string, string> = {
-    ' ': 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
-    Enter: 'Enter', Backspace: 'Backspace', Delete: 'Delete', Escape: 'Escape',
-    Tab: 'Tab', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+  const KEY_DISPLAY_MAP: Record<string, string> = {
+    ShiftLeft: 'Left Shift ⇧', ShiftRight: 'Right Shift ⇧',
+    ControlLeft: 'Left Control ⌃', ControlRight: 'Right Control ⌃',
+    AltLeft: 'Left Option ⌥', AltRight: 'Right Option ⌥',
+    MetaLeft: 'Left Command ⌘', MetaRight: 'Right Command ⌘',
+    Space: 'Space', Enter: 'Enter ↵', Tab: 'Tab ⇥',
+    Backspace: 'Backspace ⌫', Delete: 'Delete ⌦', Escape: 'Escape ⎋',
+    ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
   };
 
-  const modifierKeyToShortcut = (key: string): string => {
-    if (key === 'Meta' || key === 'Control') return 'CommandOrControl';
-    if (key === 'Alt') return 'Alt';
-    return 'Shift';
+  const getKeyDisplay = (e: React.KeyboardEvent): string => {
+    return KEY_DISPLAY_MAP[e.code]
+      ?? (e.code.startsWith('Key') ? e.code.slice(3) : null)
+      ?? (e.code.startsWith('Digit') ? e.code.slice(5) : null)
+      ?? e.code;
   };
 
-  const keyEventToShortcut = (e: React.KeyboardEvent): string | null => {
-    const parts: string[] = [];
-    if (e.metaKey || e.ctrlKey) parts.push('CommandOrControl');
-    if (e.altKey) parts.push('Alt');
-    if (e.shiftKey) parts.push('Shift');
-    const key = e.key;
-    if (MODIFIER_KEYS.includes(key)) return null;
-    const mapped = KEY_MAP[key] || (key.length === 1 ? key.toUpperCase() : key);
-    parts.push(mapped);
-    return parts.join('+');
-  };
-
-  const registerShortcut = async (shortcut: string) => {
-    setHotkeyValue(shortcut);
+  const registerShortcut = async (config: HotkeyConfig) => {
+    setHotkeyValue(config.key);
     setRecordingHotkey(false);
+    const configJson = JSON.stringify(config);
     try {
-      await invoke('register_hotkey', { shortcut });
-      await updateSetting('hotkey', shortcut);
+      await invoke('register_hotkey', { configJson });
+      await updateSetting('hotkey', configJson);
       setHotkeySet(true);
-      logEvent('Onboarding', 'hotkey_set', { shortcut });
-      message.success(t('onboarding.hotkeySet', { shortcut }));
+      logEvent('Onboarding', 'hotkey_set', { config: configJson });
+      message.success(t('onboarding.hotkeySet', { shortcut: config.key }));
     } catch (e) {
       message.error(formatError(e, t('onboarding.hotkeyRegisterFailed')));
     }
@@ -202,21 +208,15 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const handleHotkeyKeyDown = (e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (MODIFIER_KEYS.includes(e.key)) {
-      hadNonModifierRef.current = false;
-      return;
-    }
-    hadNonModifierRef.current = true;
-    const shortcut = keyEventToShortcut(e);
-    if (shortcut) registerShortcut(shortcut);
+    if (MODIFIER_CODES.has(e.code)) return;
+    registerShortcut({ code: e.code, key: getKeyDisplay(e), is_modifier: false });
   };
 
   const handleHotkeyKeyUp = (e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (MODIFIER_KEYS.includes(e.key) && !hadNonModifierRef.current) {
-      registerShortcut(modifierKeyToShortcut(e.key));
-    }
+    if (!MODIFIER_CODES.has(e.code)) return;
+    registerShortcut({ code: e.code, key: getKeyDisplay(e), is_modifier: true });
   };
 
   // --- Complete ---

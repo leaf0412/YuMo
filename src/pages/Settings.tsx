@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Collapse, Switch, Slider, Select, Input, Button, Flex, Space, Typography,
   message, Popconfirm, InputNumber,
@@ -61,7 +61,17 @@ export default function Settings() {
     try {
       const result = await invoke<AppSettings>('get_settings');
       setSettings(result);
-      setHotkeyInput(result.hotkey || '');
+      const rawHotkey = result.hotkey || '';
+      if (rawHotkey) {
+        try {
+          const parsed = JSON.parse(rawHotkey) as HotkeyConfig;
+          setHotkeyInput(parsed.key);
+        } catch {
+          setHotkeyInput(rawHotkey); // Backward compat with old accelerator format
+        }
+      } else {
+        setHotkeyInput('');
+      }
     } catch { /* logged */ }
   }, []);
 
@@ -96,50 +106,49 @@ export default function Settings() {
   };
 
   const [recordingHotkey, setRecordingHotkey] = useState(false);
-  const hadNonModifierRef = useRef(false);
 
   // Data import state
   const [legacyPath, setLegacyPath] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
 
-  const MODIFIER_KEYS = ['Meta', 'Control', 'Alt', 'Shift'];
+  interface HotkeyConfig {
+    code: string;
+    key: string;
+    is_modifier: boolean;
+  }
 
-  const KEY_MAP: Record<string, string> = {
-    ' ': 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
-    Enter: 'Enter', Backspace: 'Backspace', Delete: 'Delete', Escape: 'Escape',
-    Tab: 'Tab', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+  const MODIFIER_CODES = new Set([
+    'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight',
+    'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight',
+  ]);
+
+  const KEY_DISPLAY_MAP: Record<string, string> = {
+    ShiftLeft: 'Left Shift ⇧', ShiftRight: 'Right Shift ⇧',
+    ControlLeft: 'Left Control ⌃', ControlRight: 'Right Control ⌃',
+    AltLeft: 'Left Option ⌥', AltRight: 'Right Option ⌥',
+    MetaLeft: 'Left Command ⌘', MetaRight: 'Right Command ⌘',
+    Space: 'Space', Enter: 'Enter ↵', Tab: 'Tab ⇥',
+    Backspace: 'Backspace ⌫', Delete: 'Delete ⌦', Escape: 'Escape ⎋',
+    ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
   };
 
-  const modifierKeyToShortcut = (key: string): string => {
-    if (key === 'Meta' || key === 'Control') return 'CommandOrControl';
-    if (key === 'Alt') return 'Alt';
-    return 'Shift';
+  const getKeyDisplay = (e: React.KeyboardEvent): string => {
+    return KEY_DISPLAY_MAP[e.code]
+      ?? (e.code.startsWith('Key') ? e.code.slice(3) : null)
+      ?? (e.code.startsWith('Digit') ? e.code.slice(5) : null)
+      ?? e.code;
   };
 
-  const keyEventToShortcut = (e: React.KeyboardEvent): string | null => {
-    const parts: string[] = [];
-    if (e.metaKey || e.ctrlKey) parts.push('CommandOrControl');
-    if (e.altKey) parts.push('Alt');
-    if (e.shiftKey) parts.push('Shift');
-
-    const key = e.key;
-    if (MODIFIER_KEYS.includes(key)) return null;
-
-    const mapped = KEY_MAP[key] || (key.length === 1 ? key.toUpperCase() : key);
-    parts.push(mapped);
-
-    return parts.join('+') || null;
-  };
-
-  const registerShortcut = async (shortcut: string) => {
-    setHotkeyInput(shortcut);
+  const registerShortcut = async (config: HotkeyConfig) => {
+    setHotkeyInput(config.key);
     setRecordingHotkey(false);
-    logEvent('Settings', 'hotkey_captured', { shortcut });
+    const configJson = JSON.stringify(config);
+    logEvent('Settings', 'hotkey_captured', { config: configJson });
     try {
-      await invoke('register_hotkey', { shortcut });
-      updateSetting('hotkey', shortcut);
-      logEvent('Settings', 'hotkey_registered', { shortcut });
-      message.success(t('settings.hotkeySet', { shortcut }));
+      await invoke('register_hotkey', { configJson });
+      updateSetting('hotkey', configJson);
+      logEvent('Settings', 'hotkey_registered', { config: configJson });
+      message.success(t('settings.hotkeySet', { shortcut: config.key }));
     } catch (e: unknown) {
       message.error(formatError(e, t('settings.registerFailed')));
     }
@@ -148,21 +157,15 @@ export default function Settings() {
   const handleHotkeyKeyDown = (e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (MODIFIER_KEYS.includes(e.key)) {
-      hadNonModifierRef.current = false;
-      return;
-    }
-    hadNonModifierRef.current = true;
-    const shortcut = keyEventToShortcut(e);
-    if (shortcut) registerShortcut(shortcut);
+    if (MODIFIER_CODES.has(e.code)) return;
+    registerShortcut({ code: e.code, key: getKeyDisplay(e), is_modifier: false });
   };
 
   const handleHotkeyKeyUp = (e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (MODIFIER_KEYS.includes(e.key) && !hadNonModifierRef.current) {
-      registerShortcut(modifierKeyToShortcut(e.key));
-    }
+    if (!MODIFIER_CODES.has(e.code)) return;
+    registerShortcut({ code: e.code, key: getKeyDisplay(e), is_modifier: true });
   };
 
   const handleClearHotkey = async () => {
