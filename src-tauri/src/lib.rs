@@ -81,10 +81,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .manage(state::AppContext::new(conn, paths, saved_settings))
         .manage(daemon)
+        .manage(hotkey::HotkeyListener::new())
         .setup(move |app| {
             // Cache audio devices at startup to avoid CoreAudio scan on recording hot path
             {
@@ -220,22 +220,36 @@ pub fn run() {
                 }
             }
 
-            // Restore saved hotkey — calls toggle_recording_internal directly
-            if let Some(shortcut) = &saved_hotkey {
-                let handle = app.handle().clone();
-                match hotkey::register_shortcut(app.handle(), shortcut, move || {
-                    let h = handle.clone();
-                    tauri::async_runtime::spawn(async move {
-                        use tauri::Manager;
-                        let ctx = h.state::<state::AppContext>();
-                        info!("[hotkey] triggered! calling toggle_recording_internal");
-                        if let Err(e) = commands::toggle_recording_internal(&h, &ctx) {
-                            log::error!("[hotkey] toggle failed: {}", e);
+            // Start native hotkey listener and restore saved hotkey
+            {
+                use tauri::Manager;
+                let listener = app.state::<hotkey::HotkeyListener>();
+                if let Err(e) = listener.start() {
+                    log::error!("[hotkey] failed to start native listener: {}", e);
+                }
+
+                if let Some(shortcut_json) = &saved_hotkey {
+                    match serde_json::from_str::<hotkey::HotkeyConfig>(shortcut_json) {
+                        Ok(config) => {
+                            let handle = app.handle().clone();
+                            let cb: hotkey::HotkeyCallback = std::sync::Arc::new(move || {
+                                let h = handle.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    let ctx = h.state::<state::AppContext>();
+                                    info!("[hotkey] triggered! calling toggle_recording_internal");
+                                    if let Err(e) = commands::toggle_recording_internal(&h, &ctx) {
+                                        log::error!("[hotkey] toggle failed: {}", e);
+                                    }
+                                });
+                            });
+                            if let Err(e) = listener.register(&config, cb) {
+                                log::error!("[hotkey] failed to restore hotkey: {}", e);
+                            }
                         }
-                    });
-                }) {
-                    Ok(()) => info!("Restored hotkey: {}", shortcut),
-                    Err(e) => info!("Failed to restore hotkey {}: {}", shortcut, e),
+                        Err(_) => {
+                            info!("[hotkey] saved hotkey is old format, user needs to re-configure");
+                        }
+                    }
                 }
             }
 
