@@ -1,4 +1,4 @@
-import { ipcMain, globalShortcut } from "electron";
+import { ipcMain, globalShortcut, clipboard } from "electron";
 import log from "../logger";
 import { getAddon } from "../addon";
 import {
@@ -51,6 +51,12 @@ export function registerAudioHandlers(): void {
     try {
       const resultJson = await getAddon().stopRecording();
       const result = JSON.parse(resultJson);
+      // Linux: Rust arboard clipboard loses content on drop,
+      // so write clipboard here via Electron (Chromium) API.
+      if (process.platform === "linux" && result.text) {
+        clipboard.writeText(result.text);
+        log.info("[audio] Linux: wrote transcription to clipboard via Electron");
+      }
       hideRecorder();
       emitToRenderers("recording-state", { state: "idle" });
       emitToRenderers("transcription-result", result);

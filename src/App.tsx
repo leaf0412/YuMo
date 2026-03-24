@@ -295,8 +295,10 @@ export default function App() {
       logEvent('App', 'recording_state_changed', { state });
       pipelineRef.current = state;
       broadcast('pipeline-state', state);
-      // Linux clipboard-only mode: show toast when transcription completes
+      // Linux clipboard-only mode: copy text when transcription completes
       if (isLinux && prevState === 'processing' && state === 'idle') {
+        // Clipboard write is handled by Electron main process (audio.ts).
+        // For Tauri, listen for the transcription-result event below.
         import('antd').then(({ message }) => message.success(i18n.t('app.copiedToClipboard'), 3));
       }
     });
@@ -318,6 +320,17 @@ export default function App() {
         broadcast('escape-hint', 'pressAgain');
       }
     });
+
+    // Linux (Tauri): write clipboard via browser API when transcription completes
+    // Electron handles this in audio.ts via electron.clipboard
+    const unlistenTranscription = isLinux
+      ? listen<{ text: string }>('transcription-result', (event) => {
+          const text = event.payload?.text;
+          if (text) {
+            navigator.clipboard.writeText(text).catch(() => {});
+          }
+        })
+      : Promise.resolve(() => {});
 
     // Paste failure notification (Linux: xdotool/wtype not installed)
     const unlistenPaste = listen<{ error: string }>('paste-failed', () => {
@@ -354,6 +367,7 @@ export default function App() {
       unlistenState.then((fn) => fn());
       unlistenEscape.then((fn) => fn());
       unlistenPaste.then((fn) => fn());
+      unlistenTranscription.then((fn) => fn());
       window.removeEventListener('keydown', onKeyDown);
     };
   }, []);

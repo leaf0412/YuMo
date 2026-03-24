@@ -65,11 +65,11 @@ pub fn simulate_paste() {
     // no-op on Linux
 }
 
-/// On Linux, paste_text just writes to clipboard.
-/// No Ctrl+V simulation — user pastes manually.
-pub fn paste_text(text: &str, _restore_delay_ms: u64) -> AppResult<()> {
-    log::info!("[paster] writing to clipboard (Linux clipboard-only mode)");
-    write_clipboard(text);
+/// On Linux, paste_text is a no-op.
+/// Clipboard write is handled by the Electron/Tauri layer (Chromium clipboard API)
+/// because arboard's X11 clipboard loses content when the Clipboard object is dropped.
+pub fn paste_text(_text: &str, _restore_delay_ms: u64) -> AppResult<()> {
+    log::info!("[paster] Linux: skipping Rust clipboard write, delegated to frontend");
     Ok(())
 }
 
