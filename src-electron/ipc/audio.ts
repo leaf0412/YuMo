@@ -1,4 +1,5 @@
 import { ipcMain, globalShortcut, clipboard } from "electron";
+import { exec } from "child_process";
 import log from "../logger";
 import { getAddon } from "../addon";
 import {
@@ -51,11 +52,22 @@ export function registerAudioHandlers(): void {
     try {
       const resultJson = await getAddon().stopRecording();
       const result = JSON.parse(resultJson);
-      // Linux: Rust arboard clipboard loses content on drop,
-      // so write clipboard here via Electron (Chromium) API.
+      // Linux: write clipboard via Electron API, then try xdotool auto-paste.
+      // Clipboard always works (Chromium maintains X11 selection ownership).
+      // xdotool is best-effort — if not installed, user Ctrl+V manually.
       if (process.platform === "linux" && result.text) {
         clipboard.writeText(result.text);
         log.info("[audio] Linux: wrote transcription to clipboard via Electron");
+        // Small delay for clipboard to settle, then simulate Ctrl+V
+        setTimeout(() => {
+          exec("xdotool key --clearmodifiers ctrl+v", (err) => {
+            if (err) {
+              log.info("[audio] Linux: xdotool auto-paste unavailable, user can Ctrl+V");
+            } else {
+              log.info("[audio] Linux: xdotool auto-paste succeeded");
+            }
+          });
+        }, 100);
       }
       hideRecorder();
       emitToRenderers("recording-state", { state: "idle" });
