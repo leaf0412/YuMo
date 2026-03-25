@@ -33,11 +33,8 @@ export default function Models() {
   const { t } = useTranslation();
   const { models, settings, daemonStatus, fetchModels, fetchSettings, fetchDaemonStatus, setSettings: storeSetSettings, setDaemonStatus: storeSetDaemonStatus } = useAppStore();
   const [cloudApiKey, setCloudApiKey] = useState('');
-  // Default to MLX tab on macOS, cloud tab on other platforms (MLX requires Apple Silicon)
-  const [activeTab, setActiveTab] = useState(() => {
-    const isMac = navigator.userAgent.includes('Macintosh') || navigator.platform?.includes('Mac');
-    return isMac ? 'mlx' : 'cloud';
-  });
+  // Default to local AI tab (MLX on macOS, Qwen3-ASR on Linux)
+  const [activeTab, setActiveTab] = useState('mlx');
   const [loadingModel, setLoadingModel] = useState<string | null>(null);
   const [daemonBusy, setDaemonBusy] = useState(false);
   const [setupMessage, setSetupMessage] = useState<string | null>(null);
@@ -252,7 +249,7 @@ export default function Models() {
 
   const isSelected = (modelId: string) => settings.selected_model_id === modelId;
   const LOCAL_PROVIDERS = ['local'];
-  const MLX_PROVIDERS = ['mlxWhisper', 'mlxFunASR'];
+  const MLX_PROVIDERS = ['mlxWhisper', 'mlxFunASR', 'qwen3ASR'];
   const CLOUD_PROVIDERS_LIST = ['groq', 'deepgram', 'elevenLabs', 'mistral', 'gemini', 'soniox'];
 
   const localModels = models.filter(m => LOCAL_PROVIDERS.includes(m.provider));
@@ -439,8 +436,7 @@ export default function Models() {
       </div>
       <Tabs activeKey={activeTab} onChange={setActiveTab}
         items={[
-          // Only show MLX tab when MLX models are available (macOS Apple Silicon)
-          ...(mlxModels.length > 0 ? [{ key: 'mlx', label: <span data-testid="local-models-tab">{t('models.tab.mlx', { count: mlxModels.length })}</span>, children: mlxTabContent }] : []),
+          ...(mlxModels.length > 0 ? [{ key: 'mlx', label: <span data-testid="local-models-tab">{t('models.tab.localAI', { count: mlxModels.length })}</span>, children: mlxTabContent }] : []),
           { key: 'cloud', label: <span data-testid="cloud-models-tab">{t('models.tab.cloud', { count: cloudModels.length })}</span>, children: cloudTabContent },
         ]}
       />

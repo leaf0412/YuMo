@@ -132,6 +132,7 @@
   "models.label.temperature": "温度:",
   "models.label.token": "Token:",
   "models.tab.mlx": "MLX 模型 ({{count}})",
+  "models.tab.localAI": "本地模型 ({{count}})",
   "models.tab.cloud": "云端模型 ({{count}})",
   "models.toast.modelSwitched": "已切换模型",
   "models.toast.importComplete": "导入完成",

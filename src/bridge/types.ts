@@ -31,6 +31,7 @@ export type ModelProvider =
   | 'local'
   | 'mlxWhisper'
   | 'mlxFunASR'
+  | 'qwen3ASR'
   | 'groq'
   | 'deepgram'
   | 'elevenLabs'

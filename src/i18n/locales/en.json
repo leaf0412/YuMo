@@ -132,6 +132,7 @@
   "models.label.temperature": "Temp:",
   "models.label.token": "Token:",
   "models.tab.mlx": "MLX Models ({{count}})",
+  "models.tab.localAI": "Local AI ({{count}})",
   "models.tab.cloud": "Cloud Models ({{count}})",
   "models.toast.modelSwitched": "Model switched",
   "models.toast.importComplete": "Import complete",
