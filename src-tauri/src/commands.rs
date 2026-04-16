@@ -146,14 +146,12 @@ fn start_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), App
 
     // 7. Register Escape as global shortcut for cancel during recording
     {
-        use tauri::Manager;
-        let listener = app.state::<hotkey::HotkeyListener>();
         let app_esc = app.clone();
-        let _ = listener.register_escape(std::sync::Arc::new(move || {
+        let _ = hotkey::register_escape(app, move || {
             use tauri::Emitter;
             info!("[hotkey] Escape pressed during recording");
             let _ = app_esc.emit("escape-pressed", ());
-        }));
+        });
     }
 
     // 8. Show floating recorder window
@@ -187,11 +185,7 @@ fn cancel_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), Ap
     }
 
     // Unregister Escape shortcut
-    {
-        use tauri::Manager;
-        let listener = app.state::<hotkey::HotkeyListener>();
-        let _ = listener.unregister_escape();
-    }
+    let _ = hotkey::unregister_escape(app);
 
     let _ = app.emit("recording-state", serde_json::json!({"state": "idle"}));
     crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
@@ -245,8 +239,7 @@ pub(crate) fn toggle_recording_internal(
                 use tauri::Manager;
                 let ctx = app_clone.state::<AppContext>();
                 let daemon = app_clone.state::<DaemonManager>();
-                let listener = app_clone.state::<hotkey::HotkeyListener>();
-                if let Err(e) = stop_recording(app_clone.clone(), ctx, daemon, listener).await {
+                if let Err(e) = stop_recording(app_clone.clone(), ctx, daemon).await {
                     error!("[toggle] stop_recording failed: {}", e);
                 }
             });
@@ -271,7 +264,6 @@ pub async fn stop_recording(
     app: AppHandle,
     state: State<'_, AppContext>,
     daemon: State<'_, DaemonManager>,
-    listener: State<'_, hotkey::HotkeyListener>,
 ) -> Result<(), AppError> {
     info!("[pipeline] stop_recording called");
 
@@ -674,7 +666,7 @@ pub async fn stop_recording(
     info!("[pipeline] stop_recording complete, state -> Idle");
 
     // Unregister Escape shortcut
-    let _ = listener.unregister_escape();
+    let _ = hotkey::unregister_escape(&app);
 
     // Hide floating recorder window
     crate::window_manager::WindowManager::new(app.clone()).hide("recorder");
@@ -1188,20 +1180,20 @@ pub fn delete_api_key(provider: String) -> Result<(), AppError> {
 pub fn register_hotkey(
     app: AppHandle,
     state: State<AppContext>,
-    listener: State<hotkey::HotkeyListener>,
-    config_json: String,
+    shortcut: String,
 ) -> Result<(), AppError> {
-    info!("[hotkey] register_hotkey called: {}", config_json);
+    info!("[hotkey] register_hotkey called: {:?}", shortcut);
 
-    let config: hotkey::HotkeyConfig = serde_json::from_str(&config_json)
-        .map_err(|e| AppError::InvalidInput(format!("invalid hotkey config: {}", e)))?;
+    // Persist the shortcut string in settings
+    state.set_setting_cached("hotkey", &Value::String(shortcut.clone()))?;
 
-    state.set_setting_cached("hotkey", &Value::String(config_json))?;
-
-    listener.unregister().map_err(|e| AppError::Io(e.to_string()))?;
-
+    // Clear any previously registered shortcuts, then register the new one.
+    hotkey::unregister_all(&app).map_err(|e| {
+        error!("[hotkey] unregister_all failed: {}", e);
+        AppError::Io(e.to_string())
+    })?;
     let app_clone = app.clone();
-    let cb: hotkey::HotkeyCallback = std::sync::Arc::new(move || {
+    hotkey::register_shortcut(&app, &shortcut, move || {
         let h = app_clone.clone();
         tauri::async_runtime::spawn(async move {
             use tauri::Manager;
@@ -1211,15 +1203,16 @@ pub fn register_hotkey(
                 error!("[hotkey] toggle failed: {}", e);
             }
         });
-    });
-    listener.register(&config, cb).map_err(|e| AppError::Io(e.to_string()))?;
-
-    Ok(())
+    })
+    .map_err(|e| {
+        error!("[hotkey] register_shortcut failed: {:?} error: {}", shortcut, e);
+        AppError::Io(e.to_string())
+    })
 }
 
 #[tauri::command]
-pub fn unregister_hotkey(listener: State<hotkey::HotkeyListener>) -> Result<(), AppError> {
-    listener.unregister().map_err(|e| AppError::Io(e.to_string()))
+pub fn unregister_hotkey(app: AppHandle) -> Result<(), AppError> {
+    hotkey::unregister_all(&app).map_err(|e| AppError::Io(e.to_string()))
 }
 
 // ---------------------------------------------------------------------------

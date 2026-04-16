@@ -7777,7 +7777,6 @@ name = "yumo"
 version = "0.5.7"
 dependencies = [
  "cocoa",
- "core-foundation 0.10.1",
  "dirs 5.0.1",
  "image",
  "log",
