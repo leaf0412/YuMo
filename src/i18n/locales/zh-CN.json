@@ -222,6 +222,7 @@
   "settings.sectionGeneral": "通用",
   "settings.audioDevice": "音频设备",
   "settings.audioDevicePlaceholder": "选择音频设备",
+  "settings.audioDeviceDefault": "跟随系统默认",
   "settings.transcriptionLang": "转录语言",
   "settings.langAutoDetect": "自动检测",
   "settings.langChinese": "中文",

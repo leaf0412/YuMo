@@ -83,10 +83,23 @@ fn start_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), App
         let _ = audio_ctrl::set_system_muted(true);
     }
 
-    // 3. Resolve target device from cache
-    let dev_id = ctx.resolve_device_id();
+    // 3. Resolve target device from cache; if stale, re-scan hardware
+    let mut dev_id = ctx.resolve_device_id();
     if dev_id == 0 {
-        error!("[pipeline] no audio device available");
+        info!("[pipeline] cache miss, re-scanning audio devices");
+        match platform::recorder::list_input_devices() {
+            Ok(devices) => {
+                let count = ctx.refresh_device_cache(devices);
+                info!("[pipeline] re-scan found {} devices", count);
+                dev_id = ctx.resolve_device_id();
+            }
+            Err(e) => {
+                warn!("[pipeline] re-scan failed: {}", e);
+            }
+        }
+    }
+    if dev_id == 0 {
+        error!("[pipeline] no audio device available after re-scan");
         reset_on_error(ctx);
         return Err(AppError::Recording("No audio device available".into()));
     }

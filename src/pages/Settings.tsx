@@ -9,7 +9,7 @@ import {
   HistoryOutlined, SettingOutlined, ClearOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { emit } from '../lib/events';
+import { emit, listen } from '../lib/events';
 import i18n from '../i18n';
 import { getResolvedLocale, type UiLocale } from '../i18n/utils';
 import { invoke, formatError, logEvent } from '../lib/logger';
@@ -79,11 +79,31 @@ export default function Settings() {
     } catch { /* ignore */ }
   }, []);
 
+  const [pythonPath, setPythonPath] = useState('');
+  const [pythonPathDirty, setPythonPathDirty] = useState(false);
+
+  const loadPythonPath = useCallback(async () => {
+    try {
+      const path = await invoke<string>('get_python_path');
+      setPythonPath(path);
+    } catch { /* logged */ }
+  }, []);
+
   useEffect(() => {
     loadSettings();
     loadDevices();
     detectLegacyPath();
-  }, [loadSettings, loadDevices, detectLegacyPath]);
+    loadPythonPath();
+  }, [loadSettings, loadDevices, detectLegacyPath, loadPythonPath]);
+
+  // Listen for device hot-plug/unplug events from backend
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<AudioDevice[]>('devices-changed', (event) => {
+      setAudioDevices(event.payload);
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
 
   const updateSetting = async (key: string, value: unknown) => {
     try {
@@ -240,7 +260,7 @@ export default function Settings() {
       children: (
         <Flex vertical gap={8} style={{ width: '100%' }}>
           {settingRow(t('settings.audioDevice'),
-            <Select value={settings.audio_device} onChange={(v) => updateSetting('audio_device', v)} style={{ width: 250 }} placeholder={t('settings.audioDevicePlaceholder')} options={audioDevices.map((d) => ({ value: d.id, label: d.name }))} />,
+            <Select value={settings.audio_device ?? 0} onChange={(v) => updateSetting('audio_device', v)} style={{ width: 250 }} placeholder={t('settings.audioDevicePlaceholder')} options={[{ value: 0, label: t('settings.audioDeviceDefault') }, ...audioDevices.map((d) => ({ value: d.id, label: d.name }))]} />,
           )}
           {settingRow(t('settings.transcriptionLang'),
             <Select value={settings.language || 'auto'} onChange={(v) => updateSetting('language', v)} style={{ width: 250 }}

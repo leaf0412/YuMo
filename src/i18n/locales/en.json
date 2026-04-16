@@ -222,6 +222,7 @@
   "settings.sectionGeneral": "General",
   "settings.audioDevice": "Audio Device",
   "settings.audioDevicePlaceholder": "Select audio device",
+  "settings.audioDeviceDefault": "System Default",
   "settings.transcriptionLang": "Transcription Language",
   "settings.langAutoDetect": "Auto-detect",
   "settings.langChinese": "Chinese",

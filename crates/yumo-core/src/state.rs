@@ -109,18 +109,33 @@ impl AppContext {
 
     /// Resolve the target audio device ID from cache.
     ///
-    /// Priority: explicit `device_id` > saved `audio_device` setting > default device > 0.
+    /// Priority: saved `audio_device` setting (if present in cache) > default device > first available > 0.
     pub fn resolve_device_id(&self) -> u32 {
         let settings = self.settings_cache.read().unwrap_or_else(|e| e.into_inner());
         let devices = self.device_cache.read().unwrap_or_else(|e| e.into_inner());
         let saved = settings.get("audio_device")
             .and_then(|v| v.as_u64())
             .map(|v| v as u32);
+        // 0 means "follow system default"
         if let Some(id) = saved {
-            if devices.iter().any(|d| d.id == id) {
+            if id > 0 && devices.iter().any(|d| d.id == id) {
                 return id;
             }
         }
-        devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(0)
+        // Use system default device > first available > 0
+        devices.iter().find(|d| d.is_default)
+            .or_else(|| devices.first())
+            .map(|d| d.id)
+            .unwrap_or(0)
+    }
+
+    /// Refresh the device cache by re-enumerating audio input devices.
+    /// Returns the new device list length.
+    pub fn refresh_device_cache(&self, devices: Vec<AudioInputDevice>) -> usize {
+        let len = devices.len();
+        if let Ok(mut cache) = self.device_cache.write() {
+            *cache = devices;
+        }
+        len
     }
 }
