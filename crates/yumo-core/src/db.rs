@@ -789,6 +789,16 @@ pub fn delete_vocabulary(conn: &Connection, id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+pub fn clear_all_vocabulary(conn: &Connection) -> Result<(), AppError> {
+    info!("[db] clear_all_vocabulary");
+    conn.execute("DELETE FROM vocabulary", [])
+        .map_err(|e| {
+            error!("[db] clear_all_vocabulary failed: {}", e);
+            e
+        })?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Replacements
 // ---------------------------------------------------------------------------

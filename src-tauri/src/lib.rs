@@ -338,6 +338,7 @@ pub fn run() {
             commands::get_vocabulary,
             commands::add_vocabulary,
             commands::delete_vocabulary,
+            commands::clear_all_vocabulary,
             // Replacements
             commands::get_replacements,
             commands::set_replacement,

@@ -177,6 +177,8 @@
   "dictionary.csvImportSuccess": "CSV imported successfully",
   "dictionary.csvExportFailed": "CSV export failed",
   "dictionary.csvImportFailed": "CSV import failed",
+  "dictionary.clearAll": "Clear All",
+  "dictionary.confirmClearAll": "Delete all vocabulary entries?",
   "enhancement.title": "AI Enhancement",
   "enhancement.enableToggle": "Enable AI Enhancement",
   "enhancement.provider": "LLM Provider",

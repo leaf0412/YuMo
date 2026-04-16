@@ -177,6 +177,8 @@
   "dictionary.csvImportSuccess": "CSV 导入成功",
   "dictionary.csvExportFailed": "CSV 导出失败",
   "dictionary.csvImportFailed": "CSV 导入失败",
+  "dictionary.clearAll": "全部删除",
+  "dictionary.confirmClearAll": "确认删除全部词汇？",
   "enhancement.title": "AI 增强",
   "enhancement.enableToggle": "启用 AI 增强",
   "enhancement.provider": "LLM 服务商",

@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Tabs, Input, Button, Flex, Space, Typography, message,
+  Tabs, Input, Button, Flex, Space, Typography, message, Popconfirm,
 } from 'antd';
 import {
   PlusOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined,
-  SwapRightOutlined,
+  SwapRightOutlined, ClearOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { invoke, formatError } from '../lib/logger';
@@ -58,6 +58,16 @@ export default function Dictionary() {
       loadVocabulary();
     } catch (e) {
       message.error(formatError(e, t('dictionary.addFailed')));
+    }
+  };
+
+  const handleClearAllVocabulary = async () => {
+    try {
+      await invoke('clear_all_vocabulary');
+      message.success(t('common.deleted'));
+      loadVocabulary();
+    } catch (e) {
+      message.error(formatError(e, t('dictionary.deleteFailed')));
     }
   };
 
@@ -131,6 +141,9 @@ export default function Dictionary() {
         <Space>
           <Button icon={<UploadOutlined />} onClick={() => handleImportCsv('vocabulary')}>{t('dictionary.importCsv')}</Button>
           <Button icon={<DownloadOutlined />} onClick={() => handleExportCsv('vocabulary')}>{t('dictionary.exportCsv')}</Button>
+          <Popconfirm title={t('dictionary.confirmClearAll')} onConfirm={handleClearAllVocabulary} okText={t('common.confirm')} cancelText={t('common.cancel')}>
+            <Button danger icon={<ClearOutlined />}>{t('dictionary.clearAll')}</Button>
+          </Popconfirm>
         </Space>
       </Space>
       {vocabulary.length === 0 ? (

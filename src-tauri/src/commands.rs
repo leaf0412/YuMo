@@ -1042,6 +1042,12 @@ pub fn delete_vocabulary(state: State<AppContext>, id: String) -> Result<(), App
     db::delete_vocabulary(&conn, &id)
 }
 
+#[tauri::command]
+pub fn clear_all_vocabulary(state: State<AppContext>) -> Result<(), AppError> {
+    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
+    db::clear_all_vocabulary(&conn)
+}
+
 // ---------------------------------------------------------------------------
 // Replacements
 // ---------------------------------------------------------------------------
