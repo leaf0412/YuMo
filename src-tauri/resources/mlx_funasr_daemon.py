@@ -303,7 +303,8 @@ def transcribe(model, audio_path, language=None, max_tokens=None, temperature=No
 
     try:
         if model_type == "vibevoice":
-            return _transcribe_vibevoice(model, audio_path, language, temperature=temp)
+            tokens = max_tokens if max_tokens else 8192
+            return _transcribe_vibevoice(model, audio_path, language, max_tokens=tokens, temperature=temp)
         elif model_type == "glmasr":
             return _transcribe_glmasr(model, audio_path, language, temperature=temp)
         elif model_type == "qwen3_asr":
@@ -324,25 +325,36 @@ def transcribe(model, audio_path, language=None, max_tokens=None, temperature=No
                 pass
 
 
-def _transcribe_vibevoice(model, audio_path, language=None, temperature=0.0):
+def _transcribe_vibevoice(model, audio_path, language=None, max_tokens=8192, temperature=0.0):
     """Transcribe using VibeVoice model."""
-    log(f"VibeVoice transcribing: {audio_path}")
+    log(f"VibeVoice transcribing: {audio_path} (max_tokens={max_tokens})")
 
     old_stdout = sys.stdout
     sys.stdout = sys.stderr
     try:
         result = model.generate(
             audio_path,
-            max_tokens=8192,
+            max_tokens=max_tokens,
             temperature=temperature,
             top_p=1.0,  # Disable nucleus sampling to avoid MLX boolean indexing bug
+            prefill_step_size=4096,  # Larger prefill chunks for faster prompt processing
             verbose=False,
         )
     finally:
         sys.stdout = old_stdout
 
-    text = result.text if hasattr(result, 'text') else str(result)
-    log(f"VibeVoice raw text: '{text}'")
+    raw = result.text if hasattr(result, 'text') else str(result)
+    log(f"VibeVoice raw text: '{raw}'")
+
+    # VibeVoice returns JSON array: [{"Start":0,"End":7.37,"Speaker":0,"Content":"..."},...]
+    text = raw
+    try:
+        import json as _json
+        segments = _json.loads(raw)
+        if isinstance(segments, list):
+            text = "".join(seg.get("Content", "") for seg in segments if isinstance(seg, dict))
+    except (ValueError, TypeError):
+        pass
 
     if text:
         text = text.strip()

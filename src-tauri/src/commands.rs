@@ -401,7 +401,7 @@ pub async fn stop_recording(
     info!("[pipeline] effective language: {:?}", language);
 
     let transcribe_result = match model_info.map(|m| &m.provider) {
-        Some(transcriber::ModelProvider::MlxFunASR) => {
+        Some(provider) if provider.needs_daemon() => {
             // Auto-start daemon if not running
             if !daemon.is_running() {
                 info!("[pipeline] daemon not running, starting...");

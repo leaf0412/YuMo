@@ -18,6 +18,8 @@ pub enum ModelProvider {
     MlxFunASR,
     /// Qwen3-ASR: runs via daemon on all platforms (MLX on macOS, transformers on Windows/Linux)
     Qwen3ASR,
+    /// VibeVoice-ASR: runs via daemon (MLX on macOS)
+    VibeVoiceASR,
     Groq,
     Deepgram,
     ElevenLabs,
@@ -28,7 +30,7 @@ pub enum ModelProvider {
 
 impl ModelProvider {
     pub fn is_local(&self) -> bool {
-        matches!(self, Self::Local | Self::MlxWhisper | Self::MlxFunASR | Self::Qwen3ASR)
+        matches!(self, Self::Local | Self::MlxWhisper | Self::MlxFunASR | Self::Qwen3ASR | Self::VibeVoiceASR)
     }
 
     pub fn is_cloud(&self) -> bool {
@@ -39,7 +41,7 @@ impl ModelProvider {
     }
 
     pub fn needs_daemon(&self) -> bool {
-        matches!(self, Self::MlxWhisper | Self::MlxFunASR | Self::Qwen3ASR)
+        matches!(self, Self::MlxWhisper | Self::MlxFunASR | Self::Qwen3ASR | Self::VibeVoiceASR)
     }
 }
 
@@ -234,11 +236,38 @@ pub fn all_predefined_models() -> Vec<ModelInfo> {
             repo: Some("mlx-community/Qwen3-ASR-0.6B-8bit"),
             desc: Some("Qwen3 quantized, fast (MLX)"), speed: 9, accuracy: 7, recommended: false }.build(),
 
+        #[cfg(target_os = "macos")]
+        M { id: "mlx-qwen3-asr-1.7b-bf16", name: "Qwen3-ASR 1.7B (BF16)", size_mb: 3400, langs: multilingual(),
+            url: "", provider: ModelProvider::Qwen3ASR,
+            repo: Some("mlx-community/Qwen3-ASR-1.7B-bf16"),
+            desc: Some("Qwen3 1.7B, highest accuracy (MLX)"), speed: 6, accuracy: 9, recommended: false }.build(),
+        #[cfg(target_os = "macos")]
+        M { id: "mlx-qwen3-asr-1.7b-8bit", name: "Qwen3-ASR 1.7B (8-bit)", size_mb: 1900, langs: multilingual(),
+            url: "", provider: ModelProvider::Qwen3ASR,
+            repo: Some("mlx-community/Qwen3-ASR-1.7B-8bit"),
+            desc: Some("Qwen3 1.7B quantized, balanced speed/quality (MLX)"), speed: 7, accuracy: 9, recommended: true }.build(),
+
+        // ---- VibeVoice-ASR (macOS MLX only) ----
+        #[cfg(target_os = "macos")]
+        M { id: "mlx-vibevoice-asr-4bit", name: "VibeVoice-ASR 8B (4-bit)", size_mb: 5000, langs: multilingual(),
+            url: "", provider: ModelProvider::VibeVoiceASR,
+            repo: Some("mlx-community/VibeVoice-ASR-4bit"),
+            desc: Some("Microsoft VibeVoice, fastest quantization, 50+ languages (MLX)"), speed: 6, accuracy: 8, recommended: false }.build(),
+        #[cfg(target_os = "macos")]
+        M { id: "mlx-vibevoice-asr-8bit", name: "VibeVoice-ASR 8B (8-bit)", size_mb: 9520, langs: multilingual(),
+            url: "", provider: ModelProvider::VibeVoiceASR,
+            repo: Some("mlx-community/VibeVoice-ASR-8bit"),
+            desc: Some("Microsoft VibeVoice, 60min audio, speaker ID, 50+ languages (MLX)"), speed: 5, accuracy: 10, recommended: false }.build(),
+
         // ---- Qwen3-ASR (cross-platform, HF transformers) ----
         M { id: "qwen3-asr-0.6b", name: "Qwen3-ASR 0.6B", size_mb: 1200, langs: multilingual(),
             url: "", provider: ModelProvider::Qwen3ASR,
             repo: Some("Qwen/Qwen3-ASR"),
             desc: Some("Qwen3 speech recognition, 30+ languages"), speed: 7, accuracy: 8, recommended: true }.build(),
+        M { id: "qwen3-asr-1.7b", name: "Qwen3-ASR 1.7B", size_mb: 3400, langs: multilingual(),
+            url: "", provider: ModelProvider::Qwen3ASR,
+            repo: Some("Qwen/Qwen3-ASR-1.7B"),
+            desc: Some("Qwen3 1.7B, higher accuracy, 30+ languages"), speed: 5, accuracy: 9, recommended: false }.build(),
 
         // ---- Cloud models ----
         M { id: "groq-whisper-large-v3", name: "Groq Whisper Large v3", size_mb: 0, langs: multilingual(),
@@ -331,7 +360,7 @@ pub fn all_models(models_dir: &Path) -> Vec<ModelInfo> {
     // Qwen3ASR is kept on all platforms — daemon uses transformers on Windows/Linux.
     #[cfg(not(target_os = "macos"))]
     {
-        models.retain(|m| !matches!(m.provider, ModelProvider::MlxWhisper | ModelProvider::MlxFunASR));
+        models.retain(|m| !matches!(m.provider, ModelProvider::MlxWhisper | ModelProvider::MlxFunASR | ModelProvider::VibeVoiceASR));
     }
 
     for model in &mut models {
@@ -339,7 +368,7 @@ pub fn all_models(models_dir: &Path) -> Vec<ModelInfo> {
             ModelProvider::Local => {
                 model.is_downloaded = find_model_file(&dirs, &model.id);
             }
-            ModelProvider::MlxWhisper | ModelProvider::MlxFunASR | ModelProvider::Qwen3ASR => {
+            ModelProvider::MlxWhisper | ModelProvider::MlxFunASR | ModelProvider::Qwen3ASR | ModelProvider::VibeVoiceASR => {
                 if let Some(repo) = &model.model_repo {
                     model.is_downloaded = check_mlx_model_downloaded(repo);
                 }

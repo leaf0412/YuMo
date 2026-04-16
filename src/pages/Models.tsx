@@ -249,7 +249,7 @@ export default function Models() {
 
   const isSelected = (modelId: string) => settings.selected_model_id === modelId;
   const LOCAL_PROVIDERS = ['local'];
-  const MLX_PROVIDERS = ['mlxWhisper', 'mlxFunASR', 'qwen3ASR'];
+  const MLX_PROVIDERS = ['mlxWhisper', 'mlxFunASR', 'qwen3ASR', 'vibeVoiceASR'];
   const CLOUD_PROVIDERS_LIST = ['groq', 'deepgram', 'elevenLabs', 'mistral', 'gemini', 'soniox'];
 
   const localModels = models.filter(m => LOCAL_PROVIDERS.includes(m.provider));
