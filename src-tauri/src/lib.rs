@@ -364,6 +364,9 @@ pub fn run() {
             commands::export_dictionary_csv,
             commands::import_dictionary_csv_dialog,
             commands::export_dictionary_csv_dialog,
+            // Python path
+            commands::get_python_path,
+            commands::set_python_path,
             // MLX Daemon
             commands::daemon_start,
             commands::daemon_stop,

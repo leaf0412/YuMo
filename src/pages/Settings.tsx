@@ -115,6 +115,28 @@ export default function Settings() {
     }
   };
 
+  const savePythonPath = async () => {
+    try {
+      await invoke('set_python_path', { path: pythonPath });
+      setPythonPathDirty(false);
+      message.success(t('settings.pythonPathSaved'));
+    } catch (e) {
+      message.error(formatError(e, t('settings.updateFailed')));
+    }
+  };
+
+  const detectPythonPath = async () => {
+    try {
+      const path = await invoke<string>('get_python_path');
+      setPythonPath(path);
+      await invoke('set_python_path', { path });
+      setPythonPathDirty(false);
+      message.success(t('settings.pythonPathSaved'));
+    } catch (e) {
+      message.error(formatError(e, t('settings.updateFailed')));
+    }
+  };
+
   const [recordingHotkey, setRecordingHotkey] = useState(false);
   const hadNonModifierRef = useRef(false);
 
@@ -316,6 +338,18 @@ export default function Settings() {
         <Flex vertical gap={8} style={{ width: '100%' }}>
           {settingRow(t('settings.systemMute'), <Switch checked={settings.system_mute} onChange={(v) => updateSetting('system_mute', v)} />)}
           {settingRow(t('settings.menuBarMode'), <Switch checked={settings.menu_bar_mode} onChange={(v) => updateSetting('menu_bar_mode', v)} />)}
+          <div style={{ padding: '8px 0' }}>
+            <Text>{t('settings.pythonPath')}</Text>
+            <Space.Compact style={{ width: '100%', marginTop: 4 }}>
+              <Input
+                value={pythonPath}
+                onChange={(e) => { setPythonPath(e.target.value); setPythonPathDirty(true); }}
+                placeholder={t('settings.pythonPathPlaceholder')}
+              />
+              <Button onClick={detectPythonPath}>{t('settings.pythonPathDetect')}</Button>
+              {pythonPathDirty && <Button type="primary" onClick={savePythonPath}>{t('common.confirm')}</Button>}
+            </Space.Compact>
+          </div>
         </Flex>
       ),
     },

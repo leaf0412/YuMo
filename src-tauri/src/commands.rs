@@ -1332,6 +1332,21 @@ pub async fn export_dictionary_csv_dialog(
 }
 
 // ---------------------------------------------------------------------------
+// Python path
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn get_python_path() -> Result<String, AppError> {
+    use yumo_core::daemon::{read_custom_python_path, detect_system_python};
+    Ok(read_custom_python_path().unwrap_or_else(|| detect_system_python().unwrap_or_default()))
+}
+
+#[tauri::command]
+pub fn set_python_path(path: String) -> Result<(), AppError> {
+    yumo_core::daemon::write_custom_python_path(&path)
+}
+
+// ---------------------------------------------------------------------------
 // MLX FunASR Daemon
 // ---------------------------------------------------------------------------
 

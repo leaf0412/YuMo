@@ -213,19 +213,19 @@ impl DaemonManager {
         }
     }
 
-    /// Check if a python with mlx_audio is available (venv or system).
+    /// Check if a python with required packages is available.
     pub fn has_python(&self) -> bool {
         has_working_python()
     }
 
-    /// Bootstrap venv if needed (blocking — call from spawn_blocking).
-    pub fn ensure_python_static(cb: Option<&DaemonEventCallback>) -> AppResult<()> {
+    /// Verify python is available (no-op if already satisfied).
+    pub fn ensure_python_static(_cb: Option<&DaemonEventCallback>) -> AppResult<()> {
         if has_working_python() {
             return Ok(());
         }
-        log::info!("[daemon] ensure_python: bootstrapping venv");
-        bootstrap_venv(cb)?;
-        Ok(())
+        Err(AppError::Transcription(
+            "No working Python found. Please set the Python 3 path in Settings → System.".into(),
+        ))
     }
 
     // -----------------------------------------------------------------------
@@ -569,11 +569,22 @@ impl crate::daemon_client::DaemonClient for DaemonManager {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Quick check: does the app-managed venv have the required packages?
-/// On macOS: checks for mlx_audio. On other platforms: checks for transformers.
+/// Quick check: is there a working python with required packages?
 fn has_working_python() -> bool {
-    let venv = venv_python_path();
-    std::path::Path::new(&venv).exists() && python_has_deps(&venv)
+    if let Some(python) = resolve_python_path() {
+        return std::path::Path::new(&python).exists() && python_has_deps(&python);
+    }
+    false
+}
+
+/// Resolve the python path: custom setting → `which python3`.
+fn resolve_python_path() -> Option<String> {
+    if let Some(custom) = read_custom_python_path() {
+        if !custom.is_empty() && std::path::Path::new(&custom).exists() {
+            return Some(custom);
+        }
+    }
+    detect_system_python()
 }
 
 /// Check if a Python interpreter has the platform-appropriate deps installed.
@@ -665,286 +676,84 @@ fn python_has_mlx(python: &str) -> bool {
     }
 }
 
-/// Collect candidate Python paths, matching VoiceInk's search order:
-/// asdf -> mise -> miniforge -> mambaforge -> homebrew -> system -> local.
-fn python_candidates() -> Vec<String> {
-    let mut candidates = Vec::new();
 
-    if let Some(home) = dirs::home_dir() {
-        let home = home.to_string_lossy().to_string();
-
-        // asdf-managed pythons (newest first)
-        let asdf_dir = format!("{home}/.asdf/installs/python");
-        if let Ok(entries) = std::fs::read_dir(&asdf_dir) {
-            let mut versions: Vec<String> = entries
-                .flatten()
-                .filter_map(|e| {
-                    let bin = e.path().join("bin/python3");
-                    bin.exists().then(|| bin.to_string_lossy().to_string())
-                })
-                .collect();
-            versions.sort();
-            versions.reverse();
-            candidates.extend(versions);
-        }
-
-        // mise-managed pythons (newest first)
-        let mise_dir = format!("{home}/.local/share/mise/installs/python");
-        if let Ok(entries) = std::fs::read_dir(&mise_dir) {
-            let mut versions: Vec<String> = entries
-                .flatten()
-                .filter_map(|e| {
-                    let bin = e.path().join("bin/python3");
-                    bin.exists().then(|| bin.to_string_lossy().to_string())
-                })
-                .collect();
-            versions.sort();
-            versions.reverse();
-            candidates.extend(versions);
-        }
-
-        // conda environments
-        candidates.push(format!("{home}/miniforge3/bin/python"));
-        candidates.push(format!("{home}/mambaforge/bin/python"));
-        candidates.push(format!("{home}/.local/bin/python3"));
-    }
-
-    // System-wide
-    candidates.push("/opt/homebrew/bin/python3".into());
-    candidates.push("/usr/local/bin/python3".into());
-    candidates.push("/usr/bin/python3".into());
-
-    log::info!("[daemon] python candidates found: {}", candidates.len());
-    candidates
-}
-
-/// Locate Python for the daemon — always uses the app-managed venv at ~/.voiceink/venv.
-/// If the venv doesn't exist or has outdated deps, auto-bootstrap it.
-/// Never uses system Python to avoid version conflicts and ensure reproducibility.
-fn find_python() -> AppResult<String> {
-    let venv_python = venv_python_path();
-
-    // Fast path: venv exists and has correct deps
-    if std::path::Path::new(&venv_python).exists() && python_has_deps(&venv_python) {
-        log::info!("[daemon] using app venv python: {}", venv_python);
-        return Ok(venv_python);
-    }
-
-    // Venv missing or outdated — bootstrap it
-    if std::path::Path::new(&venv_python).exists() {
-        log::info!("[daemon] venv python exists but deps outdated, upgrading...");
-    } else {
-        log::info!("[daemon] venv not found, bootstrapping...");
-    }
-    bootstrap_venv(None)
-}
-
-/// Path to the app-managed venv python binary.
-fn venv_python_path() -> String {
-    let venv_dir = dirs::home_dir()
+/// Path to the user-configured custom python path file.
+fn custom_python_path_file() -> PathBuf {
+    dirs::home_dir()
         .unwrap_or_default()
-        .join(".voiceink/venv");
-    if cfg!(target_os = "windows") {
-        venv_dir.join("Scripts/python.exe")
-    } else {
-        venv_dir.join("bin/python3")
-    }
-    .to_string_lossy()
-    .to_string()
+        .join(".voiceink/python_path")
 }
 
-/// Find any system python3 (doesn't need mlx_audio).
-#[allow(dead_code)]
-fn find_any_python() -> Option<String> {
-    for candidate in python_candidates() {
-        if std::path::Path::new(&candidate).exists() {
-            return Some(candidate);
+/// Read user-configured custom python path (if set and non-empty).
+pub fn read_custom_python_path() -> Option<String> {
+    let file = custom_python_path_file();
+    let path = std::fs::read_to_string(&file).ok()?.trim().to_string();
+    if path.is_empty() {
+        return None;
+    }
+    Some(path)
+}
+
+/// Write user-configured custom python path.
+/// Automatically resolves shims (asdf/mise) to the real binary path.
+pub fn write_custom_python_path(path: &str) -> AppResult<()> {
+    let resolved = resolve_real_python(path.trim());
+    let file = custom_python_path_file();
+    std::fs::write(&file, &resolved).map_err(|e| {
+        AppError::Transcription(format!("failed to write python_path: {e}"))
+    })?;
+    log::info!("[daemon] custom python_path set to: {}", resolved);
+    Ok(())
+}
+
+/// Detect system python3 path via `which python3`.
+/// Automatically resolves shims to real binary paths.
+pub fn detect_system_python() -> Option<String> {
+    if let Ok(output) = Command::new("which").arg("python3").output() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() && std::path::Path::new(&path).exists() {
+            return Some(resolve_real_python(&path));
         }
     }
     None
 }
 
-/// Find or download the `uv` binary.
-/// Checks ~/.voiceink/uv first, then system PATH, then auto-downloads.
-fn find_uv() -> AppResult<PathBuf> {
-    let data_uv = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".voiceink/uv");
-    if data_uv.exists() {
-        return Ok(data_uv);
-    }
-    // System uv as fallback
-    if let Ok(output) = Command::new("which").arg("uv").output() {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() && std::path::Path::new(&path).exists() {
-            return Ok(PathBuf::from(path));
-        }
-    }
-    // Auto-download uv to ~/.voiceink/uv
-    log::info!("[daemon] uv not found, downloading...");
-    download_uv(&data_uv)?;
-    Ok(data_uv)
-}
-
-/// Download the `uv` binary via the official install script.
-fn download_uv(dest: &std::path::Path) -> AppResult<()> {
-    let parent = dest.parent().unwrap_or(std::path::Path::new("."));
-    std::fs::create_dir_all(parent)
-        .map_err(|e| AppError::Io(format!("create dir failed: {e}")))?;
-
-    // Use the official standalone installer, extract to a temp location then move
-    let tmp_dir = parent.join(".uv_install_tmp");
-    let _ = std::fs::remove_dir_all(&tmp_dir);
-    std::fs::create_dir_all(&tmp_dir)
-        .map_err(|e| AppError::Io(format!("create tmp dir failed: {e}")))?;
-
-    let status = Command::new("sh")
-        .args(["-c", &format!(
-            "curl -fsSL https://astral.sh/uv/install.sh | CARGO_HOME='{}' sh",
-            tmp_dir.to_string_lossy()
-        )])
+/// Resolve a python path to the real binary (handles asdf/mise shims).
+/// Runs `python -c "import sys; print(sys.executable)"` to get the actual interpreter.
+fn resolve_real_python(python: &str) -> String {
+    if let Ok(output) = Command::new(python)
+        .args(["-c", "import sys; print(sys.executable)"])
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .status()
-        .map_err(|e| AppError::Io(format!("uv download failed: {e}")))?;
-
-    if !status.success() {
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-        return Err(AppError::Io("uv install script failed".into()));
-    }
-
-    // The installer puts uv at CARGO_HOME/bin/uv
-    let installed = tmp_dir.join("bin/uv");
-    if installed.exists() {
-        std::fs::copy(&installed, dest)
-            .map_err(|e| AppError::Io(format!("copy uv binary failed: {e}")))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755));
-        }
-        log::info!("[daemon] uv downloaded to {:?}", dest);
-    } else {
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-        return Err(AppError::Io("uv binary not found after install".into()));
-    }
-
-    let _ = std::fs::remove_dir_all(&tmp_dir);
-    Ok(())
-}
-
-/// Run a command, streaming its stderr to log.txt line by line.
-/// Splits on both \r and \n to handle uv's carriage-return progress bars.
-fn run_and_stream_stderr(cmd: &mut Command, tag: &str) -> AppResult<()> {
-    use std::io::Read;
-
-    let mut child = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| AppError::Transcription(format!("{tag} spawn failed: {e}")))?;
-
-    let stderr = child.stderr.take().expect("no stderr");
-    let mut buf = Vec::new();
-
-    for byte in stderr.bytes() {
-        match byte {
-            Ok(b'\n') | Ok(b'\r') => {
-                if !buf.is_empty() {
-                    let line = String::from_utf8_lossy(&buf);
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        log::info!("[daemon] [bootstrap] [{}] {}", tag, trimmed);
-                    }
-                    buf.clear();
+        .stderr(Stdio::null())
+        .output()
+    {
+        if output.status.success() {
+            let real = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !real.is_empty() && std::path::Path::new(&real).exists() {
+                if real != python {
+                    log::info!("[daemon] resolved python shim '{}' -> '{}'", python, real);
                 }
+                return real;
             }
-            Ok(b) => buf.push(b),
-            Err(_) => break,
         }
     }
-    // Flush remaining
-    if !buf.is_empty() {
-        let line = String::from_utf8_lossy(&buf);
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            log::info!("[daemon] [bootstrap] [{}] {}", tag, trimmed);
-        }
-    }
-
-    let status = child.wait()
-        .map_err(|e| AppError::Transcription(format!("{tag} wait failed: {e}")))?;
-
-    if !status.success() {
-        let code = status.code().unwrap_or(-1);
-        return Err(AppError::Transcription(format!("{tag} failed exit_code={code}")));
-    }
-    Ok(())
+    python.to_string()
 }
 
-/// Create a venv at ~/.voiceink/venv and install mlx-audio-plus using `uv`.
-/// `uv` is auto-downloaded on first use if not present.
-/// Returns the venv python path on success.
-fn bootstrap_venv(cb: Option<&DaemonEventCallback>) -> AppResult<String> {
-    let start = std::time::Instant::now();
-    let uv = find_uv()?;
-    log::info!("[daemon] [bootstrap] using uv: {:?}", uv);
-
-    let venv_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".voiceink/venv");
-    let venv_dir_str = venv_dir.to_string_lossy().to_string();
-
-    // Step 1: Create venv
-    log::info!("[daemon] [bootstrap] creating venv at {} python=3.12", venv_dir_str);
-    if let Some(cb) = cb {
-        cb("daemon-setup-status", &serde_json::json!({
-            "stage": "creating_venv"
-        }));
+/// Find python for the daemon: custom setting → `which python3`.
+fn find_python() -> AppResult<String> {
+    if let Some(python) = resolve_python_path() {
+        if python_has_deps(&python) {
+            log::info!("[daemon] using python: {}", python);
+            return Ok(python);
+        }
+        log::warn!("[daemon] python '{}' found but missing required packages", python);
+        return Err(AppError::Transcription(format!(
+            "Python '{}' is missing required packages (mlx-audio). Install them or change the path in Settings → System.",
+            python
+        )));
     }
-    run_and_stream_stderr(
-        Command::new(&uv).args(["venv", &venv_dir_str, "--python", "3.12"]),
-        "uv-venv",
-    ).map_err(|e| {
-        log::error!("[daemon] [bootstrap] FAILED stage=venv elapsed_ms={}", start.elapsed().as_millis());
-        e
-    })?;
-
-    // Step 2: Install deps (platform-specific)
-    #[cfg(target_os = "macos")]
-    let pip_deps: &[&str] = &[
-        "--upgrade", "mlx-audio", "mlx-audio-plus", "soundfile", "httpx[socks]",
-    ];
-    #[cfg(not(target_os = "macos"))]
-    let pip_deps: &[&str] = &[
-        "--upgrade", "transformers", "torch", "soundfile", "httpx[socks]", "accelerate",
-    ];
-
-    log::info!("[daemon] [bootstrap] venv created, installing deps: {:?}", pip_deps);
-    if let Some(cb) = cb {
-        cb("daemon-setup-status", &serde_json::json!({
-            "stage": "installing_deps",
-            "message": "正在安装 Python 依赖，首次需要几分钟..."
-        }));
-    }
-
-    let python_bin = if cfg!(target_os = "windows") {
-        format!("{}/Scripts/python.exe", venv_dir_str)
-    } else {
-        format!("{}/bin/python3", venv_dir_str)
-    };
-    let mut pip_args: Vec<&str> = vec!["pip", "install", "--python", &python_bin];
-    pip_args.extend_from_slice(pip_deps);
-
-    run_and_stream_stderr(
-        Command::new(&uv).args(&pip_args),
-        "uv-pip",
-    ).map_err(|e| {
-        log::error!("[daemon] [bootstrap] FAILED stage=pip_install elapsed_ms={}", start.elapsed().as_millis());
-        e
-    })?;
-
-    let venv_python = venv_python_path();
-    log::info!("[daemon] [bootstrap] complete elapsed_ms={}", start.elapsed().as_millis());
-    Ok(venv_python)
+    Err(AppError::Transcription(
+        "No Python 3 found. Please set the Python 3 path in Settings → System.".into(),
+    ))
 }
