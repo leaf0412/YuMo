@@ -109,24 +109,23 @@ impl AppContext {
 
     /// Resolve the target audio device ID from cache.
     ///
-    /// Priority: saved `audio_device` setting (if present in cache) > default device > first available > 0.
+    /// Semantics:
+    /// - `audio_device == 0`: always follow current system default
+    /// - `audio_device > 0` and present in cache: locked to that specific device
+    /// - `audio_device > 0` but device gone: fall back to current system default
+    /// - System default not resolvable: return 0 (caller must surface as error;
+    ///   no silent fallback to "first available")
     pub fn resolve_device_id(&self) -> u32 {
         let settings = self.settings_cache.read().unwrap_or_else(|e| e.into_inner());
         let devices = self.device_cache.read().unwrap_or_else(|e| e.into_inner());
         let saved = settings.get("audio_device")
             .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
-        // 0 means "follow system default"
-        if let Some(id) = saved {
-            if id > 0 && devices.iter().any(|d| d.id == id) {
-                return id;
-            }
+            .map(|v| v as u32)
+            .unwrap_or(0);
+        if saved > 0 && devices.iter().any(|d| d.id == saved) {
+            return saved;
         }
-        // Use system default device > first available > 0
-        devices.iter().find(|d| d.is_default)
-            .or_else(|| devices.first())
-            .map(|d| d.id)
-            .unwrap_or(0)
+        devices.iter().find(|d| d.is_default).map(|d| d.id).unwrap_or(0)
     }
 
     /// Refresh the device cache by re-enumerating audio input devices.

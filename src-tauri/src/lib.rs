@@ -9,6 +9,7 @@ pub use yumo_core::mask;
 pub use yumo_core::pipeline;
 pub mod hotkey;
 pub use yumo_core::audio_io;
+pub use yumo_core::device_watcher;
 pub use yumo_core::platform;
 pub use yumo_core::state;
 pub use yumo_core::text_processor;
@@ -120,39 +121,35 @@ pub fn run() {
                 }
             }
 
-            // Register macOS device change listener to auto-refresh cache on plug/unplug
-            #[cfg(target_os = "macos")]
+            // Cross-platform device watcher: 1s polling, fires on device-set or
+            // system-default changes. Replaces the macOS-only CoreAudio listener
+            // for behavioural parity across macOS / Linux / Windows.
             {
                 use tauri::Manager;
                 let app_handle = app.handle().clone();
-                platform::recorder::register_device_change_listener(move || {
-                    info!("[device-listener] device change detected, refreshing cache");
+                let initial = app
+                    .state::<state::AppContext>()
+                    .device_cache
+                    .read()
+                    .map(|c| c.clone())
+                    .unwrap_or_default();
+                let watcher = device_watcher::start(initial, move |devices| {
                     let ctx = app_handle.state::<state::AppContext>();
-                    let devices = match platform::recorder::list_input_devices() {
-                        Ok(devs) => {
-                            if let Ok(mut cache) = ctx.device_cache.write() {
-                                *cache = devs.clone();
-                            }
-                            devs
-                        }
-                        Err(e) => {
-                            warn!("[device-listener] failed to list devices: {}", e);
-                            return;
-                        }
-                    };
 
-                    // If saved device is gone, auto-fallback to default
-                    let saved = ctx.settings_cache.read().ok()
-                        .and_then(|s| s.get("audio_device").and_then(|v| v.as_u64()).map(|v| v as u32));
-                    if let Some(saved_id) = saved {
-                        if !devices.iter().any(|d| d.id == saved_id) {
-                            let default_id = devices.iter().find(|d| d.is_default).map(|d| d.id as i64).unwrap_or(0);
-                            info!("[device-listener] saved device {} gone, switching to default {}", saved_id, default_id);
-                            let _ = ctx.set_setting_cached("audio_device", &serde_json::json!(default_id));
-                        }
+                    if let Ok(mut cache) = ctx.device_cache.write() {
+                        *cache = devices.clone();
                     }
 
-                    // Notify frontend of device list change
+                    // Locked device gone → reset to "follow system default" (0).
+                    // audio_device=0 means "follow system default" — never overwrite it.
+                    let saved = ctx.settings_cache.read().ok()
+                        .and_then(|s| s.get("audio_device").and_then(|v| v.as_u64()).map(|v| v as u32))
+                        .unwrap_or(0);
+                    if saved > 0 && !devices.iter().any(|d| d.id == saved) {
+                        info!("[device-watcher] saved device {} gone, switching to system default", saved);
+                        let _ = ctx.set_setting_cached("audio_device", &serde_json::json!(0));
+                    }
+
                     let _ = app_handle.emit("devices-changed", &devices);
 
                     let dev_id = ctx.resolve_device_id();
@@ -160,15 +157,17 @@ pub fn run() {
                         match platform::recorder::prepare_recording(dev_id) {
                             Ok(Some(prepared)) => {
                                 *ctx.prepared_recording.lock().unwrap() = Some(prepared);
-                                info!("[device-listener] re-prepared for device_id={}", dev_id);
+                                info!("[device-watcher] re-prepared for device_id={}", dev_id);
                             }
                             _ => {
                                 *ctx.prepared_recording.lock().unwrap() = None;
                             }
                         }
+                    } else {
+                        *ctx.prepared_recording.lock().unwrap() = None;
                     }
-                })
-                .unwrap_or_else(|e| info!("[startup] device listener failed: {}", e));
+                });
+                std::mem::forget(watcher);
             }
 
             // Sync bundled resources (daemon script + uv) to ~/.voiceink/
@@ -387,10 +386,7 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
-            #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Exit = event {
-                platform::recorder::unregister_device_change_listener();
-            }
+        .run(|_app_handle, _event| {
+            // device-watcher polling thread exits with the process; no cleanup needed.
         });
 }

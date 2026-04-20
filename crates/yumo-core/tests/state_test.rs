@@ -286,3 +286,61 @@ fn test_resolve_device_id_empty_cache() {
     // Empty cache, no saved setting -> returns 0
     assert_eq!(ctx.resolve_device_id(), 0);
 }
+
+#[test]
+fn test_resolve_device_id_saved_zero_means_follow_default() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let mut settings = HashMap::new();
+    settings.insert("audio_device".to_string(), json!(0));
+    let ctx = AppContext::new(conn, test_paths(), settings);
+
+    {
+        let mut cache = ctx.device_cache.write().unwrap();
+        *cache = vec![
+            AudioInputDevice { id: 1, name: "Built-in".to_string(), is_default: false },
+            AudioInputDevice { id: 7, name: "USB".to_string(), is_default: true },
+        ];
+    }
+
+    // saved=0 -> always follow system default, regardless of cache contents
+    assert_eq!(ctx.resolve_device_id(), 7);
+}
+
+#[test]
+fn test_resolve_device_id_saved_zero_no_default_returns_zero() {
+    // No is_default device in list -> must return 0, NOT the first device.
+    // This guards against the removed `or_else(first)` fallback.
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let mut settings = HashMap::new();
+    settings.insert("audio_device".to_string(), json!(0));
+    let ctx = AppContext::new(conn, test_paths(), settings);
+
+    {
+        let mut cache = ctx.device_cache.write().unwrap();
+        *cache = vec![
+            AudioInputDevice { id: 1, name: "A".to_string(), is_default: false },
+            AudioInputDevice { id: 2, name: "B".to_string(), is_default: false },
+        ];
+    }
+
+    assert_eq!(ctx.resolve_device_id(), 0);
+}
+
+#[test]
+fn test_resolve_device_id_saved_gone_no_default_returns_zero() {
+    // Saved device gone AND no is_default -> return 0 (no silent fallback to first).
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let mut settings = HashMap::new();
+    settings.insert("audio_device".to_string(), json!(99));
+    let ctx = AppContext::new(conn, test_paths(), settings);
+
+    {
+        let mut cache = ctx.device_cache.write().unwrap();
+        *cache = vec![
+            AudioInputDevice { id: 1, name: "A".to_string(), is_default: false },
+            AudioInputDevice { id: 2, name: "B".to_string(), is_default: false },
+        ];
+    }
+
+    assert_eq!(ctx.resolve_device_id(), 0);
+}

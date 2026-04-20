@@ -101,9 +101,11 @@ export default function Settings() {
     let unlisten: (() => void) | undefined;
     listen<AudioDevice[]>('devices-changed', (event) => {
       setAudioDevices(event.payload);
+      // Reload settings — backend may have auto-switched audio_device to default
+      loadSettings();
     }).then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
-  }, []);
+  }, [loadSettings]);
 
   const updateSetting = async (key: string, value: unknown) => {
     try {

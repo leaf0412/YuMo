@@ -7,7 +7,7 @@ use yumo_core::daemon::DaemonManager;
 use yumo_core::db;
 use yumo_core::platform;
 use yumo_core::state::{AppContext, AppPaths};
-use yumo_core::{audio_io, text_processor, transcriber};
+use yumo_core::{audio_io, device_watcher, text_processor, transcriber};
 
 // ---------------------------------------------------------------------------
 // Global state (initialized once via `init`)
@@ -123,8 +123,8 @@ pub async fn list_audio_devices() -> Result<Vec<NapiAudioDevice>> {
     }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
-/// Register a callback invoked when the system audio device list changes
-/// (e.g. plug/unplug). macOS only; no-op on other platforms.
+/// Register a callback invoked when the system audio device list or default
+/// device changes (e.g. plug/unplug). Cross-platform: macOS / Linux / Windows.
 /// The callback receives the updated device list as JSON string.
 #[napi]
 pub fn register_device_change_callback(callback: JsFunction) -> Result<()> {
@@ -133,63 +133,42 @@ pub fn register_device_change_callback(callback: JsFunction) -> Result<()> {
             ctx.env.create_string_from_std(ctx.value).map(|v| vec![v])
         })?;
 
-    #[cfg(target_os = "macos")]
-    {
-        platform::recorder::register_device_change_listener(move || {
-            log::info!("[device-listener] device change detected, refreshing cache");
-            if let Ok(app) = ctx() {
-                let devices = match platform::recorder::list_input_devices() {
-                    Ok(devs) => {
-                        if let Ok(mut cache) = app.device_cache.write() {
-                            *cache = devs.clone();
-                        }
-                        devs
-                    }
-                    Err(e) => {
-                        log::warn!("[device-listener] failed to list devices: {}", e);
-                        return;
-                    }
-                };
+    let initial = platform::recorder::list_input_devices().unwrap_or_default();
+    let watcher = device_watcher::start(initial, move |devices| {
+        let Ok(app) = ctx() else { return };
 
-                // If saved device is gone, auto-fallback to default
-                let saved = app.settings_cache.read().ok()
-                    .and_then(|s| s.get("audio_device").and_then(|v| v.as_u64()).map(|v| v as u32));
-                if let Some(saved_id) = saved {
-                    if !devices.iter().any(|d| d.id == saved_id) {
-                        let default_id = devices.iter().find(|d| d.is_default).map(|d| d.id as i64).unwrap_or(0);
-                        log::info!("[device-listener] saved device {} gone, switching to default {}", saved_id, default_id);
-                        let _ = app.set_setting_cached("audio_device", &serde_json::json!(default_id));
-                    }
+        if let Ok(mut cache) = app.device_cache.write() {
+            *cache = devices.clone();
+        }
+
+        let saved = app.settings_cache.read().ok()
+            .and_then(|s| s.get("audio_device").and_then(|v| v.as_u64()).map(|v| v as u32))
+            .unwrap_or(0);
+        if saved > 0 && !devices.iter().any(|d| d.id == saved) {
+            log::info!("[device-watcher] saved device {} gone, switching to system default", saved);
+            let _ = app.set_setting_cached("audio_device", &serde_json::json!(0));
+        }
+
+        let dev_id = app.resolve_device_id();
+        if dev_id > 0 {
+            match platform::recorder::prepare_recording(dev_id) {
+                Ok(Some(prepared)) => {
+                    *app.prepared_recording.lock().unwrap() = Some(prepared);
+                    log::info!("[device-watcher] re-prepared for device_id={dev_id}");
                 }
-
-                // Re-prepare AudioUnit
-                let dev_id = app.resolve_device_id();
-                if dev_id > 0 {
-                    match platform::recorder::prepare_recording(dev_id) {
-                        Ok(Some(prepared)) => {
-                            *app.prepared_recording.lock().unwrap() = Some(prepared);
-                            log::info!("[device-listener] re-prepared for device_id={}", dev_id);
-                        }
-                        _ => {
-                            *app.prepared_recording.lock().unwrap() = None;
-                        }
-                    }
-                }
-
-                // Notify JS callback with updated device list
-                if let Ok(json) = serde_json::to_string(&devices) {
-                    tsfn.call(json, ThreadsafeFunctionCallMode::NonBlocking);
+                _ => {
+                    *app.prepared_recording.lock().unwrap() = None;
                 }
             }
-        })
-        .map_err(|e| Error::from_reason(format!("Failed to register listener: {e}")))?;
-    }
+        } else {
+            *app.prepared_recording.lock().unwrap() = None;
+        }
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = tsfn;
-        log::info!("[device-listener] device change listener not supported on this platform");
-    }
+        if let Ok(json) = serde_json::to_string(&devices) {
+            tsfn.call(json, ThreadsafeFunctionCallMode::NonBlocking);
+        }
+    });
+    std::mem::forget(watcher);
 
     Ok(())
 }
