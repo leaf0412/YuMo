@@ -209,6 +209,36 @@ pub fn chinese_numerals_to_arabic(text: &str) -> String {
         .into_owned()
 }
 
+fn cn_version_token_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"[〇零一二三四五六七八九两十百千万亿]+(?:点[〇零一二三四五六七八九两十百千万亿]+){2,}",
+        )
+        .unwrap()
+    })
+}
+
+/// Convert CJK version-number patterns like 零点六点零 → 0.6.0.
+/// Requires ≥2 "点" separators (≥3 segments) to avoid false positives on
+/// 下午两点 / 一点小事 / 三点水 / 版本二点零 etc. where 点 is not a decimal
+/// separator or the two-segment form is ambiguous with common expressions.
+pub fn chinese_version_numbers_to_arabic(text: &str) -> String {
+    cn_version_token_re()
+        .replace_all(text, |caps: &regex::Captures| {
+            let token = &caps[0];
+            let mut parts: Vec<String> = Vec::new();
+            for seg in token.split('点') {
+                match parse_cn_numeral(seg) {
+                    Some(n) => parts.push(n.to_string()),
+                    None => return token.to_string(),
+                }
+            }
+            parts.join(".")
+        })
+        .into_owned()
+}
+
 // ---------------------------------------------------------------------------
 // CJK ↔ ASCII spacing (PangU style)
 // ---------------------------------------------------------------------------
@@ -247,7 +277,8 @@ pub fn process_text(
 ) -> String {
     info!("[text_processor] process_text input={} auto_capitalize={}", mask::mask_text(text), auto_capitalize);
     let after_replacements = apply_replacements(text, replacements);
-    let after_numerals = chinese_numerals_to_arabic(&after_replacements);
+    let after_version = chinese_version_numbers_to_arabic(&after_replacements);
+    let after_numerals = chinese_numerals_to_arabic(&after_version);
     let after_spacing = add_cjk_spacing(&after_numerals);
     let result = if auto_capitalize {
         capitalize_sentences(&after_spacing)

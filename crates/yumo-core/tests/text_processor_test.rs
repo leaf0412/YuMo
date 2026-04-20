@@ -207,3 +207,74 @@ fn process_text_idiom_safe() {
     let result = text_processor::process_text("一些事情发生了", &[], false);
     assert_eq!(result, "一些事情发生了");
 }
+
+// ---------------------------------------------------------------------------
+// chinese_version_numbers_to_arabic — 版本号形态 (X点Y点Z...) 专门处理
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cn_version_three_segments() {
+    assert_eq!(
+        text_processor::chinese_version_numbers_to_arabic("可以发布零点六点零的版本"),
+        "可以发布0.6.0的版本",
+    );
+}
+
+#[test]
+fn cn_version_four_plus_segments() {
+    assert_eq!(
+        text_processor::chinese_version_numbers_to_arabic("版本一点二点三点四发布了"),
+        "版本1.2.3.4发布了",
+    );
+}
+
+#[test]
+fn cn_version_multi_char_segments() {
+    // Each segment can itself be a multi-char numeral (positional or unit).
+    assert_eq!(
+        text_processor::chinese_version_numbers_to_arabic("升级到二十点一点零"),
+        "升级到20.1.0",
+    );
+}
+
+#[test]
+fn cn_version_ignores_two_segments() {
+    // Only ≥2 dots (≥3 segments) are treated as version numbers.
+    // 两点钟 / 一点小事 / 三点水 must all stay untouched.
+    assert_eq!(
+        text_processor::chinese_version_numbers_to_arabic("下午两点到会议室"),
+        "下午两点到会议室",
+    );
+    assert_eq!(
+        text_processor::chinese_version_numbers_to_arabic("就是一点小事"),
+        "就是一点小事",
+    );
+    assert_eq!(
+        text_processor::chinese_version_numbers_to_arabic("三点水偏旁"),
+        "三点水偏旁",
+    );
+    // Even "版本二点零" — explicit call: two segments stay as-is.
+    assert_eq!(
+        text_processor::chinese_version_numbers_to_arabic("版本二点零"),
+        "版本二点零",
+    );
+}
+
+#[test]
+fn cn_version_no_change_on_plain_text() {
+    assert_eq!(text_processor::chinese_version_numbers_to_arabic("hello 1.2.3"), "hello 1.2.3");
+    assert_eq!(text_processor::chinese_version_numbers_to_arabic(""), "");
+}
+
+#[test]
+fn process_text_version_pipeline() {
+    // End-to-end: version numerals convert, then CJK/ASCII spacing kicks in.
+    let result = text_processor::process_text("可以发布零点六点零的版本", &[], false);
+    assert_eq!(result, "可以发布 0.6.0 的版本");
+}
+
+#[test]
+fn process_text_version_does_not_touch_time() {
+    let result = text_processor::process_text("下午两点开会", &[], false);
+    assert_eq!(result, "下午两点开会");
+}
