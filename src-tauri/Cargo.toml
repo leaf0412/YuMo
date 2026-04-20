@@ -1,6 +1,6 @@
 [package]
 name = "yumo"
-version = "0.5.7"
+version = "0.6.0"
 description = "语墨 - Voice to Text"
 authors = ["you"]
 edition = "2021"
