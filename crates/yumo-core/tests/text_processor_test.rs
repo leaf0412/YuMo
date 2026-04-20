@@ -278,3 +278,92 @@ fn process_text_version_does_not_touch_time() {
     let result = text_processor::process_text("下午两点开会", &[], false);
     assert_eq!(result, "下午两点开会");
 }
+
+// ---------------------------------------------------------------------------
+// merge_uppercase_letter_sequences — 合并 whisper 把缩略词拆字母的场景
+// ---------------------------------------------------------------------------
+
+#[test]
+fn merge_letters_cdn() {
+    assert_eq!(
+        text_processor::merge_uppercase_letter_sequences("升级到 C D N 节点"),
+        "升级到 CDN 节点",
+    );
+}
+
+#[test]
+fn merge_letters_two_letter_mr() {
+    assert_eq!(
+        text_processor::merge_uppercase_letter_sequences("提交一个 M R"),
+        "提交一个 MR",
+    );
+}
+
+#[test]
+fn merge_letters_api() {
+    assert_eq!(
+        text_processor::merge_uppercase_letter_sequences("调用 A P I 接口"),
+        "调用 API 接口",
+    );
+}
+
+#[test]
+fn merge_letters_multiple_groups() {
+    assert_eq!(
+        text_processor::merge_uppercase_letter_sequences("C D N 和 M R"),
+        "CDN 和 MR",
+    );
+}
+
+#[test]
+fn merge_letters_leaves_single_letter_alone() {
+    // Single uppercase letter standalone — not a sequence, must stay.
+    assert_eq!(
+        text_processor::merge_uppercase_letter_sequences("I am here"),
+        "I am here",
+    );
+    assert_eq!(
+        text_processor::merge_uppercase_letter_sequences("维生素 A 含量"),
+        "维生素 A 含量",
+    );
+}
+
+#[test]
+fn merge_letters_lowercase_untouched() {
+    assert_eq!(
+        text_processor::merge_uppercase_letter_sequences("a b c test"),
+        "a b c test",
+    );
+}
+
+#[test]
+fn merge_letters_lowercase_word_breaks_sequence() {
+    assert_eq!(
+        text_processor::merge_uppercase_letter_sequences("C D is good"),
+        "CD is good",
+    );
+    assert_eq!(
+        text_processor::merge_uppercase_letter_sequences("A the B"),
+        "A the B",
+    );
+}
+
+#[test]
+fn merge_letters_already_joined_acronym_untouched() {
+    assert_eq!(
+        text_processor::merge_uppercase_letter_sequences("the URL is CDN"),
+        "the URL is CDN",
+    );
+}
+
+#[test]
+fn process_text_merge_cdn_pipeline() {
+    let result = text_processor::process_text("升级到 C D N 节点", &[], false);
+    assert_eq!(result, "升级到 CDN 节点");
+}
+
+#[test]
+fn process_text_merge_mr_pipeline() {
+    let result = text_processor::process_text("提交一个 M R", &[], false);
+    assert_eq!(result, "提交一个 MR");
+}

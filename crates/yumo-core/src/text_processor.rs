@@ -98,6 +98,33 @@ pub fn is_hallucinated(text: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Merge whitespace-separated uppercase letters back into acronyms.
+// ---------------------------------------------------------------------------
+
+fn uppercase_letter_seq_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\b[A-Z](?:[ \t]+[A-Z]\b)+").unwrap())
+}
+
+/// Collapse sequences of isolated uppercase letters (≥2 letters separated by
+/// whitespace) into a single acronym token. Whisper-class models often emit
+/// acronyms like CDN / URL / API / MR as "C D N", but the speaker's intent is
+/// the acronym — so we merge them back.
+///
+/// Lowercase letters or other tokens break the sequence, so "A the B" stays
+/// unchanged. Single uppercase letters (e.g. "维生素 A") are also untouched.
+pub fn merge_uppercase_letter_sequences(text: &str) -> String {
+    uppercase_letter_seq_re()
+        .replace_all(text, |caps: &regex::Captures| {
+            caps[0]
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect::<String>()
+        })
+        .into_owned()
+}
+
+// ---------------------------------------------------------------------------
 // Chinese numerals → Arabic digits
 // ---------------------------------------------------------------------------
 
@@ -277,7 +304,8 @@ pub fn process_text(
 ) -> String {
     info!("[text_processor] process_text input={} auto_capitalize={}", mask::mask_text(text), auto_capitalize);
     let after_replacements = apply_replacements(text, replacements);
-    let after_version = chinese_version_numbers_to_arabic(&after_replacements);
+    let after_letter_merge = merge_uppercase_letter_sequences(&after_replacements);
+    let after_version = chinese_version_numbers_to_arabic(&after_letter_merge);
     let after_numerals = chinese_numerals_to_arabic(&after_version);
     let after_spacing = add_cjk_spacing(&after_numerals);
     let result = if auto_capitalize {
