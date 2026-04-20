@@ -1,6 +1,7 @@
 use crate::mask;
 use log::{info, warn};
 use regex::{Regex, RegexBuilder};
+use std::sync::OnceLock;
 
 /// Apply word-boundary-aware, case-insensitive replacements.
 pub fn apply_replacements(text: &str, replacements: &[(String, String)]) -> String {
@@ -96,7 +97,149 @@ pub fn is_hallucinated(text: &str) -> bool {
     false
 }
 
-/// Apply replacements first, then optionally capitalize sentences.
+// ---------------------------------------------------------------------------
+// Chinese numerals → Arabic digits
+// ---------------------------------------------------------------------------
+
+fn cn_digit_value(c: char) -> Option<i64> {
+    match c {
+        '〇' | '零' => Some(0),
+        '一' => Some(1),
+        '二' | '两' => Some(2),
+        '三' => Some(3),
+        '四' => Some(4),
+        '五' => Some(5),
+        '六' => Some(6),
+        '七' => Some(7),
+        '八' => Some(8),
+        '九' => Some(9),
+        _ => None,
+    }
+}
+
+fn cn_unit_value(c: char) -> Option<i64> {
+    match c {
+        '十' => Some(10),
+        '百' => Some(100),
+        '千' => Some(1000),
+        '万' => Some(10_000),
+        '亿' => Some(100_000_000),
+        _ => None,
+    }
+}
+
+/// Parse a token consisting only of CJK numeral characters into i64.
+/// Returns `None` for malformed/ambiguous tokens (caller should leave original).
+fn parse_cn_numeral(s: &str) -> Option<i64> {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.is_empty() {
+        return None;
+    }
+
+    let has_unit = chars.iter().any(|&c| cn_unit_value(c).is_some());
+    let all_digits = chars.iter().all(|&c| cn_digit_value(c).is_some());
+
+    // Positional mode (no units, all digit chars): 二〇二六 → 2026
+    if !has_unit && all_digits {
+        let mut n: i64 = 0;
+        for c in chars {
+            n = n * 10 + cn_digit_value(c).unwrap();
+        }
+        return Some(n);
+    }
+    if !has_unit {
+        return None;
+    }
+
+    // Unit mode: state machine over (digit | small_unit | big_unit).
+    let mut total: i64 = 0;
+    let mut section: i64 = 0;
+    let mut current: i64 = 0;
+    for c in chars {
+        if let Some(d) = cn_digit_value(c) {
+            current = d;
+        } else if let Some(u) = cn_unit_value(c) {
+            if u >= 10_000 {
+                let val = section + current;
+                let val = if val == 0 { 1 } else { val };
+                total += val * u;
+                section = 0;
+                current = 0;
+            } else {
+                let val = if current == 0 { 1 } else { current };
+                section += val * u;
+                current = 0;
+            }
+        } else {
+            return None;
+        }
+    }
+    Some(total + section + current)
+}
+
+fn cn_numeral_token_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"[〇零一二三四五六七八九两十百千万亿]+").unwrap())
+}
+
+/// Multi-char idioms that look like numerals but are not. Length-2 unit-then-digit
+/// or unit-then-unit forms slip past the "≥2 chars" rule, so we exclude them
+/// explicitly. Keep this list short — it must only contain truly common cases.
+const CN_NUMERAL_IDIOM_SKIP: &[&str] = &["万一", "千万", "万万", "九九"];
+
+/// Convert connected CJK-numeral substrings (length ≥ 2) to Arabic digits.
+/// Single-character occurrences are left alone — this naturally skips idioms
+/// like 一些 / 二话不说 / 三明治 / 九点 (孤立的数字字)，再用 idiom 白名单兜住
+/// "单位+数字"型的"万一/千万"等。
+pub fn chinese_numerals_to_arabic(text: &str) -> String {
+    cn_numeral_token_re()
+        .replace_all(text, |caps: &regex::Captures| {
+            let token = &caps[0];
+            if token.chars().count() < 2 {
+                return token.to_string();
+            }
+            if CN_NUMERAL_IDIOM_SKIP.iter().any(|w| *w == token) {
+                return token.to_string();
+            }
+            match parse_cn_numeral(token) {
+                Some(n) => n.to_string(),
+                None => token.to_string(),
+            }
+        })
+        .into_owned()
+}
+
+// ---------------------------------------------------------------------------
+// CJK ↔ ASCII spacing (PangU style)
+// ---------------------------------------------------------------------------
+
+fn cjk_then_ascii_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"([\u{3040}-\u{30ff}\u{3400}-\u{4dbf}\u{4e00}-\u{9fff}])([A-Za-z0-9])").unwrap()
+    })
+}
+
+fn ascii_then_cjk_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"([A-Za-z0-9])([\u{3040}-\u{30ff}\u{3400}-\u{4dbf}\u{4e00}-\u{9fff}])").unwrap()
+    })
+}
+
+/// Insert a single space at every CJK ↔ ASCII letter/digit boundary.
+/// Idempotent: existing spaces or punctuation between CJK/ASCII are preserved.
+pub fn add_cjk_spacing(text: &str) -> String {
+    let s = cjk_then_ascii_re().replace_all(text, "$1 $2");
+    ascii_then_cjk_re().replace_all(&s, "$1 $2").into_owned()
+}
+
+// ---------------------------------------------------------------------------
+// process_text — pipeline integration
+// ---------------------------------------------------------------------------
+
+/// Apply replacements → CJK numerals → CJK/ASCII spacing → optional capitalize.
+/// The numeral conversion and spacing are always-on formatting steps.
 pub fn process_text(
     text: &str,
     replacements: &[(String, String)],
@@ -104,10 +247,12 @@ pub fn process_text(
 ) -> String {
     info!("[text_processor] process_text input={} auto_capitalize={}", mask::mask_text(text), auto_capitalize);
     let after_replacements = apply_replacements(text, replacements);
+    let after_numerals = chinese_numerals_to_arabic(&after_replacements);
+    let after_spacing = add_cjk_spacing(&after_numerals);
     let result = if auto_capitalize {
-        capitalize_sentences(&after_replacements)
+        capitalize_sentences(&after_spacing)
     } else {
-        after_replacements
+        after_spacing
     };
     info!("[text_processor] process_text output={}", mask::mask_text(&result));
     result
