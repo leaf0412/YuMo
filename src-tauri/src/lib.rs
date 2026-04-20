@@ -384,6 +384,16 @@ pub fn run() {
             // System locale
             commands::get_system_locale,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    use tauri::Manager;
+                    let wm = window_manager::WindowManager::new(window.app_handle().clone());
+                    wm.hide("main");
+                }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, _event| {
