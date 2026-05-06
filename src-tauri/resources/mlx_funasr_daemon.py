@@ -492,6 +492,8 @@ def transcribe(model, audio_path, language=None, max_tokens=None, temperature=No
         elif model_type == "qwen3_asr":
             tokens = max_tokens if max_tokens else 8192
             return _transcribe_qwen3_asr(model, audio_path, language, max_tokens=tokens, temperature=temp)
+        elif model_type == "custom":
+            return _transcribe_custom(model, audio_path, language)
         else:
             tokens = max_tokens if max_tokens else 500
             return _transcribe_funasr(model, audio_path, language, max_tokens=tokens, temperature=temp)
@@ -733,6 +735,24 @@ def _qwen3_generate_single(model, audio_path, language, max_tokens, temperature)
     text = result.text if hasattr(result, 'text') else str(result)
     _log_funasr_result(result)
     return text.strip() if text else ""
+
+
+def _transcribe_custom(model, audio_path, language):
+    """Transcribe using a custom-loaded model from YAML spec.
+
+    Honors `transcribe_method` and `language_param` from the spec, defaulting to
+    `transcribe` and `language` respectively. `max_tokens` / `temperature` are
+    intentionally NOT forwarded — custom-model APIs vary too much; spec defaults
+    handle their own decoding parameters.
+    """
+    spec = model._daemon_custom_spec
+    method_name = spec.get("transcribe_method", "transcribe")
+    lang_param = spec.get("language_param", "language")
+    method = getattr(model, method_name)
+    kwargs = {}
+    if language:
+        kwargs[lang_param] = language
+    return method(audio_path, **kwargs)
 
 
 def _transcribe_funasr(model, audio_path, language=None, max_tokens=500, temperature=0.0):

@@ -195,5 +195,41 @@ class LoadCustomTest(unittest.TestCase):
             self.assertIn("paths.json", str(ctx.exception))
 
 
+class TranscribeCustomTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        add_fixtures_to_path()
+        cls.daemon = load_daemon_module()
+
+    def _load_stub(self, tmp):
+        tmp = Path(tmp)
+        custom_dir = tmp / "custom_models"; custom_dir.mkdir()
+        voiceink_dir = tmp / "models"; voiceink_dir.mkdir()
+        spec_path = custom_dir / "stub.yaml"
+        spec_path.write_text((FIXTURES_DIR / "specs" / "mimo_like.yaml").read_text())
+        self.daemon.download_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
+        return self.daemon.load_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
+
+    def test_dispatches_to_custom_branch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            model = self._load_stub(tmp)
+            text = self.daemon.transcribe(model, "/path/audio.wav", language="zh")
+            self.assertEqual(text, "[stub:int4:zh] /path/audio.wav")
+
+    def test_uses_configured_method_and_param_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            custom_dir = tmp / "custom_models"; custom_dir.mkdir()
+            voiceink_dir = tmp / "models"; voiceink_dir.mkdir()
+            yaml_text = (FIXTURES_DIR / "specs" / "mimo_like.yaml").read_text()
+            yaml_text += "\ntranscribe_method: transcribe\nlanguage_param: language\n"
+            spec_path = custom_dir / "stub.yaml"
+            spec_path.write_text(yaml_text)
+            self.daemon.download_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
+            model = self.daemon.load_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
+            text = self.daemon.transcribe(model, "/x.wav", language="en")
+            self.assertIn("[stub:int4:en]", text)
+
+
 if __name__ == "__main__":
     unittest.main()
