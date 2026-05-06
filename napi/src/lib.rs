@@ -878,8 +878,9 @@ pub async fn stop_recording() -> Result<String> {
     let model_info = all.iter().find(|m| m.id == model_id);
 
     let transcribe_result = match model_info.map(|m| &m.provider) {
-        Some(transcriber::ModelProvider::MlxFunASR) => {
-            // Use daemon for MLX transcription
+        Some(transcriber::ModelProvider::MlxFunASR)
+        | Some(transcriber::ModelProvider::Custom) => {
+            // Use daemon for MLX / custom-YAML transcription
             let d = daemon()?;
             if !d.is_running() {
                 d.start().map_err(|e| Error::from_reason(format!("daemon start: {e}")))?;
@@ -889,7 +890,8 @@ pub async fn stop_recording() -> Result<String> {
             let loaded = d.loaded_model();
             if model_repo.is_some() && loaded.as_ref() != model_repo.as_ref() {
                 let repo = model_repo.as_ref().unwrap();
-                let cmd = serde_json::json!({"action": "load", "model": repo});
+                // Reuse build_load_command so YAML paths get provider="custom" + dirs auto-injected.
+                let cmd = build_load_command(repo);
                 let resp = d.send_command(&cmd)
                     .map_err(|e| Error::from_reason(format!("daemon load: {e}")))?;
                 if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" {
