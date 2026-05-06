@@ -215,8 +215,22 @@ def download_custom_model(spec_path: str, voiceink_models_dir: str, custom_model
         else:
             raise ValueError(f"unknown returns kind: {returns}")
     elif "hf_repos" in download:
-        # T12 implements this branch
-        raise NotImplementedError("hf_repos variant not yet implemented")
+        from huggingface_hub import snapshot_download
+        from pathlib import Path as _Path
+        repo_dirs = []
+        for repo in download["hf_repos"]:
+            sanitized = repo.replace("/", "--")
+            local_dir = _Path(voiceink_models_dir) / f"custom-{sanitized}"
+            snapshot_download(repo, local_dir=str(local_dir))
+            repo_dirs.append(str(local_dir))
+
+        raw_paths = download.get("paths", {})
+        if not raw_paths:
+            # Default: name them repo_0, repo_1...
+            paths_out = {f"repo_{i}": p for i, p in enumerate(repo_dirs)}
+        else:
+            paths_out = _render_kwargs(raw_paths, voiceink_models_dir, repo_dirs=repo_dirs)
+            paths_out = {k: str(v) for k, v in paths_out.items()}
     else:
         raise ValueError("download must declare either 'function' or 'hf_repos'")
 

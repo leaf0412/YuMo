@@ -127,5 +127,43 @@ class DownloadFunctionVariantTest(unittest.TestCase):
             self.assertTrue(Path(paths["tokenizer_dir"]).exists())
 
 
+class DownloadHfReposVariantTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        add_fixtures_to_path()
+        cls.daemon = load_daemon_module()
+
+    def test_hf_repos_variant_calls_snapshot_download(self):
+        calls = []
+        def fake_snapshot(repo_id, local_dir, **kw):
+            calls.append((repo_id, local_dir))
+            Path(local_dir).mkdir(parents=True, exist_ok=True)
+            return local_dir
+
+        # Monkeypatch the daemon's huggingface_hub
+        import huggingface_hub
+        original = huggingface_hub.snapshot_download
+        huggingface_hub.snapshot_download = fake_snapshot
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp = Path(tmp)
+                custom_dir = tmp / "custom_models"; custom_dir.mkdir()
+                voiceink_dir = tmp / "models"; voiceink_dir.mkdir()
+                spec_path = custom_dir / "hf.yaml"
+                spec_path.write_text((FIXTURES_DIR / "specs" / "hf_repos.yaml").read_text())
+
+                result = self.daemon.download_custom_model(
+                    str(spec_path),
+                    voiceink_models_dir=str(voiceink_dir),
+                    custom_models_dir=str(custom_dir),
+                )
+                self.assertTrue(result["success"])
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0][0], "foo/bar")
+                self.assertIn("asr_dir", result["paths"])
+        finally:
+            huggingface_hub.snapshot_download = original
+
+
 if __name__ == "__main__":
     unittest.main()
