@@ -20,6 +20,8 @@ pub enum ModelProvider {
     Qwen3ASR,
     /// VibeVoice-ASR: runs via daemon (MLX on macOS)
     VibeVoiceASR,
+    /// Custom model defined via YAML plugin under ~/.voiceink/custom_models/
+    Custom,
     Groq,
     Deepgram,
     ElevenLabs,
@@ -30,7 +32,7 @@ pub enum ModelProvider {
 
 impl ModelProvider {
     pub fn is_local(&self) -> bool {
-        matches!(self, Self::Local | Self::MlxWhisper | Self::MlxFunASR | Self::Qwen3ASR | Self::VibeVoiceASR)
+        matches!(self, Self::Local | Self::MlxWhisper | Self::MlxFunASR | Self::Qwen3ASR | Self::VibeVoiceASR | Self::Custom)
     }
 
     pub fn is_cloud(&self) -> bool {
@@ -41,7 +43,7 @@ impl ModelProvider {
     }
 
     pub fn needs_daemon(&self) -> bool {
-        matches!(self, Self::MlxWhisper | Self::MlxFunASR | Self::Qwen3ASR | Self::VibeVoiceASR)
+        matches!(self, Self::MlxWhisper | Self::MlxFunASR | Self::Qwen3ASR | Self::VibeVoiceASR | Self::Custom)
     }
 }
 

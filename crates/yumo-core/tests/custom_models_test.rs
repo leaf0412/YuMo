@@ -193,6 +193,44 @@ fn validate_passes_for_valid_spec() {
 }
 
 use yumo_core::custom_models::{scan_custom_models, ScanResult};
+use yumo_core::custom_models::spec_to_model_info;
+use yumo_core::transcriber::ModelProvider;
+
+#[test]
+fn spec_to_model_info_uses_custom_provider_and_path_in_repo() {
+    let spec = make_minimal_spec("test-id");
+    let info = spec_to_model_info(&spec);
+
+    assert_eq!(info.id, "test-id");
+    assert_eq!(info.name, "Test");
+    assert_eq!(info.size_mb, 1);
+    assert!(matches!(info.provider, ModelProvider::Custom));
+    assert_eq!(info.model_repo.as_deref(), Some(spec.source_path.to_str().unwrap()));
+    assert_eq!(info.is_downloaded, false);
+    assert_eq!(info.languages, vec!["zh".to_string()]);
+}
+
+#[test]
+fn spec_to_model_info_multilang_uses_multi_marker() {
+    let yaml = r#"
+schema_version: 1
+id: multi
+name: Multi
+size_mb: 1
+languages:
+  zh: 中文
+  en: English
+speed: 5
+accuracy: 5
+python_module: x
+load:
+  function: x.load
+  kwargs: {}
+"#;
+    let spec = parse_spec_from_str(yaml, PathBuf::from("/tmp/t.yaml")).unwrap();
+    let info = spec_to_model_info(&spec);
+    assert_eq!(info.languages, vec!["multi".to_string()]);
+}
 
 #[test]
 fn scan_returns_empty_for_nonexistent_dir() {

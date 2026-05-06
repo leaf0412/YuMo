@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
+use crate::transcriber::{ModelInfo, ModelProvider};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoadSpec {
@@ -170,6 +171,35 @@ pub fn validate_spec(spec: &CustomModelSpec, existing_ids: &HashSet<String>) -> 
 pub enum ScanResult {
     Ok(CustomModelSpec),
     Err { path: PathBuf, error: String },
+}
+
+/// Convert a parsed `CustomModelSpec` into a `ModelInfo` row for the
+/// model registry. Mirrors the `langs_to_vec` convention used by built-in
+/// providers (>1 language → `["multi"]`).
+pub fn spec_to_model_info(spec: &CustomModelSpec) -> ModelInfo {
+    let languages = if spec.languages.len() > 1 {
+        vec!["multi".to_string()]
+    } else {
+        spec.languages.keys().cloned().collect()
+    };
+
+    ModelInfo {
+        id: spec.id.clone(),
+        name: spec.name.clone(),
+        size_mb: spec.size_mb,
+        supported_languages: spec.languages.clone(),
+        languages,
+        download_url: String::new(),
+        is_downloaded: false,
+        provider: ModelProvider::Custom,
+        // Repurpose `model_repo` to point at the YAML spec file path, so
+        // downstream consumers can locate the source plugin.
+        model_repo: Some(spec.source_path.to_string_lossy().into_owned()),
+        description: spec.description.clone(),
+        speed: spec.speed,
+        accuracy: spec.accuracy,
+        is_recommended: spec.recommended,
+    }
 }
 
 pub fn scan_custom_models(dir: &Path) -> Vec<ScanResult> {
