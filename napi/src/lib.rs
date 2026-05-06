@@ -519,32 +519,6 @@ pub fn daemon_stop() -> Result<()> {
     Ok(())
 }
 
-/// Build the JSON command sent to the Python daemon for the `load` action.
-///
-/// Custom-model specs live as `*.yaml`/`*.yml` files (their path is stored in
-/// `ModelInfo.model_repo`). Built-in MLX models always use HuggingFace
-/// `org/repo` strings. So the path suffix is a reliable provider hint —
-/// when present, we forward `provider: "custom"` plus the directories the
-/// daemon's `load_custom_model` branch needs.
-fn build_load_command(model_repo: &str) -> serde_json::Value {
-    let mut cmd = serde_json::json!({
-        "action": "load",
-        "model": model_repo,
-    });
-    let lower = model_repo.to_ascii_lowercase();
-    if lower.ends_with(".yaml") || lower.ends_with(".yml") {
-        let home = dirs::home_dir().unwrap_or_default();
-        cmd["provider"] = serde_json::json!("custom");
-        cmd["voiceink_models_dir"] = serde_json::json!(
-            home.join(".voiceink/models").to_string_lossy()
-        );
-        cmd["custom_models_dir"] = serde_json::json!(
-            home.join(".voiceink/custom_models").to_string_lossy()
-        );
-    }
-    cmd
-}
-
 #[napi]
 pub async fn daemon_load_model(model_repo: String) -> Result<()> {
     let repo = model_repo.clone();
@@ -553,7 +527,7 @@ pub async fn daemon_load_model(model_repo: String) -> Result<()> {
         if !d.is_running() {
             d.start().map_err(|e| Error::from_reason(format!("daemon start: {e}")))?;
         }
-        let cmd = build_load_command(&repo);
+        let cmd = yumo_core::custom_models::build_load_command(&repo);
         let resp = d.send_command(&cmd)
             .map_err(|e| Error::from_reason(format!("daemon load: {e}")))?;
         if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" {
@@ -891,7 +865,7 @@ pub async fn stop_recording() -> Result<String> {
             if model_repo.is_some() && loaded.as_ref() != model_repo.as_ref() {
                 let repo = model_repo.as_ref().unwrap();
                 // Reuse build_load_command so YAML paths get provider="custom" + dirs auto-injected.
-                let cmd = build_load_command(repo);
+                let cmd = yumo_core::custom_models::build_load_command(repo);
                 let resp = d.send_command(&cmd)
                     .map_err(|e| Error::from_reason(format!("daemon load: {e}")))?;
                 if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" {
@@ -1645,46 +1619,3 @@ pub async fn import_voiceink_legacy(store_path: String) -> Result<String> {
     }).await.map_err(|e| Error::from_reason(format!("spawn: {e}")))?
 }
 
-#[cfg(test)]
-mod tests {
-    use super::build_load_command;
-
-    #[test]
-    fn build_load_cmd_adds_provider_for_yaml_path() {
-        let cmd = build_load_command("/Users/x/.voiceink/custom_models/mimo.yaml");
-        assert_eq!(cmd["action"], "load");
-        assert_eq!(cmd["model"], "/Users/x/.voiceink/custom_models/mimo.yaml");
-        assert_eq!(cmd["provider"], "custom");
-        assert!(cmd["voiceink_models_dir"].is_string());
-        assert!(cmd["custom_models_dir"].is_string());
-    }
-
-    #[test]
-    fn build_load_cmd_adds_provider_for_yml_path() {
-        let cmd = build_load_command("/tmp/specs/foo.yml");
-        assert_eq!(cmd["provider"], "custom");
-        assert!(cmd["voiceink_models_dir"].is_string());
-    }
-
-    #[test]
-    fn build_load_cmd_handles_uppercase_extension() {
-        let cmd = build_load_command("/tmp/Spec.YAML");
-        assert_eq!(cmd["provider"], "custom");
-    }
-
-    #[test]
-    fn build_load_cmd_no_provider_for_normal_model() {
-        let cmd = build_load_command("ggml-tiny");
-        assert_eq!(cmd["action"], "load");
-        assert_eq!(cmd["model"], "ggml-tiny");
-        assert!(cmd.get("provider").is_none());
-        assert!(cmd.get("voiceink_models_dir").is_none());
-        assert!(cmd.get("custom_models_dir").is_none());
-    }
-
-    #[test]
-    fn build_load_cmd_no_provider_for_hf_repo() {
-        let cmd = build_load_command("mlx-community/Fun-ASR-MLT-Nano-2512-8bit");
-        assert!(cmd.get("provider").is_none());
-    }
-}

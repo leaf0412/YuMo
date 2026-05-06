@@ -206,6 +206,31 @@ pub fn spec_to_model_info(spec: &CustomModelSpec) -> ModelInfo {
     }
 }
 
+/// Build the daemon `load` command JSON for a given model_repo.
+///
+/// Custom-model YAML paths (ending in `.yaml`/`.yml`, case-insensitive)
+/// get `provider: "custom"` plus `voiceink_models_dir` and `custom_models_dir`
+/// injected so the daemon routes to `load_custom_model`. All other model_repos
+/// get the standard `{action: "load", model}` shape.
+pub fn build_load_command(model_repo: &str) -> serde_json::Value {
+    let mut cmd = serde_json::json!({
+        "action": "load",
+        "model": model_repo,
+    });
+    let lower = model_repo.to_ascii_lowercase();
+    if lower.ends_with(".yaml") || lower.ends_with(".yml") {
+        let home = dirs::home_dir().unwrap_or_default();
+        cmd["provider"] = serde_json::json!("custom");
+        cmd["voiceink_models_dir"] = serde_json::json!(
+            home.join(".voiceink/models").to_string_lossy()
+        );
+        cmd["custom_models_dir"] = serde_json::json!(
+            home.join(".voiceink/custom_models").to_string_lossy()
+        );
+    }
+    cmd
+}
+
 pub fn scan_custom_models(dir: &Path) -> Vec<ScanResult> {
     if !dir.exists() {
         return Vec::new();
@@ -241,4 +266,48 @@ pub fn scan_custom_models(dir: &Path) -> Vec<ScanResult> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_load_command;
+
+    #[test]
+    fn build_load_cmd_adds_provider_for_yaml_path() {
+        let cmd = build_load_command("/Users/x/.voiceink/custom_models/mimo.yaml");
+        assert_eq!(cmd["action"], "load");
+        assert_eq!(cmd["model"], "/Users/x/.voiceink/custom_models/mimo.yaml");
+        assert_eq!(cmd["provider"], "custom");
+        assert!(cmd["voiceink_models_dir"].is_string());
+        assert!(cmd["custom_models_dir"].is_string());
+    }
+
+    #[test]
+    fn build_load_cmd_adds_provider_for_yml_path() {
+        let cmd = build_load_command("/tmp/specs/foo.yml");
+        assert_eq!(cmd["provider"], "custom");
+        assert!(cmd["voiceink_models_dir"].is_string());
+    }
+
+    #[test]
+    fn build_load_cmd_handles_uppercase_extension() {
+        let cmd = build_load_command("/tmp/Spec.YAML");
+        assert_eq!(cmd["provider"], "custom");
+    }
+
+    #[test]
+    fn build_load_cmd_no_provider_for_normal_model() {
+        let cmd = build_load_command("ggml-tiny");
+        assert_eq!(cmd["action"], "load");
+        assert_eq!(cmd["model"], "ggml-tiny");
+        assert!(cmd.get("provider").is_none());
+        assert!(cmd.get("voiceink_models_dir").is_none());
+        assert!(cmd.get("custom_models_dir").is_none());
+    }
+
+    #[test]
+    fn build_load_cmd_no_provider_for_hf_repo() {
+        let cmd = build_load_command("mlx-community/Fun-ASR-MLT-Nano-2512-8bit");
+        assert!(cmd.get("provider").is_none());
+    }
 }
