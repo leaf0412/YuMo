@@ -73,38 +73,77 @@ export function registerModelsHandlers(): void {
   // -------------------------------------------------------------------------
 
   // 1. Scan ~/.voiceink/custom_models/*.yaml and return { ok, errors }.
-  // TODO(T17): wire to Rust scan_custom_models via napi addon. For now this
-  // returns an empty scaffold so the IPC channel is registered and the
-  // renderer can be built before T17 lands.
+  // Rust emits CustomModelSpec fields in camelCase (via serde rename_all).
+  // The DownloadSpec is serde(untagged), so its JSON has no `kind` field —
+  // we add the discriminator here based on which fields are present.
   ipcMain.handle("list-custom-models", async () => {
-    return { ok: [], errors: [] };
+    const dir = customModelsDir();
+    const raw = JSON.parse(await getAddon().scanCustomModels(dir)) as {
+      ok: Array<Record<string, unknown>>;
+      errors: Array<{ path: string; error: string }>;
+    };
+    const ok = raw.ok.map((spec) => {
+      if (spec.download && typeof spec.download === "object") {
+        const d = spec.download as Record<string, unknown>;
+        if ("hfRepos" in d) {
+          spec.download = { kind: "hfRepos", ...d };
+        } else if ("function" in d) {
+          spec.download = { kind: "function", ...d };
+        }
+      }
+      return spec;
+    });
+    return { ok, errors: raw.errors };
   });
 
   // 2. Check whether a custom spec's pip dependencies are satisfied.
-  // TODO(T17): wire to napi addon (e.g. customCheckDeps(specPath)) which
-  // forwards to the Python daemon `check_custom_dependencies` action.
-  ipcMain.handle("custom-check-deps", async (_e, _specPath: string) => {
-    throw new Error(
-      "custom-check-deps not yet wired — pending T17 napi bridge",
-    );
+  // Forwards to the Python daemon `check_custom_dependencies` action.
+  ipcMain.handle("custom-check-deps", async (_e, specPath: string) => {
+    const raw = await getAddon().customCheckDeps(specPath);
+    const resp = JSON.parse(raw) as Record<string, unknown>;
+    if (resp.status === "error") {
+      throw new Error(typeof resp.error === "string" ? resp.error : "check_custom_dependencies failed");
+    }
+    return {
+      installed: Array.isArray(resp.installed) ? resp.installed : [],
+      missing: Array.isArray(resp.missing) ? resp.missing : [],
+      allInstalled: resp.all_installed === true,
+    };
   });
 
-  // 3. Install pip dependencies for a custom spec.
-  // TODO(T17): wire to napi addon (e.g. customInstallDeps(specPath)) which
-  // forwards to the Python daemon `install_custom_dependencies` action.
-  ipcMain.handle("custom-install-deps", async (_e, _specPath: string) => {
-    throw new Error(
-      "custom-install-deps not yet wired — pending T17 napi bridge",
-    );
+  // 3. Install pip dependencies for a custom spec (long-running).
+  ipcMain.handle("custom-install-deps", async (_e, specPath: string) => {
+    const raw = await getAddon().customInstallDeps(specPath);
+    const resp = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      success: resp.success === true,
+      stdout: typeof resp.stdout === "string" ? resp.stdout : "",
+      stderr: typeof resp.stderr === "string" ? resp.stderr : "",
+      error: typeof resp.error === "string" ? resp.error : null,
+    };
   });
 
-  // 4. Run the spec's download step (function or hf_repos variant).
-  // TODO(T17): wire to napi addon (e.g. customDownload(specPath, voiceinkModelsDir, customModelsDir))
-  // which forwards to the Python daemon `download_custom_model` action.
-  ipcMain.handle("custom-download", async (_e, _specPath: string) => {
-    throw new Error(
-      "custom-download not yet wired — pending T17 napi bridge",
+  // 4. Run the spec's download step (function or hf_repos variant) — long-running.
+  ipcMain.handle("custom-download", async (_e, specPath: string) => {
+    const raw = await getAddon().customDownload(
+      specPath,
+      voiceinkModelsDir(),
+      customModelsDir(),
     );
+    const resp = JSON.parse(raw) as Record<string, unknown>;
+    if (resp.status === "error") {
+      return {
+        success: false,
+        paths: {},
+        error: typeof resp.error === "string" ? resp.error : "download_custom_model failed",
+      };
+    }
+    return {
+      success: true,
+      paths: (resp.paths && typeof resp.paths === "object")
+        ? (resp.paths as Record<string, string>)
+        : {},
+    };
   });
 
   // 5. Open ~/.voiceink/custom_models/ in the OS file manager.

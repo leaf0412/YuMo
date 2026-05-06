@@ -13,6 +13,7 @@ use crate::error::AppError;
 use crate::transcriber::{ModelInfo, ModelProvider};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"))]
 pub struct LoadSpec {
     pub function: String,
     #[serde(default)]
@@ -22,11 +23,13 @@ pub struct LoadSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum DownloadSpec {
+    #[serde(rename_all(serialize = "camelCase"))]
     HfRepos {
         hf_repos: Vec<String>,
         #[serde(default)]
         paths: HashMap<String, String>,
     },
+    #[serde(rename_all(serialize = "camelCase"))]
     Function {
         function: String,
         #[serde(default)]
@@ -45,7 +48,8 @@ pub enum DownloadReturnKind {
     Path,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CustomModelSpec {
     pub source_path: PathBuf,
     pub schema_version: u32,
