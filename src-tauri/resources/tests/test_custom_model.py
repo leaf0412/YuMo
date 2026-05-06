@@ -92,5 +92,40 @@ class InstallDepsTest(unittest.TestCase):
         self.assertIn("could not find", result["error"])
 
 
+import json
+import tempfile
+
+class DownloadFunctionVariantTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        add_fixtures_to_path()
+        cls.daemon = load_daemon_module()
+
+    def test_function_variant_writes_sidecar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            custom_dir = tmp / "custom_models"
+            custom_dir.mkdir()
+            voiceink_dir = tmp / "models"
+            voiceink_dir.mkdir()
+            spec_path = custom_dir / "stub.yaml"
+            spec_path.write_text((FIXTURES_DIR / "specs" / "mimo_like.yaml").read_text())
+
+            result = self.daemon.download_custom_model(
+                str(spec_path),
+                voiceink_models_dir=str(voiceink_dir),
+                custom_models_dir=str(custom_dir),
+            )
+            self.assertTrue(result["success"])
+
+            sidecar = custom_dir / ".cache" / "stub-mimo.paths.json"
+            self.assertTrue(sidecar.exists())
+            paths = json.loads(sidecar.read_text())
+            self.assertIn("asr_dir", paths)
+            self.assertIn("tokenizer_dir", paths)
+            self.assertTrue(Path(paths["asr_dir"]).exists())
+            self.assertTrue(Path(paths["tokenizer_dir"]).exists())
+
+
 if __name__ == "__main__":
     unittest.main()
