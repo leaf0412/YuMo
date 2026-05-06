@@ -436,7 +436,7 @@ pub async fn stop_recording(
             if model_repo.is_some() && loaded.as_ref() != model_repo.as_ref() {
                 let repo = model_repo.as_ref().unwrap();
                 info!("[pipeline] loading MLX model: {}", repo);
-                let cmd = serde_json::json!({"action": "load", "model": repo});
+                let cmd = yumo_core::custom_models::build_load_command(repo);
                 match daemon.send_command(&cmd) {
                     Ok(resp) if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" => {
                         daemon.set_loaded_model(model_repo.clone());
@@ -927,6 +927,50 @@ pub fn delete_model(state: State<AppContext>, daemon: State<DaemonManager>, mode
                         std::fs::remove_dir_all(&cache_dir)?;
                     }
                 }
+                // If this model is currently loaded, unload it
+                if daemon.loaded_model().as_deref() == model.model_repo.as_deref() {
+                    let cmd = serde_json::json!({"action": "unload"});
+                    let _ = daemon.send_command(&cmd);
+                    daemon.set_loaded_model(None);
+                }
+            }
+            transcriber::ModelProvider::Custom => {
+                // Delete sidecar + listed download dirs for custom-model YAML plugins.
+                // Keep the YAML itself — user may want to re-download later.
+                // (custom_remove handles the YAML+sidecar+dirs combo.)
+                let home = dirs::home_dir().unwrap_or_default();
+                let voiceink_root = home.join(".voiceink");
+                let cache_dir = voiceink_root.join("custom_models").join(".cache");
+                let sidecar = cache_dir.join(format!("{}.paths.json", model_id));
+
+                let mut downloaded_dirs: Vec<String> = Vec::new();
+                if let Ok(raw) = std::fs::read_to_string(&sidecar) {
+                    if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&raw) {
+                        downloaded_dirs = map.into_values().collect();
+                    }
+                }
+
+                for d in downloaded_dirs {
+                    if d.is_empty() { continue; }
+                    let resolved = std::path::Path::new(&d).to_path_buf();
+                    // Only delete dirs/files that live inside ~/.voiceink/.
+                    if resolved == voiceink_root || resolved.starts_with(&voiceink_root) {
+                        info!("[cmd] deleting custom model artifact: {:?}", resolved);
+                        if resolved.is_dir() {
+                            let _ = std::fs::remove_dir_all(&resolved);
+                        } else if resolved.exists() {
+                            let _ = std::fs::remove_file(&resolved);
+                        }
+                    } else {
+                        warn!("[cmd] skipping non-voiceink path: {:?}", resolved);
+                    }
+                }
+
+                if sidecar.exists() {
+                    info!("[cmd] deleting custom model sidecar: {:?}", sidecar);
+                    let _ = std::fs::remove_file(&sidecar);
+                }
+
                 // If this model is currently loaded, unload it
                 if daemon.loaded_model().as_deref() == model.model_repo.as_deref() {
                     let cmd = serde_json::json!({"action": "unload"});
@@ -1511,6 +1555,309 @@ pub fn daemon_unload_model(app: tauri::AppHandle, daemon: State<DaemonManager>) 
     daemon.send_command(&cmd)?;
     daemon.set_loaded_model(None);
     let _ = app.emit("daemon-status-changed", ());
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Custom Model YAML plugin
+// ---------------------------------------------------------------------------
+
+fn home_voiceink_dir() -> std::path::PathBuf {
+    dirs::home_dir().unwrap_or_default().join(".voiceink")
+}
+
+fn custom_models_dir() -> std::path::PathBuf {
+    home_voiceink_dir().join("custom_models")
+}
+
+fn voiceink_models_dir() -> std::path::PathBuf {
+    home_voiceink_dir().join("models")
+}
+
+fn custom_cache_dir() -> std::path::PathBuf {
+    custom_models_dir().join(".cache")
+}
+
+fn trusted_file_path() -> std::path::PathBuf {
+    custom_models_dir().join(".trusted")
+}
+
+/// Scan ~/.voiceink/custom_models/*.yaml. Returns { ok, errors }.
+/// Each spec's `download` field gets a `kind` discriminator added so
+/// untagged-serde JSON can be disambiguated by the frontend.
+#[tauri::command]
+pub fn list_custom_models() -> Result<serde_json::Value, AppError> {
+    use yumo_core::custom_models::{scan_custom_models, ScanResult};
+
+    let dir = custom_models_dir();
+    let results = scan_custom_models(&dir);
+
+    let mut ok = Vec::new();
+    let mut errors = Vec::new();
+    for r in results {
+        match r {
+            ScanResult::Ok(spec) => {
+                let mut value = serde_json::to_value(&spec)
+                    .map_err(|e| AppError::Io(format!("serialize spec: {e}")))?;
+                // Inject `kind` discriminator into download field
+                if let Some(download) = value.get_mut("download") {
+                    if let Some(obj) = download.as_object_mut() {
+                        let kind = if obj.contains_key("hfRepos") {
+                            "hfRepos"
+                        } else if obj.contains_key("function") {
+                            "function"
+                        } else {
+                            ""
+                        };
+                        if !kind.is_empty() {
+                            obj.insert("kind".into(), serde_json::Value::String(kind.into()));
+                        }
+                    }
+                }
+                ok.push(value);
+            }
+            ScanResult::Err { path, error } => {
+                errors.push(serde_json::json!({
+                    "path": path.to_string_lossy(),
+                    "error": error,
+                }));
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "ok": ok,
+        "errors": errors,
+    }))
+}
+
+/// Check whether a custom spec's pip dependencies are satisfied.
+#[tauri::command]
+pub async fn custom_check_deps(
+    spec_path: String,
+    daemon: State<'_, DaemonManager>,
+) -> Result<serde_json::Value, AppError> {
+    info!("[cmd] custom_check_deps spec_path={}", spec_path);
+    if !daemon.is_running() {
+        daemon.start()?;
+    }
+    let cmd = serde_json::json!({
+        "action": "check_custom_dependencies",
+        "spec_path": spec_path,
+    });
+    let timeout = std::time::Duration::from_secs(60);
+    let resp = daemon.send_command_async(&cmd, timeout).await?;
+    if resp.status == "error" {
+        return Err(AppError::Transcription(
+            resp.error
+                .unwrap_or_else(|| "check_custom_dependencies failed".into()),
+        ));
+    }
+    let value = serde_json::to_value(&resp).unwrap_or_default();
+    Ok(value)
+}
+
+/// Install pip dependencies for a custom spec (long-running).
+#[tauri::command]
+pub async fn custom_install_deps(
+    spec_path: String,
+    daemon: State<'_, DaemonManager>,
+) -> Result<serde_json::Value, AppError> {
+    info!("[cmd] custom_install_deps spec_path={}", spec_path);
+    if !daemon.is_running() {
+        daemon.start()?;
+    }
+    let cmd = serde_json::json!({
+        "action": "install_custom_dependencies",
+        "spec_path": spec_path,
+    });
+    let timeout = std::time::Duration::from_secs(600);
+    let resp = daemon.send_command_async(&cmd, timeout).await?;
+    let value = serde_json::to_value(&resp).unwrap_or_default();
+    Ok(value)
+}
+
+/// Run the spec's download step (function or hf_repos variant) — long-running.
+#[tauri::command]
+pub async fn custom_download(
+    spec_path: String,
+    daemon: State<'_, DaemonManager>,
+) -> Result<serde_json::Value, AppError> {
+    info!("[cmd] custom_download spec_path={}", spec_path);
+    if !daemon.is_running() {
+        daemon.start()?;
+    }
+    let cmd = serde_json::json!({
+        "action": "download_custom_model",
+        "spec_path": spec_path,
+        "voiceink_models_dir": voiceink_models_dir().to_string_lossy(),
+        "custom_models_dir": custom_models_dir().to_string_lossy(),
+    });
+    let timeout = std::time::Duration::from_secs(1800);
+    let resp = daemon.send_command_async(&cmd, timeout).await?;
+    let value = serde_json::to_value(&resp).unwrap_or_default();
+    Ok(value)
+}
+
+/// Open ~/.voiceink/custom_models/ in the OS file manager.
+#[tauri::command]
+pub fn custom_open_dir(app: AppHandle) -> Result<(), AppError> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let dir = custom_models_dir();
+    std::fs::create_dir_all(&dir)?;
+    let dir_str = dir.to_string_lossy().to_string();
+    info!("[cmd] custom_open_dir {}", dir_str);
+    app.opener()
+        .open_path(dir_str.clone(), None::<&str>)
+        .map_err(|e| AppError::Io(format!("open_path failed: {}", e)))?;
+    Ok(())
+}
+
+/// Copy a built-in example YAML from the app bundle to ~/.voiceink/custom_models/.
+#[tauri::command]
+pub fn custom_import_example(
+    file_name: String,
+    app: AppHandle,
+) -> Result<serde_json::Value, AppError> {
+    // Defensive: prevent path traversal — file_name must be a bare basename.
+    let pb = std::path::Path::new(&file_name);
+    let basename = pb
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| AppError::InvalidInput(format!("invalid file name: {}", file_name)))?;
+    if basename != file_name || file_name.starts_with('.') {
+        return Err(AppError::InvalidInput(format!(
+            "invalid example file name: {}",
+            file_name
+        )));
+    }
+
+    // Resolve resource path: try Tauri resource_dir() (production) then
+    // CARGO_MANIFEST_DIR/resources (dev). Mirrors lib.rs sync_resource pattern.
+    let res_dir = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|d| d.join("resources").join("custom_model_examples"));
+    let dev_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("custom_model_examples");
+
+    let candidates: Vec<std::path::PathBuf> = res_dir
+        .iter()
+        .chain(std::iter::once(&dev_dir))
+        .map(|d| d.join(&file_name))
+        .collect();
+
+    let src = candidates
+        .iter()
+        .find(|p| p.exists())
+        .ok_or_else(|| {
+            AppError::NotFound(format!(
+                "example '{}' not found in any of: {:?}",
+                file_name, candidates
+            ))
+        })?;
+
+    let dest_dir = custom_models_dir();
+    std::fs::create_dir_all(&dest_dir)?;
+    let dest = dest_dir.join(&file_name);
+    std::fs::copy(src, &dest)?;
+    info!("[cmd] custom_import_example {} -> {}", src.display(), dest.display());
+
+    Ok(serde_json::json!({
+        "destPath": dest.to_string_lossy(),
+    }))
+}
+
+/// Remove a custom spec: YAML + sidecar + downloaded dirs (~/.voiceink only).
+#[tauri::command]
+pub fn custom_remove(spec_path: String) -> Result<(), AppError> {
+    info!("[cmd] custom_remove spec_path={}", spec_path);
+    let spec_pb = std::path::PathBuf::from(&spec_path);
+
+    // Sidecar is keyed by YAML basename without extension, mirroring Electron handler.
+    let basename = spec_pb
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    let sidecar = custom_cache_dir().join(format!("{}.paths.json", basename));
+
+    let mut downloaded_dirs: Vec<String> = Vec::new();
+    if let Ok(raw) = std::fs::read_to_string(&sidecar) {
+        if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&raw) {
+            downloaded_dirs = map.into_values().collect();
+        }
+    }
+
+    // Remove YAML + sidecar (best-effort)
+    if spec_pb.exists() {
+        let _ = std::fs::remove_file(&spec_pb);
+    }
+    if sidecar.exists() {
+        let _ = std::fs::remove_file(&sidecar);
+    }
+
+    // Remove downloaded dirs, but only those under ~/.voiceink/
+    let safe_root = home_voiceink_dir();
+    for d in downloaded_dirs {
+        if d.is_empty() { continue; }
+        let resolved = std::path::Path::new(&d).to_path_buf();
+        if resolved == safe_root || resolved.starts_with(&safe_root) {
+            info!("[cmd] custom_remove deleting {:?}", resolved);
+            if resolved.is_dir() {
+                let _ = std::fs::remove_dir_all(&resolved);
+            } else if resolved.exists() {
+                let _ = std::fs::remove_file(&resolved);
+            }
+        } else {
+            warn!("[cmd] custom_remove skipping non-voiceink path: {:?}", resolved);
+        }
+    }
+
+    Ok(())
+}
+
+/// is-downloaded check — sidecar paths.json existence.
+#[tauri::command]
+pub fn custom_is_downloaded(id: String) -> bool {
+    let sidecar = custom_cache_dir().join(format!("{}.paths.json", id));
+    sidecar.exists()
+}
+
+/// Trust state — backed by ~/.voiceink/custom_models/.trusted line list.
+#[tauri::command]
+pub fn custom_is_trusted(id: String) -> bool {
+    let raw = match std::fs::read_to_string(trusted_file_path()) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    raw.lines().any(|line| line.trim() == id)
+}
+
+/// Append `id` to the trusted list if not already present.
+#[tauri::command]
+pub fn custom_set_trusted(id: String) -> Result<(), AppError> {
+    let dir = custom_models_dir();
+    std::fs::create_dir_all(&dir)?;
+
+    let path = trusted_file_path();
+    let mut list: Vec<String> = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw
+            .lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    if !list.iter().any(|s| s == &id) {
+        list.push(id);
+    }
+    let mut content = list.join("\n");
+    content.push('\n');
+    std::fs::write(&path, content)?;
     Ok(())
 }
 

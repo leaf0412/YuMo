@@ -374,6 +374,17 @@ pub fn run() {
             commands::daemon_check_deps,
             commands::daemon_load_model,
             commands::daemon_unload_model,
+            // Custom model YAML plugin
+            commands::list_custom_models,
+            commands::custom_check_deps,
+            commands::custom_install_deps,
+            commands::custom_download,
+            commands::custom_open_dir,
+            commands::custom_import_example,
+            commands::custom_remove,
+            commands::custom_is_downloaded,
+            commands::custom_is_trusted,
+            commands::custom_set_trusted,
             // Sprite sheets
             commands::list_sprites,
             commands::get_sprite_image,
