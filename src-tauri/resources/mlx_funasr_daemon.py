@@ -86,6 +86,42 @@ def get_install_command(missing_packages):
     return f"pip install {' '.join(packages)}"
 
 
+def _parse_custom_spec(spec_path: str) -> dict:
+    """Read and YAML-parse a custom model spec file. Lazy yaml import."""
+    import yaml
+    with open(spec_path, "r") as f:
+        return yaml.safe_load(f)
+
+
+def _split_pip_pkg_name(spec: str) -> str:
+    """'mimo_mlx>=0.1.0' → 'mimo_mlx'. Handles >=, ==, ~=, <, >, !=, ;markers."""
+    import re
+    return re.split(r"[<>=!~;\s]", spec, 1)[0].strip()
+
+
+def check_custom_dependencies(spec_path: str) -> dict:
+    """Check whether the YAML spec's pip_packages are importable.
+
+    Returns: {installed: [...], missing: [pkg_spec, ...], all_installed: bool}
+    """
+    import importlib.util
+    spec = _parse_custom_spec(spec_path)
+    pip_packages = spec.get("pip_packages") or [spec["python_module"]]
+
+    installed, missing = [], []
+    for pkg_spec in pip_packages:
+        name = _split_pip_pkg_name(pkg_spec)
+        if importlib.util.find_spec(name) is not None:
+            installed.append(name)
+        else:
+            missing.append(pkg_spec)
+    return {
+        "installed": installed,
+        "missing": missing,
+        "all_installed": not missing,
+    }
+
+
 def get_model_cache_path(model_repo):
     """Get the model cache path under ~/.voiceink/models."""
     hf_model_dir = f"models--{model_repo.replace('/', '--')}"
@@ -1061,6 +1097,15 @@ def main():
             log("Shutting down")
             send_response({"status": "bye"})
             break
+
+        elif action == "check_custom_dependencies":
+            spec_path = cmd.get("spec_path")
+            try:
+                result = check_custom_dependencies(spec_path)
+                send_response({"status": "success", **result})
+            except Exception as e:
+                log(f"check_custom_dependencies error: {e}")
+                send_response({"status": "error", "error": str(e)})
 
         else:
             send_response({
