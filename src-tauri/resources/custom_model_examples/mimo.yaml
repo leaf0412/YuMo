@@ -1,0 +1,39 @@
+# Reference example: Xiaomi MiMo V2.5 ASR (MLX INT4)
+# Source: https://huggingface.co/carloshuang1224/MiMo-V2.5-ASR-MLX-INT4
+# This file is shipped with 「语墨」 and copied to ~/.voiceink/custom_models/
+# when the user clicks "Import Example" in Settings → Models → Custom Models.
+
+schema_version: 1
+id: custom-mimo-v2.5-asr-int4
+name: MiMo V2.5 ASR (INT4)
+description: Xiaomi MiMo V2.5 ASR, MLX INT4 quantized. Chinese / English.
+size_mb: 8000
+languages:
+  zh: 中文
+  en: English
+speed: 7
+accuracy: 9
+recommended: false
+
+python_module: mimo_mlx
+pip_packages:
+  - mimo_mlx>=0.1.0
+
+download:
+  function: mimo_mlx.download_models
+  kwargs:
+    precision: int4
+    local_root: "{voiceink_models_dir}"
+    audio_tokenizer_repo: XiaomiMiMo/MiMo-Audio-Tokenizer
+  returns: tuple
+  path_names: [asr_dir, tokenizer_dir]
+
+load:
+  function: mimo_mlx.load_asr
+  kwargs:
+    precision: int4
+    audio_tokenizer_dir: "{paths.tokenizer_dir}"
+    local_root: "{voiceink_models_dir}"
+
+transcribe_method: transcribe
+language_param: language

@@ -165,12 +165,38 @@ export function registerModelsHandlers(): void {
       if (safeName !== fileName || safeName.startsWith(".")) {
         throw new Error(`Invalid example file name: ${fileName}`);
       }
-      const src = path.join(
-        app.getAppPath(),
-        "_docs",
-        "custom_model_examples",
-        safeName,
-      );
+      // In dev: <appPath>/src-tauri/resources/custom_model_examples/<file>
+      // In packaged: <resourcesPath>/resources/custom_model_examples/<file>
+      const candidates = [
+        path.join(
+          process.resourcesPath ?? "",
+          "resources",
+          "custom_model_examples",
+          safeName,
+        ),
+        path.join(
+          app.getAppPath(),
+          "src-tauri",
+          "resources",
+          "custom_model_examples",
+          safeName,
+        ),
+      ];
+      let src: string | null = null;
+      for (const c of candidates) {
+        try {
+          await fsp.access(c);
+          src = c;
+          break;
+        } catch {
+          // try next
+        }
+      }
+      if (!src) {
+        throw new Error(
+          `Example "${safeName}" not found in any of: ${candidates.join(", ")}`,
+        );
+      }
       const dest = path.join(customModelsDir(), safeName);
       await fsp.mkdir(customModelsDir(), { recursive: true });
       await fsp.copyFile(src, dest);
