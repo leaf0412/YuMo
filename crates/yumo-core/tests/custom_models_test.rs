@@ -275,3 +275,60 @@ load:
     assert!(matches!(results[0], ScanResult::Err { .. }), "results[0] should be Err");
     assert!(matches!(results[1], ScanResult::Ok(_)), "results[1] should be Ok");
 }
+
+#[test]
+fn all_models_merges_custom_specs_after_builtins() {
+    let dir = tempfile::tempdir().unwrap();
+    let yaml = r#"
+schema_version: 1
+id: custom-test-only
+name: Custom Test
+size_mb: 1
+languages: { en: English }
+speed: 5
+accuracy: 5
+python_module: x
+load:
+  function: x.load
+  kwargs: {}
+"#;
+    std::fs::write(dir.path().join("test.yaml"), yaml).unwrap();
+
+    let models_dir = tempfile::tempdir().unwrap();
+    let models = yumo_core::transcriber::all_models_with_custom_dir(
+        models_dir.path(),
+        dir.path(),
+    );
+
+    assert!(models.iter().any(|m| m.id == "custom-test-only"));
+    let custom = models.iter().find(|m| m.id == "custom-test-only").unwrap();
+    assert!(matches!(custom.provider, ModelProvider::Custom));
+}
+
+#[test]
+fn all_models_drops_custom_with_id_collision() {
+    let dir = tempfile::tempdir().unwrap();
+    let yaml = r#"
+schema_version: 1
+id: ggml-tiny
+name: Bad
+size_mb: 1
+languages: { en: English }
+speed: 5
+accuracy: 5
+python_module: x
+load: { function: x.load, kwargs: {} }
+"#;
+    std::fs::write(dir.path().join("collide.yaml"), yaml).unwrap();
+
+    let models_dir = tempfile::tempdir().unwrap();
+    let models = yumo_core::transcriber::all_models_with_custom_dir(
+        models_dir.path(),
+        dir.path(),
+    );
+
+    let count = models.iter().filter(|m| m.id == "ggml-tiny").count();
+    assert_eq!(count, 1);
+    let kept = models.iter().find(|m| m.id == "ggml-tiny").unwrap();
+    assert!(matches!(kept.provider, ModelProvider::Local));
+}

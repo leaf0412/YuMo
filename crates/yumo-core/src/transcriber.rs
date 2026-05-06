@@ -355,6 +355,13 @@ pub fn check_mlx_model_downloaded(model_repo: &str) -> bool {
 }
 
 pub fn all_models(models_dir: &Path) -> Vec<ModelInfo> {
+    let custom_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".voiceink/custom_models");
+    all_models_with_custom_dir(models_dir, &custom_dir)
+}
+
+pub fn all_models_with_custom_dir(models_dir: &Path, custom_dir: &Path) -> Vec<ModelInfo> {
     let dirs = model_search_dirs(models_dir);
     let mut models = all_predefined_models();
 
@@ -375,10 +382,36 @@ pub fn all_models(models_dir: &Path) -> Vec<ModelInfo> {
                     model.is_downloaded = check_mlx_model_downloaded(repo);
                 }
             }
+            ModelProvider::Custom => {
+                // Custom models compute is_downloaded below when merged
+            }
             _ => {
                 // Cloud models: always "available" (no download needed)
                 model.is_downloaded = true;
             }
+        }
+    }
+
+    // Merge custom models, dedup by id (built-in wins)
+    let builtin_ids: std::collections::HashSet<String> =
+        models.iter().map(|m| m.id.clone()).collect();
+    for result in crate::custom_models::scan_custom_models(custom_dir) {
+        if let crate::custom_models::ScanResult::Ok(spec) = result {
+            if builtin_ids.contains(&spec.id) {
+                log::warn!(
+                    "[custom_models] id '{}' collides with built-in, dropping custom spec at {}",
+                    spec.id,
+                    spec.source_path.display()
+                );
+                continue;
+            }
+            let mut info = crate::custom_models::spec_to_model_info(&spec);
+            // is_downloaded for Custom = sidecar paths.json exists
+            let sidecar = custom_dir
+                .join(".cache")
+                .join(format!("{}.paths.json", spec.id));
+            info.is_downloaded = sidecar.exists();
+            models.push(info);
         }
     }
 
