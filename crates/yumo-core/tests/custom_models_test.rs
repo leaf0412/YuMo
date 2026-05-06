@@ -234,6 +234,6 @@ load:
     });
 
     assert_eq!(results.len(), 2);
-    matches!(results[0], ScanResult::Err { .. });
-    matches!(results[1], ScanResult::Ok(_));
+    assert!(matches!(results[0], ScanResult::Err { .. }), "results[0] should be Err");
+    assert!(matches!(results[1], ScanResult::Ok(_)), "results[1] should be Ok");
 }

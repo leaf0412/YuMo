@@ -185,7 +185,14 @@ pub fn scan_custom_models(dir: &Path) -> Vec<ScanResult> {
     };
 
     let mut out = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!("[custom_models] entry read error in {}: {}", dir.display(), e);
+                continue;
+            }
+        };
         let path = entry.path();
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         if ext != "yaml" && ext != "yml" {
