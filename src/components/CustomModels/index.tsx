@@ -1,36 +1,42 @@
+import { useCallback } from 'react';
 import { Button, Empty, Space, Spin, Typography, message } from 'antd';
 import { FolderOpenOutlined, ImportOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { formatError } from '../../lib/logger';
 import { useCustomModels } from './useCustomModels';
-
-type ElectronAPI = {
-  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
-};
-
-function getElectronAPI(): ElectronAPI {
-  const api = (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
-  if (!api) {
-    throw new Error('window.electronAPI is unavailable — custom models require the Electron host');
-  }
-  return api;
-}
+import { getElectronAPI } from './electronApi';
+import { CustomModelCard } from './CustomModelCard';
 
 /**
  * Settings page section for custom YAML-defined models.
  *
- * Renders a placeholder per-item; T19 replaces the placeholder with
- * <CustomModelCard /> wired to deps-install / download / trust flows.
+ * Aggregates list scan into per-item status (via useCustomModels) and
+ * delegates rendering to <CustomModelCard /> for the four states.
+ * Surface scan errors via toast — silent failures hide misconfigured
+ * YAML files from the user.
  */
 export function CustomModelsSection() {
-  const { items, loading, refresh } = useCustomModels();
   const { t } = useTranslation();
+
+  const reportScanError = useCallback(
+    (err: unknown) => {
+      const msg = formatError(err, 'unknown error');
+      message.error(t('customModels.scanFailed', { msg }));
+    },
+    [t],
+  );
+
+  const { items, loading, refresh } = useCustomModels({ onError: reportScanError });
+
+  const safeRefresh = useCallback(() => {
+    refresh().catch(reportScanError);
+  }, [refresh, reportScanError]);
 
   const handleImportExample = async () => {
     try {
       await getElectronAPI().invoke('custom-import-example', 'mimo.yaml');
       message.success(t('customModels.importSuccess'));
-      refresh();
+      safeRefresh();
     } catch (e) {
       message.error(formatError(e, t('customModels.importFailed')));
     }
@@ -72,21 +78,12 @@ export function CustomModelsSection() {
         <Empty description={t('customModels.empty')} />
       ) : (
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          {items.map((item, i) => (
-            // T19 will replace this placeholder with <CustomModelCard />.
-            <div
-              key={i}
-              style={{
-                padding: 8,
-                border: '1px solid #ddd',
-                borderRadius: 4,
-              }}
-              data-testid={`custom-model-item-${i}`}
-            >
-              {item.kind === 'invalid'
-                ? `Invalid: ${item.sourcePath} — ${item.error}`
-                : `[${item.kind}] ${item.spec.name} (${item.spec.id})`}
-            </div>
+          {items.map((item) => (
+            <CustomModelCard
+              key={item.kind === 'invalid' ? item.sourcePath : item.spec.id}
+              status={item}
+              onChange={safeRefresh}
+            />
           ))}
         </Space>
       )}

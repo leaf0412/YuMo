@@ -4,18 +4,7 @@ import type {
   CustomModelScanResult,
   CustomDepsCheckResult,
 } from './types';
-
-type ElectronAPI = {
-  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
-};
-
-function getElectronAPI(): ElectronAPI {
-  const api = (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
-  if (!api) {
-    throw new Error('window.electronAPI is unavailable — custom models require the Electron host');
-  }
-  return api;
-}
+import { getElectronAPI } from './electronApi';
 
 /**
  * Aggregates list-custom-models + custom-check-deps + custom-is-downloaded
@@ -23,10 +12,18 @@ function getElectronAPI(): ElectronAPI {
  *
  * Each scan-error becomes an `invalid` entry; each ok spec is then probed
  * for deps and download state in order. Errors during the per-spec probes
- * are surfaced as failures (no silent fallback) — the hook re-throws via
- * its containing promise so callers can react.
+ * are surfaced as failures (no silent fallback) — `refresh()` rejects so
+ * callers can `.catch()` and toast, and `onError` is invoked for the
+ * auto-refresh on mount so the initial scan failure is also visible.
  */
-export function useCustomModels() {
+export interface UseCustomModelsOptions {
+  /** Called when the auto-refresh on mount throws. Manual refresh() callers
+   *  should attach their own .catch — this only covers the initial scan. */
+  onError?: (err: unknown) => void;
+}
+
+export function useCustomModels(options: UseCustomModelsOptions = {}) {
+  const { onError } = options;
   const [items, setItems] = useState<CustomModelStatus[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -66,8 +63,12 @@ export function useCustomModels() {
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    refresh().catch((err) => {
+      if (onError) {
+        onError(err);
+      }
+    });
+  }, [refresh, onError]);
 
   return { items, loading, refresh };
 }
