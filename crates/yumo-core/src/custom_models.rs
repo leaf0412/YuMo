@@ -6,7 +6,7 @@
 //! Rust-side declarative bridge.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
@@ -128,4 +128,40 @@ pub fn parse_spec_from_file(path: &Path) -> Result<CustomModelSpec, AppError> {
     let yaml = std::fs::read_to_string(path)
         .map_err(|e| AppError::Io(format!("read {}: {}", path.display(), e)))?;
     parse_spec_from_str(&yaml, path.to_path_buf())
+}
+
+const SUPPORTED_SCHEMA_VERSIONS: &[u32] = &[1];
+
+pub fn validate_spec(spec: &CustomModelSpec, existing_ids: &HashSet<String>) -> Result<(), AppError> {
+    if !SUPPORTED_SCHEMA_VERSIONS.contains(&spec.schema_version) {
+        return Err(AppError::InvalidInput(format!(
+            "unsupported schema_version {} (supported: {:?})",
+            spec.schema_version, SUPPORTED_SCHEMA_VERSIONS
+        )));
+    }
+    if existing_ids.contains(&spec.id) {
+        return Err(AppError::InvalidInput(format!(
+            "id '{}' collides with an existing built-in model id",
+            spec.id
+        )));
+    }
+    if spec.languages.is_empty() {
+        return Err(AppError::InvalidInput("languages must not be empty".into()));
+    }
+    if !(1..=10).contains(&spec.speed) {
+        return Err(AppError::InvalidInput(format!("speed must be 1-10, got {}", spec.speed)));
+    }
+    if !(1..=10).contains(&spec.accuracy) {
+        return Err(AppError::InvalidInput(format!("accuracy must be 1-10, got {}", spec.accuracy)));
+    }
+    if spec.id.trim().is_empty() {
+        return Err(AppError::InvalidInput("id must not be empty".into()));
+    }
+    if spec.name.trim().is_empty() {
+        return Err(AppError::InvalidInput("name must not be empty".into()));
+    }
+    if spec.python_module.trim().is_empty() {
+        return Err(AppError::InvalidInput("python_module must not be empty".into()));
+    }
+    Ok(())
 }

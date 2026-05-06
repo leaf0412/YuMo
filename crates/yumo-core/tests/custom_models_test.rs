@@ -1,6 +1,7 @@
 use yumo_core::custom_models::{parse_spec_from_str, CustomModelSpec};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use yumo_core::custom_models::validate_spec;
 
 #[test]
 fn parses_minimal_valid_yaml() {
@@ -124,4 +125,69 @@ load:
         }
         _ => panic!("expected HfRepos variant"),
     }
+}
+
+fn make_minimal_spec(id: &str) -> CustomModelSpec {
+    let yaml = format!(r#"
+schema_version: 1
+id: {}
+name: Test
+size_mb: 1
+languages:
+  zh: 中文
+speed: 5
+accuracy: 5
+python_module: pkg
+load:
+  function: pkg.load
+  kwargs: {{}}
+"#, id);
+    parse_spec_from_str(&yaml, PathBuf::from("/tmp/t.yaml")).unwrap()
+}
+
+#[test]
+fn validate_rejects_id_collision_with_builtin() {
+    let spec = make_minimal_spec("ggml-tiny");
+    let builtin: HashSet<String> = ["ggml-tiny".to_string()].into_iter().collect();
+    let err = validate_spec(&spec, &builtin).unwrap_err();
+    assert!(err.to_string().contains("ggml-tiny"));
+    assert!(err.to_string().to_lowercase().contains("collide") || err.to_string().contains("已存在"));
+}
+
+#[test]
+fn validate_rejects_speed_out_of_range() {
+    let mut spec = make_minimal_spec("ok");
+    spec.speed = 11;
+    let err = validate_spec(&spec, &HashSet::new()).unwrap_err();
+    assert!(err.to_string().to_lowercase().contains("speed"));
+}
+
+#[test]
+fn validate_rejects_accuracy_out_of_range() {
+    let mut spec = make_minimal_spec("ok");
+    spec.accuracy = 0;
+    let err = validate_spec(&spec, &HashSet::new()).unwrap_err();
+    assert!(err.to_string().to_lowercase().contains("accuracy"));
+}
+
+#[test]
+fn validate_rejects_empty_languages() {
+    let mut spec = make_minimal_spec("ok");
+    spec.languages.clear();
+    let err = validate_spec(&spec, &HashSet::new()).unwrap_err();
+    assert!(err.to_string().to_lowercase().contains("languages"));
+}
+
+#[test]
+fn validate_rejects_unsupported_schema_version() {
+    let mut spec = make_minimal_spec("ok");
+    spec.schema_version = 99;
+    let err = validate_spec(&spec, &HashSet::new()).unwrap_err();
+    assert!(err.to_string().contains("schema_version"));
+}
+
+#[test]
+fn validate_passes_for_valid_spec() {
+    let spec = make_minimal_spec("custom-ok");
+    validate_spec(&spec, &HashSet::new()).unwrap();
 }

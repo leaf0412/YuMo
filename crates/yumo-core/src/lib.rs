@@ -20,4 +20,4 @@ pub mod state;
 
 pub mod audio_io;
 
-pub use custom_models::{CustomModelSpec, DownloadSpec, DownloadReturnKind, LoadSpec, parse_spec_from_str, parse_spec_from_file};
+pub use custom_models::{CustomModelSpec, DownloadSpec, DownloadReturnKind, LoadSpec, parse_spec_from_str, parse_spec_from_file, validate_spec};
