@@ -42,3 +42,86 @@ load:
     let langs: HashMap<String, String> = [("zh".to_string(), "中文".to_string())].into();
     assert_eq!(spec.languages, langs);
 }
+
+#[test]
+fn parses_full_yaml_with_function_download() {
+    let yaml = r#"
+schema_version: 1
+id: custom-mimo-int4
+name: MiMo INT4
+description: Xiaomi MiMo V2.5 ASR INT4
+size_mb: 8000
+languages:
+  zh: 中文
+  en: English
+speed: 7
+accuracy: 9
+recommended: false
+python_module: mimo_mlx
+pip_packages:
+  - mimo_mlx>=0.1.0
+download:
+  function: mimo_mlx.download_models
+  kwargs:
+    precision: int4
+    audio_tokenizer_repo: XiaomiMiMo/MiMo-Audio-Tokenizer
+  returns: tuple
+  path_names: [asr_dir, tokenizer_dir]
+load:
+  function: mimo_mlx.load_asr
+  kwargs:
+    precision: int4
+    audio_tokenizer_dir: "{paths.tokenizer_dir}"
+transcribe_method: transcribe
+language_param: language
+"#;
+    let spec = parse_spec_from_str(yaml, PathBuf::from("/tmp/mimo.yaml")).unwrap();
+
+    assert_eq!(spec.id, "custom-mimo-int4");
+    assert_eq!(spec.description.as_deref(), Some("Xiaomi MiMo V2.5 ASR INT4"));
+    assert_eq!(spec.pip_packages, vec!["mimo_mlx>=0.1.0".to_string()]);
+
+    match spec.download.unwrap() {
+        yumo_core::custom_models::DownloadSpec::Function { function, kwargs, returns, path_names } => {
+            assert_eq!(function, "mimo_mlx.download_models");
+            assert_eq!(kwargs.get("precision").unwrap().as_str(), Some("int4"));
+            assert!(matches!(returns, yumo_core::custom_models::DownloadReturnKind::Tuple));
+            assert_eq!(path_names, vec!["asr_dir".to_string(), "tokenizer_dir".to_string()]);
+        }
+        _ => panic!("expected Function variant"),
+    }
+}
+
+#[test]
+fn parses_yaml_with_hf_repos_download() {
+    let yaml = r#"
+schema_version: 1
+id: custom-simple
+name: Simple
+size_mb: 500
+languages:
+  en: English
+speed: 5
+accuracy: 5
+python_module: some_pkg
+download:
+  hf_repos:
+    - foo/bar
+    - foo/baz
+  paths:
+    asr_dir: "{repo_dirs[0]}"
+    tok_dir: "{repo_dirs[1]}"
+load:
+  function: some_pkg.load
+  kwargs: {}
+"#;
+    let spec = parse_spec_from_str(yaml, PathBuf::from("/tmp/x.yaml")).unwrap();
+
+    match spec.download.unwrap() {
+        yumo_core::custom_models::DownloadSpec::HfRepos { hf_repos, paths } => {
+            assert_eq!(hf_repos, vec!["foo/bar".to_string(), "foo/baz".to_string()]);
+            assert_eq!(paths.get("asr_dir").unwrap(), "{repo_dirs[0]}");
+        }
+        _ => panic!("expected HfRepos variant"),
+    }
+}
