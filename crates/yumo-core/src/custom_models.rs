@@ -5,9 +5,127 @@
 //! daemon does the actual `import` + invocation; this module is purely the
 //! Rust-side declarative bridge.
 
-use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use crate::error::AppError;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoadSpec {
+    pub function: String,
+    #[serde(default)]
+    pub kwargs: HashMap<String, serde_yaml::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DownloadSpec {
+    HfRepos {
+        hf_repos: Vec<String>,
+        #[serde(default)]
+        paths: HashMap<String, String>,
+    },
+    Function {
+        function: String,
+        #[serde(default)]
+        kwargs: HashMap<String, serde_yaml::Value>,
+        returns: DownloadReturnKind,
+        #[serde(default)]
+        path_names: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DownloadReturnKind {
+    Tuple,
+    Dict,
+    Path,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomModelSpec {
     pub source_path: PathBuf,
+    pub schema_version: u32,
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub size_mb: u32,
+    pub languages: HashMap<String, String>,
+    pub speed: u8,
+    pub accuracy: u8,
+    pub recommended: bool,
+    pub python_module: String,
+    pub pip_packages: Vec<String>,
+    pub download: Option<DownloadSpec>,
+    pub load: LoadSpec,
+    pub transcribe_method: String,
+    pub language_param: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSpec {
+    schema_version: u32,
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    size_mb: u32,
+    languages: HashMap<String, String>,
+    speed: u8,
+    accuracy: u8,
+    #[serde(default)]
+    recommended: bool,
+    python_module: String,
+    #[serde(default)]
+    pip_packages: Option<Vec<String>>,
+    #[serde(default)]
+    download: Option<DownloadSpec>,
+    load: LoadSpec,
+    #[serde(default)]
+    transcribe_method: Option<String>,
+    #[serde(default)]
+    language_param: Option<String>,
+}
+
+pub fn parse_spec_from_str(yaml: &str, source_path: PathBuf) -> Result<CustomModelSpec, AppError> {
+    let raw: RawSpec = serde_yaml::from_str(yaml).map_err(|e| {
+        AppError::InvalidInput(format!(
+            "YAML parse error in {}: {}",
+            source_path.display(),
+            e
+        ))
+    })?;
+
+    let pip_packages = raw
+        .pip_packages
+        .unwrap_or_else(|| vec![raw.python_module.clone()]);
+
+    Ok(CustomModelSpec {
+        source_path,
+        schema_version: raw.schema_version,
+        id: raw.id,
+        name: raw.name,
+        description: raw.description,
+        size_mb: raw.size_mb,
+        languages: raw.languages,
+        speed: raw.speed,
+        accuracy: raw.accuracy,
+        recommended: raw.recommended,
+        python_module: raw.python_module,
+        pip_packages,
+        download: raw.download,
+        load: raw.load,
+        transcribe_method: raw
+            .transcribe_method
+            .unwrap_or_else(|| "transcribe".to_string()),
+        language_param: raw.language_param.unwrap_or_else(|| "language".to_string()),
+    })
+}
+
+pub fn parse_spec_from_file(path: &Path) -> Result<CustomModelSpec, AppError> {
+    let yaml = std::fs::read_to_string(path)
+        .map_err(|e| AppError::Io(format!("read {}: {}", path.display(), e)))?;
+    parse_spec_from_str(&yaml, path.to_path_buf())
 }
