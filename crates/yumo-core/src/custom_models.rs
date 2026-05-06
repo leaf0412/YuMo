@@ -165,3 +165,39 @@ pub fn validate_spec(spec: &CustomModelSpec, existing_ids: &HashSet<String>) -> 
     }
     Ok(())
 }
+
+#[derive(Debug)]
+pub enum ScanResult {
+    Ok(CustomModelSpec),
+    Err { path: PathBuf, error: String },
+}
+
+pub fn scan_custom_models(dir: &Path) -> Vec<ScanResult> {
+    if !dir.exists() {
+        return Vec::new();
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            log::warn!("[custom_models] read_dir {} failed: {}", dir.display(), e);
+            return Vec::new();
+        }
+    };
+
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext != "yaml" && ext != "yml" {
+            continue;
+        }
+        match parse_spec_from_file(&path) {
+            Ok(spec) => out.push(ScanResult::Ok(spec)),
+            Err(e) => out.push(ScanResult::Err {
+                path: path.clone(),
+                error: e.to_string(),
+            }),
+        }
+    }
+    out
+}

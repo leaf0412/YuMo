@@ -191,3 +191,49 @@ fn validate_passes_for_valid_spec() {
     let spec = make_minimal_spec("custom-ok");
     validate_spec(&spec, &HashSet::new()).unwrap();
 }
+
+use yumo_core::custom_models::{scan_custom_models, ScanResult};
+
+#[test]
+fn scan_returns_empty_for_nonexistent_dir() {
+    let results = scan_custom_models(&PathBuf::from("/nonexistent/path/xyz"));
+    assert!(results.is_empty());
+}
+
+#[test]
+fn scan_returns_empty_for_empty_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let results = scan_custom_models(dir.path());
+    assert!(results.is_empty());
+}
+
+#[test]
+fn scan_isolates_invalid_files_from_valid_ones() {
+    let dir = tempfile::tempdir().unwrap();
+    let valid = r#"
+schema_version: 1
+id: ok
+name: OK
+size_mb: 1
+languages: { en: English }
+speed: 5
+accuracy: 5
+python_module: x
+load:
+  function: x.load
+  kwargs: {}
+"#;
+    std::fs::write(dir.path().join("good.yaml"), valid).unwrap();
+    std::fs::write(dir.path().join("broken.yaml"), "not: : valid: yaml::").unwrap();
+    std::fs::write(dir.path().join("ignored.txt"), "should be skipped").unwrap();
+
+    let mut results = scan_custom_models(dir.path());
+    results.sort_by_key(|r| match r {
+        ScanResult::Ok(s) => s.source_path.file_name().unwrap().to_string_lossy().into_owned(),
+        ScanResult::Err { path, .. } => path.file_name().unwrap().to_string_lossy().into_owned(),
+    });
+
+    assert_eq!(results.len(), 2);
+    matches!(results[0], ScanResult::Err { .. });
+    matches!(results[1], ScanResult::Ok(_));
+}
