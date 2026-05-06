@@ -1,6 +1,5 @@
 """Shared helpers for daemon tests."""
 import importlib.util
-import os
 import sys
 from pathlib import Path
 
