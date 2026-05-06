@@ -1,0 +1,16 @@
+schema_version: 1
+id: stub-hf
+name: Stub HF
+size_mb: 50
+languages: { en: English }
+speed: 5
+accuracy: 5
+python_module: fake_asr_pkg
+download:
+  hf_repos: [foo/bar]
+  paths:
+    asr_dir: "{repo_dirs[0]}"
+load:
+  function: fake_asr_pkg.load_asr
+  kwargs:
+    audio_tokenizer_dir: "{paths.asr_dir}"
