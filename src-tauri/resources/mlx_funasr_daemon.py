@@ -21,6 +21,7 @@ import os
 import json
 import gc
 import time
+import subprocess
 
 # All model cache lives under ~/.voiceink/models
 _mlx_cache = os.path.join(os.path.expanduser("~"), ".voiceink", "models")
@@ -120,6 +121,21 @@ def check_custom_dependencies(spec_path: str) -> dict:
         "missing": missing,
         "all_installed": not missing,
     }
+
+
+def install_custom_dependencies(spec_path: str) -> dict:
+    """Run pip install for the spec's pip_packages.
+
+    Returns: {success: bool, stdout: str, stderr: str, error: str|None}
+    """
+    spec = _parse_custom_spec(spec_path)
+    pkgs = spec.get("pip_packages") or [spec["python_module"]]
+    cmd = [sys.executable, "-m", "pip", "install", *pkgs]
+    log(f"running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode == 0:
+        return {"success": True, "stdout": result.stdout, "stderr": result.stderr, "error": None}
+    return {"success": False, "stdout": result.stdout, "stderr": result.stderr, "error": result.stderr.strip() or "pip install failed"}
 
 
 def get_model_cache_path(model_repo):
@@ -1105,6 +1121,15 @@ def main():
                 send_response({"status": "success", **result})
             except Exception as e:
                 log(f"check_custom_dependencies error: {e}")
+                send_response({"status": "error", "error": str(e)})
+
+        elif action == "install_custom_dependencies":
+            spec_path = cmd.get("spec_path")
+            try:
+                result = install_custom_dependencies(spec_path)
+                send_response({"status": "success" if result["success"] else "error", **result})
+            except Exception as e:
+                log(f"install_custom_dependencies error: {e}")
                 send_response({"status": "error", "error": str(e)})
 
         else:
