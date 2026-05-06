@@ -156,6 +156,80 @@ export interface PipelineState {
 }
 
 // ---------------------------------------------------------------------------
+// Custom Model YAML Plugin
+// ---------------------------------------------------------------------------
+//
+// camelCase fields per TS convention. The Rust side (yumo-core) uses snake_case
+// for these structs; the Electron IPC handler in src-electron/ipc/models.ts is
+// responsible for converting snake_case → camelCase before forwarding to the
+// renderer.
+
+export interface CustomModelLoadSpec {
+  function: string;
+  kwargs: Record<string, unknown>;
+}
+
+// Note: the Rust side stores DownloadSpec as serde untagged (no `kind` field
+// in JSON). The Electron IPC handler in src-electron/ipc/models.ts adds the
+// `kind` discriminator before forwarding to the renderer.
+export type CustomModelDownloadSpec =
+  | {
+      kind: 'function';
+      function: string;
+      kwargs: Record<string, unknown>;
+      returns: 'tuple' | 'dict' | 'path';
+      pathNames: string[];
+    }
+  | {
+      kind: 'hfRepos';
+      hfRepos: string[];
+      paths: Record<string, string>;
+    };
+
+export interface CustomModelSpec {
+  sourcePath: string;
+  schemaVersion: number;
+  id: string;
+  name: string;
+  description: string | null;
+  sizeMb: number;
+  languages: Record<string, string>;
+  speed: number;
+  accuracy: number;
+  recommended: boolean;
+  pythonModule: string;
+  pipPackages: string[];
+  download: CustomModelDownloadSpec | null;
+  load: CustomModelLoadSpec;
+  transcribeMethod: string;
+  languageParam: string;
+}
+
+export interface CustomModelScanResult {
+  ok: CustomModelSpec[];
+  errors: { path: string; error: string }[];
+}
+
+export interface CustomDepsCheckResult {
+  installed: string[];
+  missing: string[];
+  allInstalled: boolean;
+}
+
+export interface CustomDepsInstallResult {
+  success: boolean;
+  stdout: string;
+  stderr: string;
+  error: string | null;
+}
+
+export interface CustomDownloadResult {
+  success: boolean;
+  paths: Record<string, string>;
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Event callback types
 // ---------------------------------------------------------------------------
 

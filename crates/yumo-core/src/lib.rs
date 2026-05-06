@@ -10,6 +10,7 @@ pub mod pipeline;
 pub mod text_processor;
 pub mod transcriber;
 pub mod cloud;
+pub mod custom_models;
 pub mod enhancer;
 pub mod downloader;
 pub mod vad;
@@ -18,3 +19,5 @@ pub mod device_watcher;
 pub mod state;
 
 pub mod audio_io;
+
+pub use custom_models::{CustomModelSpec, DownloadSpec, DownloadReturnKind, LoadSpec, ScanResult, parse_spec_from_str, parse_spec_from_file, scan_custom_models, spec_to_model_info, validate_spec};

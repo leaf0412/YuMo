@@ -16,6 +16,7 @@ extraResources:
     filter:
       - "mlx_funasr_daemon.py"
       - "denoiser/**/*"
+      - "custom_model_examples/**/*"
 mac:
   target:
     - dmg

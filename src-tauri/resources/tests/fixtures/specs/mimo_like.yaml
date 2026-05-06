@@ -1,0 +1,23 @@
+schema_version: 1
+id: stub-mimo
+name: Stub MiMo
+size_mb: 100
+languages: { zh: 中文, en: English }
+speed: 7
+accuracy: 9
+python_module: fake_asr_pkg
+pip_packages: [fake_asr_pkg]
+download:
+  function: fake_asr_pkg.download_models
+  kwargs:
+    precision: int4
+    local_root: "{voiceink_models_dir}"
+    audio_tokenizer_repo: fake/tok
+  returns: tuple
+  path_names: [asr_dir, tokenizer_dir]
+load:
+  function: fake_asr_pkg.load_asr
+  kwargs:
+    precision: int4
+    audio_tokenizer_dir: "{paths.tokenizer_dir}"
+    local_root: "{voiceink_models_dir}"

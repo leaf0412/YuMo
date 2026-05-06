@@ -99,6 +99,16 @@ export type NapiAddon = {
   // Legacy import
   detectVoiceinkLegacyPath(): Promise<string | null>;
   importVoiceinkLegacy(storePath: string): Promise<string>;
+
+  // Custom-model YAML plugin
+  scanCustomModels(dir: string): Promise<string>;
+  customCheckDeps(specPath: string): Promise<string>;
+  customInstallDeps(specPath: string): Promise<string>;
+  customDownload(
+    specPath: string,
+    voiceinkModelsDir: string,
+    customModelsDir: string,
+  ): Promise<string>;
 };
 
 // ---------------------------------------------------------------------------

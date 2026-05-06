@@ -21,6 +21,7 @@ import os
 import json
 import gc
 import time
+import subprocess
 
 # All model cache lives under ~/.voiceink/models
 _mlx_cache = os.path.join(os.path.expanduser("~"), ".voiceink", "models")
@@ -84,6 +85,187 @@ def get_install_command(missing_packages):
     }
     packages = [pkg_map.get(p, p) for p in missing_packages]
     return f"pip install {' '.join(packages)}"
+
+
+def _parse_custom_spec(spec_path: str) -> dict:
+    """Read and YAML-parse a custom model spec file. Lazy yaml import."""
+    import yaml
+    with open(spec_path, "r") as f:
+        return yaml.safe_load(f)
+
+
+def _split_pip_pkg_name(spec: str) -> str:
+    """'mimo_mlx>=0.1.0' → 'mimo_mlx'. Handles >=, ==, ~=, <, >, !=, ;markers."""
+    import re
+    return re.split(r"[<>=!~;\s]", spec, 1)[0].strip()
+
+
+def check_custom_dependencies(spec_path: str) -> dict:
+    """Check whether the YAML spec's pip_packages are importable.
+
+    Returns: {installed: [...], missing: [pkg_spec, ...], all_installed: bool}
+    """
+    import importlib.util
+    spec = _parse_custom_spec(spec_path)
+    pip_packages = spec.get("pip_packages") or [spec["python_module"]]
+
+    installed, missing = [], []
+    for pkg_spec in pip_packages:
+        name = _split_pip_pkg_name(pkg_spec)
+        if importlib.util.find_spec(name) is not None:
+            installed.append(name)
+        else:
+            missing.append(pkg_spec)
+    return {
+        "installed": installed,
+        "missing": missing,
+        "all_installed": not missing,
+    }
+
+
+def install_custom_dependencies(spec_path: str) -> dict:
+    """Run pip install for the spec's pip_packages.
+
+    Returns: {success: bool, stdout: str, stderr: str, error: str|None}
+    """
+    spec = _parse_custom_spec(spec_path)
+    pkgs = spec.get("pip_packages") or [spec["python_module"]]
+    cmd = [sys.executable, "-m", "pip", "install", *pkgs]
+    log(f"running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode == 0:
+        return {"success": True, "stdout": result.stdout, "stderr": result.stderr, "error": None}
+    return {"success": False, "stdout": result.stdout, "stderr": result.stderr, "error": result.stderr.strip() or "pip install failed"}
+
+
+def _resolve_attr(module_name: str, dotted_path: str):
+    """Resolve 'pkg.submod.func' → callable, after importing pkg.
+
+    The first segment must equal module_name (or be a prefix); subsequent
+    segments are attribute access on the imported module. If an attribute
+    lookup fails, fall back to importing it as a deeper submodule.
+    """
+    import importlib
+    parts = dotted_path.split(".")
+    # The dotted path may include the module name as its first segment
+    # (e.g. "mimo_mlx.load_asr") or just attributes ("load_asr").
+    if parts[0] == module_name:
+        attrs = parts[1:]
+    else:
+        attrs = parts
+    obj = importlib.import_module(module_name)
+    for i, a in enumerate(attrs):
+        try:
+            obj = getattr(obj, a)
+        except AttributeError:
+            # Try as a deeper submodule
+            full = ".".join([module_name] + attrs[: i + 1])
+            obj = importlib.import_module(full)
+    return obj
+
+
+def _render_kwargs(kwargs: dict, voiceink_models_dir: str, paths: dict | None = None, repo_dirs: list | None = None) -> dict:
+    """Replace {voiceink_models_dir}, {paths.X}, {repo_dirs[N]} in string values."""
+    import re
+    rendered = {}
+    paths = paths or {}
+    repo_dirs = repo_dirs or []
+    for k, v in kwargs.items():
+        if isinstance(v, str):
+            v = v.replace("{voiceink_models_dir}", voiceink_models_dir)
+            for m in list(re.finditer(r"\{paths\.([^}]+)\}", v)):
+                key = m.group(1)
+                if key not in paths:
+                    raise KeyError(f"paths.{key} not resolved (download must run first)")
+                v = v.replace(m.group(0), paths[key])
+            for m in list(re.finditer(r"\{repo_dirs\[(\d+)\]\}", v)):
+                idx = int(m.group(1))
+                if idx >= len(repo_dirs):
+                    raise IndexError(f"repo_dirs[{idx}] out of range (only {len(repo_dirs)} repos)")
+                v = v.replace(m.group(0), str(repo_dirs[idx]))
+        rendered[k] = v
+    return rendered
+
+
+def download_custom_model(spec_path: str, voiceink_models_dir: str, custom_models_dir: str) -> dict:
+    """Run the download step declared in the YAML spec; write sidecar paths.json."""
+    import json
+    spec = _parse_custom_spec(spec_path)
+    download = spec.get("download")
+    if not download:
+        return {"success": True, "paths": {}, "note": "no download step declared"}
+
+    paths_out: dict = {}
+
+    if "function" in download:
+        func = _resolve_attr(spec["python_module"], download["function"])
+        rendered = _render_kwargs(download.get("kwargs", {}), voiceink_models_dir)
+        result = func(**rendered)
+        returns = download.get("returns", "tuple")
+        if returns == "tuple":
+            names = download.get("path_names", [])
+            if len(names) != len(result):
+                raise ValueError(f"path_names has {len(names)} entries but function returned {len(result)} values")
+            paths_out = {n: str(p) for n, p in zip(names, result)}
+        elif returns == "dict":
+            paths_out = {k: str(v) for k, v in result.items()}
+        elif returns == "path":
+            names = download.get("path_names", ["model_dir"])
+            paths_out = {names[0]: str(result)}
+        else:
+            raise ValueError(f"unknown returns kind: {returns}")
+    elif "hf_repos" in download:
+        from huggingface_hub import snapshot_download
+        from pathlib import Path as _Path
+        repo_dirs = []
+        for repo in download["hf_repos"]:
+            sanitized = repo.replace("/", "--")
+            local_dir = _Path(voiceink_models_dir) / f"custom-{sanitized}"
+            snapshot_download(repo, local_dir=str(local_dir))
+            repo_dirs.append(str(local_dir))
+
+        raw_paths = download.get("paths", {})
+        if not raw_paths:
+            # Default: name them repo_0, repo_1...
+            paths_out = {f"repo_{i}": p for i, p in enumerate(repo_dirs)}
+        else:
+            paths_out = _render_kwargs(raw_paths, voiceink_models_dir, repo_dirs=repo_dirs)
+            paths_out = {k: str(v) for k, v in paths_out.items()}
+    else:
+        raise ValueError("download must declare either 'function' or 'hf_repos'")
+
+    # Write sidecar atomically
+    from pathlib import Path
+    cache_dir = Path(custom_models_dir) / ".cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    sidecar = cache_dir / f"{spec['id']}.paths.json"
+    tmp = sidecar.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(paths_out, indent=2))
+    tmp.replace(sidecar)
+
+    return {"success": True, "paths": paths_out}
+
+
+def load_custom_model(spec_path: str, voiceink_models_dir: str, custom_models_dir: str):
+    """Load a custom-spec model: read sidecar, render kwargs, call load.function."""
+    import json
+    from pathlib import Path
+    spec = _parse_custom_spec(spec_path)
+    sidecar = Path(custom_models_dir) / ".cache" / f"{spec['id']}.paths.json"
+    if not sidecar.exists():
+        raise FileNotFoundError(
+            f"paths.json sidecar missing at {sidecar} — run download_custom_model first"
+        )
+    paths = json.loads(sidecar.read_text())
+
+    load = spec["load"]
+    rendered = _render_kwargs(load.get("kwargs", {}), voiceink_models_dir, paths=paths)
+
+    func = _resolve_attr(spec["python_module"], load["function"])
+    model = func(**rendered)
+    model._daemon_model_type = "custom"
+    model._daemon_custom_spec = spec
+    return model
 
 
 def get_model_cache_path(model_repo):
@@ -310,6 +492,8 @@ def transcribe(model, audio_path, language=None, max_tokens=None, temperature=No
         elif model_type == "qwen3_asr":
             tokens = max_tokens if max_tokens else 8192
             return _transcribe_qwen3_asr(model, audio_path, language, max_tokens=tokens, temperature=temp)
+        elif model_type == "custom":
+            return _transcribe_custom(model, audio_path, language)
         else:
             tokens = max_tokens if max_tokens else 500
             return _transcribe_funasr(model, audio_path, language, max_tokens=tokens, temperature=temp)
@@ -551,6 +735,24 @@ def _qwen3_generate_single(model, audio_path, language, max_tokens, temperature)
     text = result.text if hasattr(result, 'text') else str(result)
     _log_funasr_result(result)
     return text.strip() if text else ""
+
+
+def _transcribe_custom(model, audio_path, language):
+    """Transcribe using a custom-loaded model from YAML spec.
+
+    Honors `transcribe_method` and `language_param` from the spec, defaulting to
+    `transcribe` and `language` respectively. `max_tokens` / `temperature` are
+    intentionally NOT forwarded — custom-model APIs vary too much; spec defaults
+    handle their own decoding parameters.
+    """
+    spec = model._daemon_custom_spec
+    method_name = spec.get("transcribe_method", "transcribe")
+    lang_param = spec.get("language_param", "language")
+    method = getattr(model, method_name)
+    kwargs = {}
+    if language:
+        kwargs[lang_param] = language
+    return method(audio_path, **kwargs)
 
 
 def _transcribe_funasr(model, audio_path, language=None, max_tokens=500, temperature=0.0):
@@ -973,6 +1175,7 @@ def main():
         elif action == "load":
             new_repo = cmd.get("model", "")
             language = cmd.get("language")
+            provider = cmd.get("provider", "")
 
             if not new_repo:
                 send_response({
@@ -1001,11 +1204,18 @@ def main():
                         except Exception:
                             pass
 
-                # Download if not available
-                if not check_model_downloaded(new_repo):
-                    download_model(new_repo)
+                if provider == "custom":
+                    voiceink_dir = cmd.get("voiceink_models_dir") or _mlx_cache
+                    custom_dir = cmd.get("custom_models_dir") or os.path.join(
+                        os.path.expanduser("~"), ".voiceink", "custom_models"
+                    )
+                    model = load_custom_model(new_repo, voiceink_dir, custom_dir)
+                else:
+                    # Download if not available
+                    if not check_model_downloaded(new_repo):
+                        download_model(new_repo)
 
-                model = load_model(new_repo, language)
+                    model = load_model(new_repo, language)
                 model_repo = new_repo
                 log(f"Model switch complete: {new_repo}")
                 send_response({"status": "loaded", "model": new_repo})
@@ -1061,6 +1271,35 @@ def main():
             log("Shutting down")
             send_response({"status": "bye"})
             break
+
+        elif action == "check_custom_dependencies":
+            spec_path = cmd.get("spec_path")
+            try:
+                result = check_custom_dependencies(spec_path)
+                send_response({"status": "success", **result})
+            except Exception as e:
+                log(f"check_custom_dependencies error: {e}")
+                send_response({"status": "error", "error": str(e)})
+
+        elif action == "install_custom_dependencies":
+            spec_path = cmd.get("spec_path")
+            try:
+                result = install_custom_dependencies(spec_path)
+                send_response({"status": "success" if result["success"] else "error", **result})
+            except Exception as e:
+                log(f"install_custom_dependencies error: {e}")
+                send_response({"status": "error", "error": str(e)})
+
+        elif action == "download_custom_model":
+            spec_path = cmd.get("spec_path")
+            voiceink_models_dir = cmd.get("voiceink_models_dir") or _mlx_cache
+            custom_models_dir = cmd.get("custom_models_dir") or os.path.join(os.path.expanduser("~"), ".voiceink", "custom_models")
+            try:
+                result = download_custom_model(spec_path, voiceink_models_dir, custom_models_dir)
+                send_response({"status": "success", **result})
+            except Exception as e:
+                log(f"download_custom_model error: {e}")
+                send_response({"status": "error", "error": str(e)})
 
         else:
             send_response({
