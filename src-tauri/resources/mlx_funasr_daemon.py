@@ -246,6 +246,28 @@ def download_custom_model(spec_path: str, voiceink_models_dir: str, custom_model
     return {"success": True, "paths": paths_out}
 
 
+def load_custom_model(spec_path: str, voiceink_models_dir: str, custom_models_dir: str):
+    """Load a custom-spec model: read sidecar, render kwargs, call load.function."""
+    import json
+    from pathlib import Path
+    spec = _parse_custom_spec(spec_path)
+    sidecar = Path(custom_models_dir) / ".cache" / f"{spec['id']}.paths.json"
+    if not sidecar.exists():
+        raise FileNotFoundError(
+            f"paths.json sidecar missing at {sidecar} — run download_custom_model first"
+        )
+    paths = json.loads(sidecar.read_text())
+
+    load = spec["load"]
+    rendered = _render_kwargs(load.get("kwargs", {}), voiceink_models_dir, paths=paths)
+
+    func = _resolve_attr(spec["python_module"], load["function"])
+    model = func(**rendered)
+    model._daemon_model_type = "custom"
+    model._daemon_custom_spec = spec
+    return model
+
+
 def get_model_cache_path(model_repo):
     """Get the model cache path under ~/.voiceink/models."""
     hf_model_dir = f"models--{model_repo.replace('/', '--')}"
@@ -1133,6 +1155,7 @@ def main():
         elif action == "load":
             new_repo = cmd.get("model", "")
             language = cmd.get("language")
+            provider = cmd.get("provider", "")
 
             if not new_repo:
                 send_response({
@@ -1161,11 +1184,18 @@ def main():
                         except Exception:
                             pass
 
-                # Download if not available
-                if not check_model_downloaded(new_repo):
-                    download_model(new_repo)
+                if provider == "custom":
+                    voiceink_dir = cmd.get("voiceink_models_dir") or _mlx_cache
+                    custom_dir = cmd.get("custom_models_dir") or os.path.join(
+                        os.path.expanduser("~"), ".voiceink", "custom_models"
+                    )
+                    model = load_custom_model(new_repo, voiceink_dir, custom_dir)
+                else:
+                    # Download if not available
+                    if not check_model_downloaded(new_repo):
+                        download_model(new_repo)
 
-                model = load_model(new_repo, language)
+                    model = load_model(new_repo, language)
                 model_repo = new_repo
                 log(f"Model switch complete: {new_repo}")
                 send_response({"status": "loaded", "model": new_repo})

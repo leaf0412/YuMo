@@ -165,5 +165,35 @@ class DownloadHfReposVariantTest(unittest.TestCase):
             huggingface_hub.snapshot_download = original
 
 
+class LoadCustomTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        add_fixtures_to_path()
+        cls.daemon = load_daemon_module()
+
+    def _setup(self, tmp):
+        tmp = Path(tmp)
+        custom_dir = tmp / "custom_models"; custom_dir.mkdir()
+        voiceink_dir = tmp / "models"; voiceink_dir.mkdir()
+        spec_path = custom_dir / "stub.yaml"
+        spec_path.write_text((FIXTURES_DIR / "specs" / "mimo_like.yaml").read_text())
+        return spec_path, voiceink_dir, custom_dir
+
+    def test_load_after_download_succeeds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path, voiceink_dir, custom_dir = self._setup(tmp)
+            self.daemon.download_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
+            model = self.daemon.load_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
+            self.assertEqual(model._daemon_model_type, "custom")
+            self.assertEqual(model.precision, "int4")
+
+    def test_load_without_download_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path, voiceink_dir, custom_dir = self._setup(tmp)
+            with self.assertRaises(FileNotFoundError) as ctx:
+                self.daemon.load_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
+            self.assertIn("paths.json", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
