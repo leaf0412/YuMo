@@ -10,6 +10,7 @@ import {
 import { listen } from '../lib/events';
 import { invoke, formatError, logEvent } from '../lib/logger';
 import useAppStore from '../stores/useAppStore';
+import { CustomModelsSection } from '../components/CustomModels';
 const { Title, Text } = Typography;
 
 interface ModelSettings {
@@ -440,6 +441,7 @@ export default function Models() {
           { key: 'cloud', label: <span data-testid="cloud-models-tab">{t('models.tab.cloud', { count: cloudModels.length })}</span>, children: cloudTabContent },
         ]}
       />
+      <CustomModelsSection />
     </Flex>
   );
 }
