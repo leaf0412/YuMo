@@ -1,8 +1,9 @@
 import { Alert, Button, Card, Modal, Space, Tag, Typography, message } from 'antd';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CustomModelStatus } from './types';
 import { getElectronAPI } from './electronApi';
+import { TrustDialog } from './TrustDialog';
 
 interface Props {
   status: CustomModelStatus;
@@ -35,6 +36,7 @@ type DownloadResult = {
 export function CustomModelCard({ status, onChange }: Props) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
+  const [trustOpen, setTrustOpen] = useState(false);
 
   // ---- invalid: no spec, render error-only card -------------------------
   if (status.kind === 'invalid') {
@@ -119,11 +121,31 @@ export function CustomModelCard({ status, onChange }: Props) {
   };
 
   const handleUse = () => {
-    // T20 will replace this stub with a real TrustDialog flow that
-    // persists the user's trust decision and activates the model in the
-    // global model-selection store.
-    message.info(t('customModels.useTodoT20', { name: spec.name }));
+    setTrustOpen(true);
   };
+
+  // Activation: mark this model as the selected one via the existing
+  // `select-model` IPC channel. This mirrors what the MLX path does after
+  // loading (it calls Tauri's `select_model` which sets `selected_model_id`).
+  //
+  // KNOWN GAP (deferred): the daemon `load` action accepts a `provider`
+  // parameter (T13) but the napi `daemon_load_model` bridge does not yet
+  // forward it — see `napi/src/lib.rs::daemon_load_model`. Until that's
+  // wired, we don't trigger a daemon-side load for custom models here;
+  // selection-only activation is sufficient for the trust-dialog milestone.
+  const handleTrust = useCallback(async () => {
+    setTrustOpen(false);
+    try {
+      await getElectronAPI().invoke('select-model', { modelId: spec.id });
+      message.success(t('customModels.activated', { name: spec.name }));
+      onChange();
+    } catch (err) {
+      Modal.error({
+        title: t('customModels.activateFailed'),
+        content: String(err),
+      });
+    }
+  }, [spec.id, spec.name, onChange, t]);
 
   const handleRemove = () => {
     Modal.confirm({
@@ -146,7 +168,8 @@ export function CustomModelCard({ status, onChange }: Props) {
   };
 
   return (
-    <Card>
+    <>
+      <Card>
       <Space direction="vertical" style={{ width: '100%' }} size="small">
         <Space style={{ justifyContent: 'space-between', width: '100%' }}>
           <Typography.Text strong>{spec.name}</Typography.Text>
@@ -197,6 +220,13 @@ export function CustomModelCard({ status, onChange }: Props) {
         </Space>
       </Space>
     </Card>
+      <TrustDialog
+        spec={spec}
+        open={trustOpen}
+        onCancel={() => setTrustOpen(false)}
+        onTrust={handleTrust}
+      />
+    </>
   );
 }
 
