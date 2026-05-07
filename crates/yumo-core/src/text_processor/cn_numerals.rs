@@ -2,6 +2,7 @@
 //!
 //! 设计文档: _docs/specs/2026-05-07-cn-numerals-redesign-design.md
 
+use log::info;
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -194,7 +195,12 @@ fn apply_version_template(text: &str) -> String {
                     None => return token.to_string(),
                 }
             }
-            parts.join(".")
+            let result = parts.join(".");
+            info!(
+                "[text_processor::cn_num] template_match scene=version span={:?} -> {:?}",
+                token, result
+            );
+            result
         })
         .into_owned()
 }
@@ -228,7 +234,14 @@ fn apply_decimal_template(text: &str) -> String {
                 return caps[0].to_string();
             }
             match (parse_cn_numeral(left), cn_positional_digits_to_str(right)) {
-                (Some(l), Some(r)) => format!("{}.{}", l, r),
+                (Some(l), Some(r)) => {
+                    let result = format!("{}.{}", l, r);
+                    info!(
+                        "[text_processor::cn_num] template_match scene=decimal span={:?} -> {:?}",
+                        &caps[0], result
+                    );
+                    result
+                }
                 _ => caps[0].to_string(),
             }
         })
@@ -287,7 +300,14 @@ fn apply_percent_template(text: &str) -> String {
     cn_percent_re()
         .replace_all(text, |caps: &regex::Captures| {
             match parse_int_or_decimal(&caps[1]) {
-                Some(n) => format!("{}%", n),
+                Some(n) => {
+                    let result = format!("{}%", n);
+                    info!(
+                        "[text_processor::cn_num] template_match scene=percent span={:?} -> {:?}",
+                        &caps[0], result
+                    );
+                    result
+                }
                 None => caps[0].to_string(),
             }
         })
@@ -299,7 +319,14 @@ fn apply_permille_template(text: &str) -> String {
     cn_permille_re()
         .replace_all(text, |caps: &regex::Captures| {
             match parse_int_or_decimal(&caps[1]) {
-                Some(n) => format!("{}‰", n),
+                Some(n) => {
+                    let result = format!("{}‰", n);
+                    info!(
+                        "[text_processor::cn_num] template_match scene=permille span={:?} -> {:?}",
+                        &caps[0], result
+                    );
+                    result
+                }
                 None => caps[0].to_string(),
             }
         })
@@ -312,7 +339,14 @@ fn apply_fraction_template(text: &str) -> String {
     cn_fraction_re()
         .replace_all(text, |caps: &regex::Captures| {
             match (parse_cn_numeral(&caps[1]), parse_cn_numeral(&caps[2])) {
-                (Some(denom), Some(numer)) => format!("{}/{}", numer, denom),
+                (Some(denom), Some(numer)) => {
+                    let result = format!("{}/{}", numer, denom);
+                    info!(
+                        "[text_processor::cn_num] template_match scene=fraction span={:?} -> {:?}",
+                        &caps[0], result
+                    );
+                    result
+                }
                 _ => caps[0].to_string(),
             }
         })
@@ -325,7 +359,14 @@ fn apply_ordinal_template(text: &str) -> String {
     cn_ordinal_re()
         .replace_all(text, |caps: &regex::Captures| {
             match parse_cn_numeral(&caps[1]) {
-                Some(n) => format!("第{}", n),
+                Some(n) => {
+                    let result = format!("第{}", n);
+                    info!(
+                        "[text_processor::cn_num] template_match scene=ordinal span={:?} -> {:?}",
+                        &caps[0], result
+                    );
+                    result
+                }
                 None => caps[0].to_string(),
             }
         })
@@ -339,7 +380,14 @@ fn apply_negative_template(text: &str) -> String {
     cn_negative_re()
         .replace_all(text, |caps: &regex::Captures| {
             match parse_int_or_decimal(&caps[1]) {
-                Some(n) => format!("-{}", n),
+                Some(n) => {
+                    let result = format!("-{}", n);
+                    info!(
+                        "[text_processor::cn_num] template_match scene=negative span={:?} -> {:?}",
+                        &caps[0], result
+                    );
+                    result
+                }
                 None => caps[0].to_string(),
             }
         })
@@ -364,18 +412,29 @@ fn quantifier_scan(text: &str) -> String {
                 let span: String = chars[j..i].iter().collect();
                 let span_last = chars[i - 1];
                 let q_first = chars[i];
-                if !is_blacklisted(span_last, q_first) {
-                    if let Some(num) = parse_cn_numeral(&span) {
-                        // 撤销 out 中已写入的 span（中文字符 UTF-8 是 3 字节，不能按 char 数 truncate）
-                        let span_bytes: usize = chars[j..i].iter().map(|ch| ch.len_utf8()).sum();
-                        out.truncate(out.len() - span_bytes);
-                        out.push_str(&num.to_string());
-                        for k in 0..q_len {
-                            out.push(chars[i + k]);
-                        }
-                        i += q_len;
-                        continue;
-                    }
+                if is_blacklisted(span_last, q_first) {
+                    info!(
+                        "[text_processor::cn_num] skip span={:?} anchor={:?} reason=pseudo_quantifier_blacklist",
+                        span_last, q_first
+                    );
+                } else if let Some(num) = parse_cn_numeral(&span) {
+                    // 撤销 out 中已写入的 span（中文字符 UTF-8 是 3 字节，不能按 char 数 truncate）
+                    let span_bytes: usize = chars[j..i].iter().map(|ch| ch.len_utf8()).sum();
+                    out.truncate(out.len() - span_bytes);
+                    let q_str: String = chars[i..i + q_len].iter().collect();
+                    info!(
+                        "[text_processor::cn_num] quantifier_match anchor={:?} span={:?} -> {}",
+                        q_str, span, num
+                    );
+                    out.push_str(&num.to_string());
+                    out.push_str(&q_str);
+                    i += q_len;
+                    continue;
+                } else {
+                    info!(
+                        "[text_processor::cn_num] parse_failed span={:?} anchor={:?}",
+                        span, q_first
+                    );
                 }
             }
         }
