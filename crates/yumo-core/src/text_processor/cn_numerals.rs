@@ -78,7 +78,9 @@ fn is_cn_digit_char(c: char) -> bool {
     CN_DIGIT_CHARS.contains(c)
 }
 
-/// 起步量词表（单字）。多字量词在 Task 3 加。
+/// 单字量词表。
+/// 注意：'两' 不在此列——它是 CN_DIGIT_CHARS 中的数字（值=2），
+/// 混入量词表会导致 quantifier_scan 字节追踪下溢 panic。
 const QUANTIFIERS_SINGLE: &[char] = &[
     // 时间
     '年', '月', '日', '号', '点', '分', '秒', '天', '周',
@@ -89,8 +91,6 @@ const QUANTIFIERS_SINGLE: &[char] = &[
     '双', '对', '副', '件', '部', '辆', '座', '层', '楼',
     '页', '段', '篇',
     // 长度/重量/体积/物理（单字部分）
-    // 注意：'两' 不在此列，它同时是 CN_DIGIT_CHARS 中的数字（值=2），
-    // 混入量词表会导致 quantifier_scan 字节追踪下溢 panic。
     '米', '斤', '克', '吨', '磅', '升', '度', '伏', '瓦',
     // 次序/名次/容器
     '次', '遍', '趟', '回', '场', '盘', '局',
@@ -98,20 +98,52 @@ const QUANTIFIERS_SINGLE: &[char] = &[
     '杯', '瓶', '罐', '盒', '包', '袋', '箱',
 ];
 
+/// 多字量词表（按长度 desc 排序，长匹配优先）。
+/// 若未来新增 3 字量词（如"立方米"），需放在 2 字量词之前。
+const QUANTIFIERS_MULTI: &[&str] = &[
+    // 长度
+    "厘米", "毫米", "公里", "千米", "英里", "英尺", "英寸",
+    // 重量
+    "公斤", "千克", "毫克",
+    // 体积
+    "毫升", "加仑",
+    // 物理
+    "瓦特", "赫兹",
+    // 时间
+    "小时", "分钟", "钟头", "星期", "季度",
+];
+
 fn is_single_quantifier(c: char) -> bool {
     QUANTIFIERS_SINGLE.contains(&c)
 }
 
+/// 在 chars[i..] 起点匹配最长量词，返回量词字符长度（None 表示未命中）。
+/// 多字量词优先（QUANTIFIERS_MULTI 按长度 desc），命中后直接返回；
+/// 无多字命中再检查单字。
+fn match_quantifier_at(chars: &[char], i: usize) -> Option<usize> {
+    for q in QUANTIFIERS_MULTI {
+        let q_chars: Vec<char> = q.chars().collect();
+        let q_len = q_chars.len();
+        if i + q_len <= chars.len() && chars[i..i + q_len] == q_chars[..] {
+            return Some(q_len);
+        }
+    }
+    if is_single_quantifier(chars[i]) {
+        return Some(1);
+    }
+    None
+}
+
 /// 扫描文本，遇到量词锚点则往左回溯中文数字字，调用 parse_cn_numeral 转换。
+/// 支持单字量词（个/克/年 等）与多字量词（公里/小时/厘米 等），多字优先长匹配。
 fn quantifier_scan(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let n = chars.len();
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while i < n {
-        let c = chars[i];
-        if is_single_quantifier(c) {
-            // 从 i 往左回溯连续中文数字字
+        if let Some(q_len) = match_quantifier_at(&chars, i) {
+            // 从量词起点 i 往左回溯连续中文数字字
             let mut j = i;
             while j > 0 && is_cn_digit_char(chars[j - 1]) {
                 j -= 1;
@@ -123,13 +155,15 @@ fn quantifier_scan(text: &str) -> String {
                     let span_bytes: usize = chars[j..i].iter().map(|ch| ch.len_utf8()).sum();
                     out.truncate(out.len() - span_bytes);
                     out.push_str(&num.to_string());
-                    out.push(c);
-                    i += 1;
+                    for k in 0..q_len {
+                        out.push(chars[i + k]);
+                    }
+                    i += q_len;
                     continue;
                 }
             }
         }
-        out.push(c);
+        out.push(chars[i]);
         i += 1;
     }
     out
@@ -203,5 +237,24 @@ mod tests {
     fn quantifier_scan_multiple_in_one_string() {
         assert_eq!(convert_cn_numerals("三个五块"), "3个5块");
         assert_eq!(convert_cn_numerals("我有三块他有五个"), "我有3块他有5个");
+    }
+
+    #[test]
+    fn quantifier_scan_multi_char_quantifier() {
+        assert_eq!(convert_cn_numerals("跑了三公里"), "跑了3公里");
+        assert_eq!(convert_cn_numerals("等了两小时"), "等了2小时");
+        assert_eq!(convert_cn_numerals("二十厘米"), "20厘米");
+    }
+
+    #[test]
+    fn quantifier_scan_long_match_priority() {
+        // "公里" 优先于 "里"（如 "里" 进单字量词）；"小时" 优先于 "时"
+        assert_eq!(convert_cn_numerals("十公里"), "10公里");
+    }
+
+    /// 回归：位值记法年份（二〇二六年）→ 2026年。
+    #[test]
+    fn quantifier_scan_positional_year() {
+        assert_eq!(convert_cn_numerals("二〇二六年"), "2026年");
     }
 }
