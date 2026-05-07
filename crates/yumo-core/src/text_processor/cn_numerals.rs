@@ -164,6 +164,63 @@ fn match_quantifier_at(chars: &[char], i: usize) -> Option<usize> {
     None
 }
 
+/// 版本号正则：匹配 ≥3 段中文数字以 '点' 分隔的整体（如"零点六点零"）。
+/// 必须先于小数模板应用，否则前两段会被小数模板偷吃。
+fn cn_version_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"{0}(?:点{0}){{2,}}", CN_DIGIT_CLASS)).unwrap()
+    })
+}
+
+/// 小数正则：匹配 X点Y，左右各至少一个中文数字字。
+fn cn_decimal_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"({0})点({0})", CN_DIGIT_CLASS)).unwrap()
+    })
+}
+
+/// 版本号模板：零点六点零 → 0.6.0，一点二点三点四 → 1.2.3.4。
+/// 任一段解析失败则保留原文（不兜底）。
+fn apply_version_template(text: &str) -> String {
+    cn_version_re()
+        .replace_all(text, |caps: &regex::Captures| {
+            let token = &caps[0];
+            let mut parts: Vec<String> = Vec::new();
+            for seg in token.split('点') {
+                match parse_cn_numeral(seg) {
+                    Some(n) => parts.push(n.to_string()),
+                    None => return token.to_string(),
+                }
+            }
+            parts.join(".")
+        })
+        .into_owned()
+}
+
+/// 小数模板：二点五 → 2.5，十二点三四 → 12.34。
+/// 约束：左+右合计 ≥2 个中文数字字，避免单字-点-单字歧义被误转。
+/// 实际上 CN_DIGIT_CLASS 已要求每侧 ≥1 字，"单字+单字"=2 ≥2 仍可命中——
+/// 此约束保留以应对未来 regex 可能放宽为 `*` 的情况，并作文档说明。
+/// 解析失败保留原文（不兜底）。
+fn apply_decimal_template(text: &str) -> String {
+    cn_decimal_re()
+        .replace_all(text, |caps: &regex::Captures| {
+            let left = &caps[1];
+            let right = &caps[2];
+            let total_chars = left.chars().count() + right.chars().count();
+            if total_chars < 2 {
+                return caps[0].to_string();
+            }
+            match (parse_cn_numeral(left), parse_cn_numeral(right)) {
+                (Some(l), Some(r)) => format!("{}.{}", l, r),
+                _ => caps[0].to_string(),
+            }
+        })
+        .into_owned()
+}
+
 fn cn_ordinal_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(&format!(r"第({})", CN_DIGIT_CLASS)).unwrap())
@@ -240,7 +297,12 @@ fn quantifier_scan(text: &str) -> String {
 }
 
 pub fn convert_cn_numerals(text: &str) -> String {
-    let s = apply_negative_template(text);
+    // Pipeline 顺序遵循优先级：
+    // 版本号 (≥3段) > 小数 > 负数 > 序数 > 量词扫描。
+    // Task 7 加百分/千分/分数后将插入到版本号后、小数前。
+    let s = apply_version_template(text);
+    let s = apply_decimal_template(&s);
+    let s = apply_negative_template(&s);
     let s = apply_ordinal_template(&s);
     quantifier_scan(&s)
 }
@@ -378,5 +440,34 @@ mod tests {
     fn template_negative() {
         assert_eq!(convert_cn_numerals("负三百"), "-300");
         assert_eq!(convert_cn_numerals("温度负二十度"), "温度-20度");
+    }
+
+    #[test]
+    fn template_decimal() {
+        assert_eq!(convert_cn_numerals("二点五"), "2.5");
+        assert_eq!(convert_cn_numerals("零点六"), "0.6");
+        assert_eq!(convert_cn_numerals("十二点三四"), "12.34");
+    }
+
+    #[test]
+    fn template_decimal_skips_ambiguous_two_chars() {
+        // 小数模板不命中 "两点钟"（'钟' 不是 CN_DIGIT_CLASS 字符）
+        // 但量词扫描会把 "两点" 转成 "2点"（与 design 4.2 对齐：九点 → 9点）
+        assert_eq!(convert_cn_numerals("下午两点钟"), "下午2点钟");
+        // "两点九" 合计 2 字，小数模板命中
+        assert_eq!(convert_cn_numerals("两点九"), "2.9");
+    }
+
+    #[test]
+    fn template_version() {
+        assert_eq!(convert_cn_numerals("零点六点零"), "0.6.0");
+        assert_eq!(convert_cn_numerals("一点二点三点四"), "1.2.3.4");
+        assert_eq!(convert_cn_numerals("二十点一点零"), "20.1.0");
+    }
+
+    #[test]
+    fn template_version_priority_over_decimal() {
+        // 版本号 ≥3 段必须先匹配，整体转成 X.Y.Z 而不是被小数模板拆成 "X.Y点Z"
+        assert_eq!(convert_cn_numerals("发布零点六点零的版本"), "发布0.6.0的版本");
     }
 }
