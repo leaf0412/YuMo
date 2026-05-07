@@ -96,7 +96,31 @@ const QUANTIFIERS_SINGLE: &[char] = &[
     '次', '遍', '趟', '回', '场', '盘', '局',
     '名', '位', '排', '等', '级',
     '杯', '瓶', '罐', '盒', '包', '袋', '箱',
+    // 动量词（需配合黑名单过滤伪量词搭配，如"一下"/"一举"）
+    '下', '举',
 ];
+
+/// 伪量词黑名单：(数字字, 量词首字) 二元组命中则跳过
+/// 起步只覆盖 "一" + 副词/固定搭配
+/// 注意: ('一', '两') 不需要——Task 2 fix 已把 '两' 移出 QUANTIFIERS_SINGLE
+const PSEUDO_QUANTIFIER_BLACKLIST: &[(char, char)] = &[
+    ('一', '下'),
+    ('一', '直'),
+    ('一', '定'),
+    ('一', '律'),
+    ('一', '边'),
+    ('一', '概'),
+    ('一', '向'),
+    ('一', '旦'),
+    ('一', '举'),
+    ('一', '度'),
+];
+
+fn is_blacklisted(span_last: char, q_first: char) -> bool {
+    PSEUDO_QUANTIFIER_BLACKLIST
+        .iter()
+        .any(|&(d, q)| d == span_last && q == q_first)
+}
 
 /// 多字量词表（按长度 desc 排序，长匹配优先）。
 /// 若未来新增 3 字量词（如"立方米"），需放在 2 字量词之前。
@@ -150,16 +174,20 @@ fn quantifier_scan(text: &str) -> String {
             }
             if j < i {
                 let span: String = chars[j..i].iter().collect();
-                if let Some(num) = parse_cn_numeral(&span) {
-                    // 撤销 out 中已写入的 span（中文字符 UTF-8 是 3 字节，不能按 char 数 truncate）
-                    let span_bytes: usize = chars[j..i].iter().map(|ch| ch.len_utf8()).sum();
-                    out.truncate(out.len() - span_bytes);
-                    out.push_str(&num.to_string());
-                    for k in 0..q_len {
-                        out.push(chars[i + k]);
+                let span_last = chars[i - 1];
+                let q_first = chars[i];
+                if !is_blacklisted(span_last, q_first) {
+                    if let Some(num) = parse_cn_numeral(&span) {
+                        // 撤销 out 中已写入的 span（中文字符 UTF-8 是 3 字节，不能按 char 数 truncate）
+                        let span_bytes: usize = chars[j..i].iter().map(|ch| ch.len_utf8()).sum();
+                        out.truncate(out.len() - span_bytes);
+                        out.push_str(&num.to_string());
+                        for k in 0..q_len {
+                            out.push(chars[i + k]);
+                        }
+                        i += q_len;
+                        continue;
                     }
-                    i += q_len;
-                    continue;
                 }
             }
         }
@@ -256,5 +284,25 @@ mod tests {
     #[test]
     fn quantifier_scan_positional_year() {
         assert_eq!(convert_cn_numerals("二〇二六年"), "2026年");
+    }
+
+    #[test]
+    fn pseudo_quantifier_blacklist() {
+        // "一" + 后随字 是副词 / 固定搭配，不转
+        assert_eq!(convert_cn_numerals("一下子"), "一下子");
+        assert_eq!(convert_cn_numerals("一直走"), "一直走");
+        assert_eq!(convert_cn_numerals("一定可以"), "一定可以");
+        assert_eq!(convert_cn_numerals("一概而论"), "一概而论");
+        assert_eq!(convert_cn_numerals("一向如此"), "一向如此");
+        assert_eq!(convert_cn_numerals("一旦发生"), "一旦发生");
+        assert_eq!(convert_cn_numerals("一举两得"), "一举两得");
+        assert_eq!(convert_cn_numerals("一度过严寒"), "一度过严寒");
+    }
+
+    #[test]
+    fn pseudo_quantifier_does_not_block_multi_digit() {
+        // 多字数字 + 同样的伪量词字仍然转
+        assert_eq!(convert_cn_numerals("二十下"), "20下");
+        assert_eq!(convert_cn_numerals("十度"), "10度");
     }
 }
