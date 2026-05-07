@@ -1,3 +1,6 @@
+mod cn_numerals;
+pub use cn_numerals::convert_cn_numerals;
+
 use crate::mask;
 use log::{info, warn};
 use regex::{Regex, RegexBuilder};
@@ -125,148 +128,6 @@ pub fn merge_uppercase_letter_sequences(text: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Chinese numerals → Arabic digits
-// ---------------------------------------------------------------------------
-
-fn cn_digit_value(c: char) -> Option<i64> {
-    match c {
-        '〇' | '零' => Some(0),
-        '一' => Some(1),
-        '二' | '两' => Some(2),
-        '三' => Some(3),
-        '四' => Some(4),
-        '五' => Some(5),
-        '六' => Some(6),
-        '七' => Some(7),
-        '八' => Some(8),
-        '九' => Some(9),
-        _ => None,
-    }
-}
-
-fn cn_unit_value(c: char) -> Option<i64> {
-    match c {
-        '十' => Some(10),
-        '百' => Some(100),
-        '千' => Some(1000),
-        '万' => Some(10_000),
-        '亿' => Some(100_000_000),
-        _ => None,
-    }
-}
-
-/// Parse a token consisting only of CJK numeral characters into i64.
-/// Returns `None` for malformed/ambiguous tokens (caller should leave original).
-fn parse_cn_numeral(s: &str) -> Option<i64> {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.is_empty() {
-        return None;
-    }
-
-    let has_unit = chars.iter().any(|&c| cn_unit_value(c).is_some());
-    let all_digits = chars.iter().all(|&c| cn_digit_value(c).is_some());
-
-    // Positional mode (no units, all digit chars): 二〇二六 → 2026
-    if !has_unit && all_digits {
-        let mut n: i64 = 0;
-        for c in chars {
-            n = n * 10 + cn_digit_value(c).unwrap();
-        }
-        return Some(n);
-    }
-    if !has_unit {
-        return None;
-    }
-
-    // Unit mode: state machine over (digit | small_unit | big_unit).
-    let mut total: i64 = 0;
-    let mut section: i64 = 0;
-    let mut current: i64 = 0;
-    for c in chars {
-        if let Some(d) = cn_digit_value(c) {
-            current = d;
-        } else if let Some(u) = cn_unit_value(c) {
-            if u >= 10_000 {
-                let val = section + current;
-                let val = if val == 0 { 1 } else { val };
-                total += val * u;
-                section = 0;
-                current = 0;
-            } else {
-                let val = if current == 0 { 1 } else { current };
-                section += val * u;
-                current = 0;
-            }
-        } else {
-            return None;
-        }
-    }
-    Some(total + section + current)
-}
-
-fn cn_numeral_token_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"[〇零一二三四五六七八九两十百千万亿]+").unwrap())
-}
-
-/// Multi-char idioms that look like numerals but are not. Length-2 unit-then-digit
-/// or unit-then-unit forms slip past the "≥2 chars" rule, so we exclude them
-/// explicitly. Keep this list short — it must only contain truly common cases.
-const CN_NUMERAL_IDIOM_SKIP: &[&str] = &["万一", "千万", "万万", "九九"];
-
-/// Convert connected CJK-numeral substrings (length ≥ 2) to Arabic digits.
-/// Single-character occurrences are left alone — this naturally skips idioms
-/// like 一些 / 二话不说 / 三明治 / 九点 (孤立的数字字)，再用 idiom 白名单兜住
-/// "单位+数字"型的"万一/千万"等。
-pub fn chinese_numerals_to_arabic(text: &str) -> String {
-    cn_numeral_token_re()
-        .replace_all(text, |caps: &regex::Captures| {
-            let token = &caps[0];
-            if token.chars().count() < 2 {
-                return token.to_string();
-            }
-            if CN_NUMERAL_IDIOM_SKIP.iter().any(|w| *w == token) {
-                return token.to_string();
-            }
-            match parse_cn_numeral(token) {
-                Some(n) => n.to_string(),
-                None => token.to_string(),
-            }
-        })
-        .into_owned()
-}
-
-fn cn_version_token_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(
-            r"[〇零一二三四五六七八九两十百千万亿]+(?:点[〇零一二三四五六七八九两十百千万亿]+){2,}",
-        )
-        .unwrap()
-    })
-}
-
-/// Convert CJK version-number patterns like 零点六点零 → 0.6.0.
-/// Requires ≥2 "点" separators (≥3 segments) to avoid false positives on
-/// 下午两点 / 一点小事 / 三点水 / 版本二点零 etc. where 点 is not a decimal
-/// separator or the two-segment form is ambiguous with common expressions.
-pub fn chinese_version_numbers_to_arabic(text: &str) -> String {
-    cn_version_token_re()
-        .replace_all(text, |caps: &regex::Captures| {
-            let token = &caps[0];
-            let mut parts: Vec<String> = Vec::new();
-            for seg in token.split('点') {
-                match parse_cn_numeral(seg) {
-                    Some(n) => parts.push(n.to_string()),
-                    None => return token.to_string(),
-                }
-            }
-            parts.join(".")
-        })
-        .into_owned()
-}
-
-// ---------------------------------------------------------------------------
 // CJK ↔ ASCII spacing (PangU style)
 // ---------------------------------------------------------------------------
 
@@ -305,8 +166,7 @@ pub fn process_text(
     info!("[text_processor] process_text input={} auto_capitalize={}", mask::mask_text(text), auto_capitalize);
     let after_replacements = apply_replacements(text, replacements);
     let after_letter_merge = merge_uppercase_letter_sequences(&after_replacements);
-    let after_version = chinese_version_numbers_to_arabic(&after_letter_merge);
-    let after_numerals = chinese_numerals_to_arabic(&after_version);
+    let after_numerals = convert_cn_numerals(&after_letter_merge);
     let after_spacing = add_cjk_spacing(&after_numerals);
     let result = if auto_capitalize {
         capitalize_sentences(&after_spacing)
