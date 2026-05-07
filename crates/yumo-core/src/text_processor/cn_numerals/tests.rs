@@ -227,3 +227,33 @@ fn template_negative_with_decimal() {
     // 负数 + 含前导零小数
     assert_eq!(convert_cn_numerals("负零点零五"), "-0.05");
 }
+
+#[test]
+fn one_after_determiner_skipped() {
+    // 限定词 + 单字"一" + 量词 → 不转 ('一' 是限定词搭配的一部分，非数字)
+    assert_eq!(convert_cn_numerals("同一个"), "同一个");
+    assert_eq!(convert_cn_numerals("唯一一个"), "唯一一个");
+    assert_eq!(convert_cn_numerals("下一个"), "下一个");
+    assert_eq!(convert_cn_numerals("另一个"), "另一个");
+    assert_eq!(convert_cn_numerals("上一年"), "上一年");
+    assert_eq!(convert_cn_numerals("这一段"), "这一段");
+    assert_eq!(convert_cn_numerals("每一天"), "每一天");
+    assert_eq!(convert_cn_numerals("某一个"), "某一个");
+}
+
+#[test]
+fn determiner_does_not_block_multi_digit_numbers() {
+    // 限定词只屏蔽单字"一"，多字数字仍转
+    assert_eq!(convert_cn_numerals("前三名"), "前3名");  // 多字数字
+    assert_eq!(convert_cn_numerals("上五楼"), "上5楼");  // '五' 不是 '一'
+    assert_eq!(convert_cn_numerals("下二十"), "下二十");  // 无量词锚点
+    assert_eq!(convert_cn_numerals("第一名"), "第1名");  // 序数 (走 ordinal 模板，非量词扫描)
+}
+
+#[test]
+fn determiner_does_not_block_when_no_determiner() {
+    // 前字非限定词，仍正常转
+    assert_eq!(convert_cn_numerals("我有一个"), "我有1个");
+    assert_eq!(convert_cn_numerals("买一斤"), "买1斤");
+    assert_eq!(convert_cn_numerals("剩一个"), "剩1个");
+}

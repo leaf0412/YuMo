@@ -134,6 +134,20 @@ fn is_blacklisted(span_last: char, q_first: char) -> bool {
         .any(|&(d, q)| d == span_last && q == q_first)
 }
 
+/// "一" 前置限定词集合：当 span 起点为 '一' 且前一字属于此集合时，量词扫描跳过。
+/// 例: 同一个/唯一一个/下一年/另一次/这一段
+/// 仅作用于单字"一"开头的 span — 多字数字（如"前三名"）不受影响。
+const ONE_PRECEDING_DETERMINERS: &[char] = &[
+    '同', '唯', '另', '这', '那', '每', '任', '某',
+    '下', '上', '前', '后',
+];
+
+/// 检查 span 是否被前置限定词修饰为非数字搭配（仅针对 '一'-开头的 span）。
+/// j: span 起点 index, span 的字符是 chars[j..i]
+fn is_one_preceded_by_determiner(chars: &[char], j: usize) -> bool {
+    j > 0 && chars[j] == '一' && ONE_PRECEDING_DETERMINERS.contains(&chars[j - 1])
+}
+
 /// 多字量词表（按长度 desc 排序，长匹配优先）。
 /// 若未来新增 3 字量词（如"立方米"），需放在 2 字量词之前。
 const QUANTIFIERS_MULTI: &[&str] = &[
@@ -421,6 +435,11 @@ fn quantifier_scan(text: &str) -> String {
                     info!(
                         "[text_processor::cn_num] skip span={:?} anchor={:?} reason=pseudo_quantifier_blacklist",
                         span_last, q_first
+                    );
+                } else if is_one_preceded_by_determiner(&chars, j) {
+                    info!(
+                        "[text_processor::cn_num] skip span={:?} preceding={:?} reason=one_after_determiner",
+                        span, chars[j - 1]
                     );
                 } else if let Some(num) = parse_cn_numeral(&span) {
                     // 撤销 out 中已写入的 span（中文字符 UTF-8 是 3 字节，不能按 char 数 truncate）
