@@ -2,6 +2,9 @@
 //!
 //! 设计文档: _docs/specs/2026-05-07-cn-numerals-redesign-design.md
 
+use regex::Regex;
+use std::sync::OnceLock;
+
 pub(super) fn cn_digit_value(c: char) -> Option<i64> {
     match c {
         '〇' | '零' => Some(0),
@@ -73,6 +76,9 @@ pub(super) fn parse_cn_numeral(s: &str) -> Option<i64> {
 }
 
 const CN_DIGIT_CHARS: &str = "〇零一二三四五六七八九两十百千万亿";
+
+/// 正则字符类：匹配任意一个中文数字字（与 CN_DIGIT_CHARS 保持同步）。
+const CN_DIGIT_CLASS: &str = r"[〇零一二三四五六七八九两十百千万亿]+";
 
 fn is_cn_digit_char(c: char) -> bool {
     CN_DIGIT_CHARS.contains(c)
@@ -158,6 +164,42 @@ fn match_quantifier_at(chars: &[char], i: usize) -> Option<usize> {
     None
 }
 
+fn cn_ordinal_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(&format!(r"第({})", CN_DIGIT_CLASS)).unwrap())
+}
+
+fn cn_negative_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(&format!(r"负({})", CN_DIGIT_CLASS)).unwrap())
+}
+
+/// 序数模板：第三 → 第3，第二十五 → 第25。
+/// parse_cn_numeral 返回 None 时保留原文（不兜底）。
+fn apply_ordinal_template(text: &str) -> String {
+    cn_ordinal_re()
+        .replace_all(text, |caps: &regex::Captures| {
+            match parse_cn_numeral(&caps[1]) {
+                Some(n) => format!("第{}", n),
+                None => caps[0].to_string(),
+            }
+        })
+        .into_owned()
+}
+
+/// 负数模板：负三百 → -300，负二十 → -20。
+/// parse_cn_numeral 返回 None 时保留原文（不兜底）。
+fn apply_negative_template(text: &str) -> String {
+    cn_negative_re()
+        .replace_all(text, |caps: &regex::Captures| {
+            match parse_cn_numeral(&caps[1]) {
+                Some(n) => format!("-{}", n),
+                None => caps[0].to_string(),
+            }
+        })
+        .into_owned()
+}
+
 /// 扫描文本，遇到量词锚点则往左回溯中文数字字，调用 parse_cn_numeral 转换。
 /// 支持单字量词（个/克/年 等）与多字量词（公里/小时/厘米 等），多字优先长匹配。
 fn quantifier_scan(text: &str) -> String {
@@ -198,7 +240,9 @@ fn quantifier_scan(text: &str) -> String {
 }
 
 pub fn convert_cn_numerals(text: &str) -> String {
-    quantifier_scan(text)
+    let s = apply_negative_template(text);
+    let s = apply_ordinal_template(&s);
+    quantifier_scan(&s)
 }
 
 #[cfg(test)]
@@ -307,5 +351,18 @@ mod tests {
         // 多字数字 + 同样的伪量词字仍然转
         assert_eq!(convert_cn_numerals("二十下"), "20下");
         assert_eq!(convert_cn_numerals("十度"), "10度");
+    }
+
+    #[test]
+    fn template_ordinal() {
+        assert_eq!(convert_cn_numerals("第三"), "第3");
+        assert_eq!(convert_cn_numerals("第二十五"), "第25");
+        assert_eq!(convert_cn_numerals("第一名"), "第1名"); // 与量词扫描不冲突
+    }
+
+    #[test]
+    fn template_negative() {
+        assert_eq!(convert_cn_numerals("负三百"), "-300");
+        assert_eq!(convert_cn_numerals("温度负二十度"), "温度-20度");
     }
 }
