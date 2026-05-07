@@ -297,6 +297,9 @@ mod tests {
         assert_eq!(convert_cn_numerals("一旦发生"), "一旦发生");
         assert_eq!(convert_cn_numerals("一举两得"), "一举两得");
         assert_eq!(convert_cn_numerals("一度过严寒"), "一度过严寒");
+        // 防御性: '两' 当前不在 QUANTIFIERS_SINGLE，量词扫描不命中 — trivially pass
+        // 若将来 '两' 加回量词表，需同步加 ('一','两') 到 PSEUDO_QUANTIFIER_BLACKLIST
+        assert_eq!(convert_cn_numerals("一两重"), "一两重");
     }
 
     #[test]
