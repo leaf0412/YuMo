@@ -199,7 +199,21 @@ fn apply_version_template(text: &str) -> String {
         .into_owned()
 }
 
-/// 小数模板：二点五 → 2.5，十二点三四 → 12.34。
+/// 把"X点Y"中的 Y 部分按位转为阿拉伯数字串。
+/// 中文小数位是按位读出的（"零五" = "05"，不是整数 5），因此不能用
+/// parse_cn_numeral——那会把 "零五" 解析为整数 5，丢失前导零。
+/// 若 Y 中含单位字（十/百/千/万/亿），则不是合法小数位，返回 None。
+fn cn_positional_digits_to_str(s: &str) -> Option<String> {
+    s.chars()
+        .map(|c| cn_digit_value(c).map(|v| v.to_string()))
+        .collect::<Option<Vec<_>>>()
+        .map(|v| v.join(""))
+}
+
+/// 小数模板：二点五 → 2.5，十二点三四 → 12.34，零点零五 → 0.05。
+/// 左侧用 parse_cn_numeral（支持 "十二" 等位值写法）；
+/// 右侧用 cn_positional_digits_to_str（按位拼接，保前导零）。
+/// 右侧含单位字（"二点十"）→ None，保留原文（不兜底）。
 /// 约束：左+右合计 ≥2 个中文数字字，避免单字-点-单字歧义被误转。
 /// 实际上 CN_DIGIT_CLASS 已要求每侧 ≥1 字，"单字+单字"=2 ≥2 仍可命中——
 /// 此约束保留以应对未来 regex 可能放宽为 `*` 的情况，并作文档说明。
@@ -213,7 +227,7 @@ fn apply_decimal_template(text: &str) -> String {
             if total_chars < 2 {
                 return caps[0].to_string();
             }
-            match (parse_cn_numeral(left), parse_cn_numeral(right)) {
+            match (parse_cn_numeral(left), cn_positional_digits_to_str(right)) {
                 (Some(l), Some(r)) => format!("{}.{}", l, r),
                 _ => caps[0].to_string(),
             }
@@ -469,5 +483,24 @@ mod tests {
     fn template_version_priority_over_decimal() {
         // 版本号 ≥3 段必须先匹配，整体转成 X.Y.Z 而不是被小数模板拆成 "X.Y点Z"
         assert_eq!(convert_cn_numerals("发布零点六点零的版本"), "发布0.6.0的版本");
+    }
+
+    #[test]
+    fn template_decimal_preserves_leading_zeros_in_fraction() {
+        // 中文小数位按位读：零点零五 = 0.05，不是 0.5
+        assert_eq!(convert_cn_numerals("零点零五"), "0.05");
+        assert_eq!(convert_cn_numerals("一点零六"), "1.06");
+        assert_eq!(convert_cn_numerals("零点零零五"), "0.005");
+        // 多位数字串保持
+        assert_eq!(convert_cn_numerals("二点三零四"), "2.304");
+    }
+
+    #[test]
+    fn template_decimal_right_with_unit_is_invalid() {
+        // 右侧含单位字（十）不是合法中文小数：小数模板跳过，保留 "二点十"。
+        // 但 pipeline 后续的 quantifier_scan 会识别 '点' 为量词锚点，
+        // 将 "二" 转成 "2"（与 "下午两点钟" → "下午2点钟" 行为一致）。
+        // 因此全 pipeline 输出为 "2点十"，而非"二点十"。
+        assert_eq!(convert_cn_numerals("二点十"), "2点十");
     }
 }
