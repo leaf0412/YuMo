@@ -242,7 +242,81 @@ fn cn_ordinal_re() -> &'static Regex {
 
 fn cn_negative_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(&format!(r"负({})", CN_DIGIT_CLASS)).unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"负({0}(?:点{0})?)", CN_DIGIT_CLASS)).unwrap()
+    })
+}
+
+fn cn_percent_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"百分之({0}(?:点{0})?)", CN_DIGIT_CLASS)).unwrap()
+    })
+}
+
+fn cn_permille_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"千分之({0}(?:点{0})?)", CN_DIGIT_CLASS)).unwrap()
+    })
+}
+
+fn cn_fraction_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"({0})分之({0})", CN_DIGIT_CLASS)).unwrap()
+    })
+}
+
+/// 把"整数"或"整数点整数"形式的中文数字串解析为字符串形式。
+/// 整数走 parse_cn_numeral；小数右侧按位（继承 Task 6 fix）。
+/// 任一段失败返回 None。
+fn parse_int_or_decimal(s: &str) -> Option<String> {
+    if let Some((left, right)) = s.split_once('点') {
+        let l = parse_cn_numeral(left)?;
+        let r = cn_positional_digits_to_str(right)?;
+        Some(format!("{}.{}", l, r))
+    } else {
+        parse_cn_numeral(s).map(|n| n.to_string())
+    }
+}
+
+/// 百分比模板：百分之三十 → 30%，百分之一点五 → 1.5%。
+/// 数字部分支持整数或小数（递归走 parse_int_or_decimal）。
+fn apply_percent_template(text: &str) -> String {
+    cn_percent_re()
+        .replace_all(text, |caps: &regex::Captures| {
+            match parse_int_or_decimal(&caps[1]) {
+                Some(n) => format!("{}%", n),
+                None => caps[0].to_string(),
+            }
+        })
+        .into_owned()
+}
+
+/// 千分比模板：千分之五 → 5‰，千分之零点八 → 0.8‰。
+fn apply_permille_template(text: &str) -> String {
+    cn_permille_re()
+        .replace_all(text, |caps: &regex::Captures| {
+            match parse_int_or_decimal(&caps[1]) {
+                Some(n) => format!("{}‰", n),
+                None => caps[0].to_string(),
+            }
+        })
+        .into_owned()
+}
+
+/// 分数模板：三分之一 → 1/3。
+/// 注：分母在前 (caps[1])、分子在后 (caps[2])，按中文表达「X分之Y」=Y/X。
+fn apply_fraction_template(text: &str) -> String {
+    cn_fraction_re()
+        .replace_all(text, |caps: &regex::Captures| {
+            match (parse_cn_numeral(&caps[1]), parse_cn_numeral(&caps[2])) {
+                (Some(denom), Some(numer)) => format!("{}/{}", numer, denom),
+                _ => caps[0].to_string(),
+            }
+        })
+        .into_owned()
 }
 
 /// 序数模板：第三 → 第3，第二十五 → 第25。
@@ -258,12 +332,13 @@ fn apply_ordinal_template(text: &str) -> String {
         .into_owned()
 }
 
-/// 负数模板：负三百 → -300，负二十 → -20。
-/// parse_cn_numeral 返回 None 时保留原文（不兜底）。
+/// 负数模板：负三百 → -300, 负二点五 → -2.5, 负零点零五 → -0.05。
+/// 数字部分支持整数或小数（共用 parse_int_or_decimal helper）。
+/// parse 失败保留原文（不兜底）。
 fn apply_negative_template(text: &str) -> String {
     cn_negative_re()
         .replace_all(text, |caps: &regex::Captures| {
-            match parse_cn_numeral(&caps[1]) {
+            match parse_int_or_decimal(&caps[1]) {
                 Some(n) => format!("-{}", n),
                 None => caps[0].to_string(),
             }
@@ -311,12 +386,17 @@ fn quantifier_scan(text: &str) -> String {
 }
 
 pub fn convert_cn_numerals(text: &str) -> String {
-    // Pipeline 顺序遵循优先级：
-    // 版本号 (≥3段) > 小数 > 负数 > 序数 > 量词扫描。
-    // Task 7 加百分/千分/分数后将插入到版本号后、小数前。
+    // Pipeline 顺序遵循 design §4.1 优先级（外层壳先于内层数字）：
+    // 版本号 (≥3段) > 百分比 > 千分比 > 分数 > 负数 > 小数 > 序数 > 量词扫描。
+    // 关键约束:
+    // - 百分/千分/分数 必须先于小数（外层"百分之X"消费后避免内部"X点Y"被偷吃）
+    // - 负数模板自身吸收小数尾巴（递归走 parse_int_or_decimal），不再依赖 decimal 前置
     let s = apply_version_template(text);
-    let s = apply_decimal_template(&s);
+    let s = apply_percent_template(&s);
+    let s = apply_permille_template(&s);
+    let s = apply_fraction_template(&s);
     let s = apply_negative_template(&s);
+    let s = apply_decimal_template(&s);
     let s = apply_ordinal_template(&s);
     quantifier_scan(&s)
 }
@@ -502,5 +582,45 @@ mod tests {
         // 将 "二" 转成 "2"（与 "下午两点钟" → "下午2点钟" 行为一致）。
         // 因此全 pipeline 输出为 "2点十"，而非"二点十"。
         assert_eq!(convert_cn_numerals("二点十"), "2点十");
+    }
+
+    #[test]
+    fn template_percent() {
+        assert_eq!(convert_cn_numerals("百分之三十"), "30%");
+        assert_eq!(convert_cn_numerals("百分之一点五"), "1.5%");
+        assert_eq!(convert_cn_numerals("增长百分之二十"), "增长20%");
+    }
+
+    #[test]
+    fn template_percent_with_leading_zero_decimal() {
+        // 小数右侧按位（继承 Task 6 fix）
+        assert_eq!(convert_cn_numerals("百分之零点零五"), "0.05%");
+    }
+
+    #[test]
+    fn template_permille() {
+        assert_eq!(convert_cn_numerals("千分之五"), "5‰");
+        assert_eq!(convert_cn_numerals("千分之零点八"), "0.8‰");
+    }
+
+    #[test]
+    fn template_fraction() {
+        assert_eq!(convert_cn_numerals("三分之一"), "1/3");
+        assert_eq!(convert_cn_numerals("五分之二"), "2/5");
+        assert_eq!(convert_cn_numerals("吃了三分之一"), "吃了1/3");
+    }
+
+    #[test]
+    fn template_percent_takes_priority_over_fraction() {
+        // "百分之三十" 必须先被百分比吃掉，不能被分数误解为 "百"/分之/"三十"
+        assert_eq!(convert_cn_numerals("百分之三十"), "30%");
+    }
+
+    #[test]
+    fn template_negative_with_decimal() {
+        // 负数支持小数（design §4.1 #5: 负二点五 → -2.5）
+        assert_eq!(convert_cn_numerals("负二点五"), "-2.5");
+        // 负数 + 含前导零小数
+        assert_eq!(convert_cn_numerals("负零点零五"), "-0.05");
     }
 }
