@@ -33,6 +33,11 @@ pub(super) fn cn_unit_value(c: char) -> Option<i64> {
     }
 }
 
+/// 把仅由 CJK 数字字符组成的字符串解析为 i64。
+/// 两种模式自动识别：
+/// - **位值模式** (无单位字, 全是 0-9 数字): 二〇二六 → 2026, 二三 → 23
+/// - **单位模式** (含十/百/千/万/亿): 一万两千三百四十五 → 12345, 一千零五 → 1005
+/// 含非合法 CJK 数字字符（如标点/单位上下文错误）返回 `None`，调用方应保留原文。
 pub(super) fn parse_cn_numeral(s: &str) -> Option<i64> {
     let chars: Vec<char> = s.chars().collect();
     if chars.is_empty() {
