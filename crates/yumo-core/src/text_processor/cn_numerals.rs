@@ -285,6 +285,20 @@ mod tests {
         }
     }
 
+    /// 不变量：CN_DIGIT_CLASS 必须能匹配 CN_DIGIT_CHARS 中的每个字符。
+    /// 两者独立维护，加新字符时容易漏改一边——此测试守住它们的字符集相等。
+    #[test]
+    fn invariant_digit_class_matches_digit_chars() {
+        let re = Regex::new(&format!("^{}$", CN_DIGIT_CLASS)).unwrap();
+        for c in CN_DIGIT_CHARS.chars() {
+            assert!(
+                re.is_match(&c.to_string()),
+                "CN_DIGIT_CLASS 缺少字符: {:?}",
+                c
+            );
+        }
+    }
+
     /// 回归：'两' 是 cn_digit 但不是 quantifier，扫到下个量词时应正确回溯+解析，不 panic。
     #[test]
     fn quantifier_scan_does_not_panic_on_两_in_span() {
