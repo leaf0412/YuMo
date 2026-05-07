@@ -90,7 +90,7 @@ fn is_cn_digit_char(c: char) -> bool {
 /// 混入量词表会导致 quantifier_scan 字节追踪下溢 panic。
 const QUANTIFIERS_SINGLE: &[char] = &[
     // 时间
-    '年', '月', '日', '号', '点', '分', '秒', '天', '周',
+    '年', '月', '日', '号', '点', '分', '秒', '天', '周', '岁',
     // 货币
     '块', '元', '角', '毛',
     // 通用计量

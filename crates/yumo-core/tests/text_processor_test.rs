@@ -158,7 +158,7 @@ fn cn_num_mixed_in_sentence() {
     );
     assert_eq!(
         text_processor::convert_cn_numerals("生于二〇〇一年，今年二十五岁"),
-        "生于2001年，今年二十五岁",
+        "生于2001年，今年25岁",
     );
 }
 
