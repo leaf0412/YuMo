@@ -32,7 +32,7 @@ impl PlatformRecorder for LinuxRecorder {
     type Handle = RecordingHandle;
 
     fn list_devices() -> AppResult<Vec<AudioInputDevice>> {
-        log::info!("[recorder] list_input_devices (linux/cpal)");
+        log::debug!("[recorder] list_input_devices (linux/cpal)");
         let host = cpal::default_host();
         let default_name = host
             .default_input_device()
@@ -46,7 +46,7 @@ impl PlatformRecorder for LinuxRecorder {
         {
             let name = device.name().unwrap_or_else(|_| format!("Device {}", idx));
             let is_default = default_name.as_deref() == Some(name.as_str());
-            log::info!(
+            log::debug!(
                 "[recorder]   device idx={} name={:?} is_default={}",
                 idx, name, is_default
             );
@@ -56,7 +56,7 @@ impl PlatformRecorder for LinuxRecorder {
                 is_default,
             });
         }
-        log::info!("[recorder] found {} input device(s)", devices.len());
+        log::debug!("[recorder] found {} input device(s)", devices.len());
         Ok(devices)
     }
 

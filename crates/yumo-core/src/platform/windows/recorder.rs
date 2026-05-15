@@ -2,7 +2,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crate::error::{AppError, AppResult};
 use crate::platform::traits::PlatformRecorder;
 use crate::platform::types::*;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -84,7 +84,7 @@ pub fn start_prepared_recording(
 // ---------------------------------------------------------------------------
 
 fn list_input_devices_impl() -> AppResult<Vec<AudioInputDevice>> {
-    info!("[recorder] list_input_devices");
+    debug!("[recorder] list_input_devices");
     let host = cpal::default_host();
 
     let default_device_name = host
@@ -110,12 +110,12 @@ fn list_input_devices_impl() -> AppResult<Vec<AudioInputDevice>> {
         });
     }
 
-    info!(
+    debug!(
         "[recorder] list_input_devices found {} devices",
         result.len()
     );
     for dev in &result {
-        info!(
+        debug!(
             "[recorder]   device id={} name={:?} is_default={}",
             dev.id, dev.name, dev.is_default
         );

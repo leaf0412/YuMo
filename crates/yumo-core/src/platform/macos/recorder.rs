@@ -2,7 +2,7 @@ use crate::error::{AppError, AppResult};
 use crate::platform::traits::PlatformRecorder;
 use crate::platform::types::*;
 use coreaudio_sys::*;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use std::mem;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -153,7 +153,7 @@ pub fn start_prepared_recording(
 // ---------------------------------------------------------------------------
 
 fn list_input_devices_impl() -> Vec<AudioInputDevice> {
-    info!("[recorder] list_input_devices");
+    debug!("[recorder] list_input_devices");
     let default_id = default_input_device_id();
     let device_ids = all_device_ids();
     let mut result = Vec::new();
@@ -170,13 +170,13 @@ fn list_input_devices_impl() -> Vec<AudioInputDevice> {
             });
         }
     }
-    info!(
+    debug!(
         "[recorder] list_input_devices found {} devices, default_id={}",
         result.len(),
         default_id
     );
     for dev in &result {
-        info!(
+        debug!(
             "[recorder]   device id={} name={:?} is_default={}",
             dev.id, dev.name, dev.is_default
         );
