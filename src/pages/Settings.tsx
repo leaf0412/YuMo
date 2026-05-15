@@ -7,6 +7,7 @@ import {
   AudioOutlined, CopyOutlined,
   DesktopOutlined, KeyOutlined,
   HistoryOutlined, SettingOutlined, ClearOutlined,
+  FormatPainterOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { emit, listen } from '../lib/events';
@@ -41,6 +42,9 @@ interface AppSettings {
   clipboard_restore?: boolean;
   paste_delay?: number;
   auto_capitalize?: boolean;
+  append_period?: boolean;
+  convert_cn_numerals?: boolean;
+  use_builtin_dictionary?: boolean;
   system_mute?: boolean;
   hotkey?: string;
   menu_bar_mode?: boolean;
@@ -330,6 +334,35 @@ export default function Settings() {
             <Slider min={0} max={1000} step={50} value={settings.paste_delay ?? 100} onChange={(v) => updateSetting('paste_delay', v)} />
           </div>
           {settingRow(t('settings.autoCapitalize'), <Switch checked={settings.auto_capitalize} onChange={(v) => updateSetting('auto_capitalize', v)} />)}
+        </Flex>
+      ),
+    },
+    {
+      key: 'postprocess',
+      label: <Space><FormatPainterOutlined />{t('settings.sectionPostprocess')}</Space>,
+      children: (
+        <Flex vertical gap={8} style={{ width: '100%' }}>
+          {settingRow(
+            t('settings.appendPeriod'),
+            <Switch
+              checked={settings.append_period ?? false}
+              onChange={(v) => updateSetting('append_period', v)}
+            />,
+          )}
+          {settingRow(
+            t('settings.convertCnNumerals'),
+            <Switch
+              checked={settings.convert_cn_numerals ?? false}
+              onChange={(v) => updateSetting('convert_cn_numerals', v)}
+            />,
+          )}
+          {settingRow(
+            t('settings.useBuiltinDictionary'),
+            <Switch
+              checked={settings.use_builtin_dictionary ?? true}
+              onChange={(v) => updateSetting('use_builtin_dictionary', v)}
+            />,
+          )}
         </Flex>
       ),
     },
