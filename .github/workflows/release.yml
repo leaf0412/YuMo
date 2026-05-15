@@ -30,7 +30,7 @@ jobs:
             bundle: nsis
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            bundle: deb,appimage
+            bundle: deb
 
     steps:
       - uses: actions/checkout@v4
@@ -109,7 +109,7 @@ jobs:
         run: |
           mkdir -p staging
           find target/${{ matrix.target }}/release/bundle -type f \
-            \( -name "*.dmg" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" \) \
+            \( -name "*.dmg" -o -name "*.exe" -o -name "*.deb" \) \
             -exec cp {} staging/ \;
           ls -lh staging/
 

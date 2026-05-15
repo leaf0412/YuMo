@@ -45,7 +45,7 @@ Groq Whisper · Deepgram Nova-2 · ElevenLabs Scribe · Mistral ASR · Gemini AS
 | macOS (ARM) | `.dmg` | Apple Silicon Mac，推荐 |
 | macOS (Intel) | `.dmg` | Intel Mac |
 | Windows | `.exe` | Windows 10+ |
-| Linux | `.AppImage` / `.deb` | Ubuntu 22.04+，需要 WebKitGTK 4.1 |
+| Linux | `.deb` | Ubuntu 22.04+，依赖 `libwebkit2gtk-4.1`（apt 自动拉取） |
 
 > macOS 首次打开可能被 Gatekeeper 拦截，右键点击 → 打开即可。
 
