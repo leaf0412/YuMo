@@ -45,6 +45,7 @@ interface AppState {
   fetchDaemonStatus: () => Promise<void>;
   fetchPermissions: () => Promise<void>;
   updateSetting: (key: string, value: string) => Promise<void>;
+  selectModel: (modelId: string) => Promise<void>;
   setSettings: (partial: Partial<AppSettings>) => void;
   setDaemonStatus: (status: DaemonStatus) => void;
   setDownloadingModelId: (id: string | null) => void;
@@ -102,6 +103,11 @@ const useAppStore = create<AppState>((set, get) => ({
   updateSetting: async (key: string, value: string) => {
     await invoke('update_setting', { key, value });
     set({ settings: { ...get().settings, [key]: value } });
+  },
+
+  selectModel: async (modelId: string) => {
+    await invoke('select_model', { modelId });
+    set({ settings: { ...get().settings, selected_model_id: modelId } });
   },
 
   setSettings: (partial) => {

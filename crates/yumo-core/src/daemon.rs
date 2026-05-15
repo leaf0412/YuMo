@@ -248,8 +248,15 @@ impl DaemonManager {
         log::info!("[daemon] using python: {}", python);
         log::info!("[daemon] [start] python={} script={}", python, self.script_path.display());
 
+        // Set cwd to data_dir (~/.voiceink) so custom-model packages that
+        // open files via relative paths like "models/<id>/config.json"
+        // (instead of honoring an explicit local_root parameter — looking
+        // at you, mimo_mlx.load_asr) resolve against the right tree.
+        // Built-in daemon paths use absolute HF cache paths, so changing
+        // cwd here is safe for them.
         let mut child = Command::new(&python)
             .arg(&self.script_path)
+            .current_dir(&self.data_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -366,13 +373,16 @@ impl DaemonManager {
     }
 
     /// Send a command and read responses one-by-one (including "downloading").
-    /// Returns a channel of responses. The caller should read until a terminal
-    /// status (not "downloading") is received.
+    /// Returns a channel of `AppResult<DaemonResponse>`. The caller should read
+    /// until a terminal status (not "downloading") OR an `Err` is received.
+    /// Read errors are forwarded as `Err` items so the caller sees the real
+    /// failure (e.g. JSON parse error, stdout closed) instead of a silent
+    /// channel close.
     pub fn send_command_streaming(
         &self,
         cmd: &Value,
         timeout: std::time::Duration,
-    ) -> AppResult<std::sync::mpsc::Receiver<DaemonResponse>> {
+    ) -> AppResult<std::sync::mpsc::Receiver<AppResult<DaemonResponse>>> {
         let action = cmd.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
         log::info!("[daemon] send_command_streaming: {}", action);
 
@@ -397,25 +407,35 @@ impl DaemonManager {
         let process = self.process.clone();
         std::thread::spawn(move || {
             loop {
-                let resp = {
+                let result: AppResult<DaemonResponse> = {
                     let mut guard = match process.lock() {
                         Ok(g) => g,
-                        Err(_) => break,
+                        Err(_) => {
+                            let _ = tx.send(Err(AppError::Transcription(
+                                "daemon mutex poisoned during streaming".into(),
+                            )));
+                            break;
+                        }
                     };
                     let proc = match guard.as_mut() {
                         Some(p) => p,
-                        None => break,
+                        None => {
+                            let _ = tx.send(Err(AppError::Transcription(
+                                "daemon stopped during streaming".into(),
+                            )));
+                            break;
+                        }
                     };
-                    match proc.read_one_response(timeout) {
-                        Ok(r) => r,
-                        Err(_) => break,
-                    }
+                    proc.read_one_response(timeout)
                 };
+
                 // "downloading" and "download_complete" are intermediate;
                 // only "loaded", "success", "error" etc. are truly terminal.
-                let is_terminal = resp.status != "downloading"
-                    && resp.status != "download_complete";
-                if tx.send(resp).is_err() {
+                let is_terminal = match &result {
+                    Ok(r) => r.status != "downloading" && r.status != "download_complete",
+                    Err(_) => true,
+                };
+                if tx.send(result).is_err() {
                     break;
                 }
                 if is_terminal {
@@ -741,7 +761,8 @@ fn resolve_real_python(python: &str) -> String {
 }
 
 /// Find python for the daemon: custom setting → `which python3`.
-fn find_python() -> AppResult<String> {
+/// Public so the custom-model worker can reuse the same selection logic.
+pub fn find_python() -> AppResult<String> {
     if let Some(python) = resolve_python_path() {
         if python_has_deps(&python) {
             log::info!("[daemon] using python: {}", python);

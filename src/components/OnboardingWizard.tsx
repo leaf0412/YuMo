@@ -39,7 +39,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const permPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Model
-  const { models, fetchModels, updateSetting } = useAppStore();
+  const { models, fetchModels, updateSetting, selectModel } = useAppStore();
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null);
@@ -131,7 +131,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
           setDownloadProgress(30 + Math.min(e.payload.progress * 70, 70));
         });
 
-        await invoke('daemon_load_model', { modelRepo: model.model_repo });
+        await invoke('daemon_load_model', { modelId: model.id });
         unlistenSetup();
         unlistenProgress();
       } else {
@@ -144,7 +144,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
       }
 
       setDownloadProgress(100);
-      await updateSetting('selected_model_id', model.id);
+      await selectModel(model.id);
       await fetchModels();
       setModelReady(true);
       setDownloading(false);

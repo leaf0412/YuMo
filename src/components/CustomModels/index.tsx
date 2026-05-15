@@ -1,8 +1,9 @@
 import { useCallback } from 'react';
-import { Button, Empty, Space, Spin, Typography, message } from 'antd';
+import { Button, Col, Empty, Row, Space, Spin, message } from 'antd';
 import { FolderOpenOutlined, ImportOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { formatError } from '../../lib/logger';
+import useAppStore from '../../stores/useAppStore';
 import { useCustomModels } from './useCustomModels';
 import { getCustomBridge } from './bridge';
 import { CustomModelCard } from './CustomModelCard';
@@ -17,6 +18,7 @@ import { CustomModelCard } from './CustomModelCard';
  */
 export function CustomModelsSection() {
   const { t } = useTranslation();
+  const selectedModelId = useAppStore((s) => s.settings.selected_model_id);
 
   const reportScanError = useCallback(
     (err: unknown) => {
@@ -51,25 +53,20 @@ export function CustomModelsSection() {
   };
 
   return (
-    <section style={{ marginTop: 32 }} data-testid="custom-models-section">
+    <section data-testid="custom-models-section">
       <Space
         style={{
           width: '100%',
-          justifyContent: 'space-between',
+          justifyContent: 'flex-end',
           marginBottom: 12,
         }}
       >
-        <Typography.Title level={5} style={{ margin: 0 }}>
-          {t('customModels.title')}
-        </Typography.Title>
-        <Space>
-          <Button icon={<ImportOutlined />} onClick={handleImportExample}>
-            {t('customModels.importExample')}
-          </Button>
-          <Button icon={<FolderOpenOutlined />} onClick={handleOpenFolder}>
-            {t('customModels.openFolder')}
-          </Button>
-        </Space>
+        <Button icon={<ImportOutlined />} onClick={handleImportExample}>
+          {t('customModels.importExample')}
+        </Button>
+        <Button icon={<FolderOpenOutlined />} onClick={handleOpenFolder}>
+          {t('customModels.openFolder')}
+        </Button>
       </Space>
 
       {loading ? (
@@ -77,15 +74,22 @@ export function CustomModelsSection() {
       ) : items.length === 0 ? (
         <Empty description={t('customModels.empty')} />
       ) : (
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          {items.map((item) => (
-            <CustomModelCard
-              key={item.kind === 'invalid' ? item.sourcePath : item.spec.id}
-              status={item}
-              onChange={safeRefresh}
-            />
-          ))}
-        </Space>
+        <Row gutter={[16, 16]}>
+          {items.map((item) => {
+            const key = item.kind === 'invalid' ? item.sourcePath : item.spec.id;
+            const isActive =
+              item.kind !== 'invalid' && selectedModelId === item.spec.id;
+            return (
+              <Col xs={24} sm={12} md={8} key={key}>
+                <CustomModelCard
+                  status={item}
+                  isActive={isActive}
+                  onChange={safeRefresh}
+                />
+              </Col>
+            );
+          })}
+        </Row>
       )}
     </section>
   );

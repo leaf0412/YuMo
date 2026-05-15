@@ -11,6 +11,7 @@ pub mod text_processor;
 pub mod transcriber;
 pub mod cloud;
 pub mod custom_models;
+pub mod custom_worker;
 pub mod enhancer;
 pub mod downloader;
 pub mod vad;

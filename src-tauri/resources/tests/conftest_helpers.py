@@ -10,8 +10,25 @@ FIXTURES_DIR = TESTS_DIR / "fixtures"
 
 def load_daemon_module():
     """Import mlx_funasr_daemon.py without requiring mlx to be installed."""
+    # Make the resources directory importable so the daemon's
+    # `import custom_model_shared` succeeds.
+    p = str(RESOURCES_DIR)
+    if p not in sys.path:
+        sys.path.insert(0, p)
     spec_path = RESOURCES_DIR / "mlx_funasr_daemon.py"
     spec = importlib.util.spec_from_file_location("daemon_under_test", spec_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_shared_module():
+    """Import custom_model_shared.py from the resources directory."""
+    p = str(RESOURCES_DIR)
+    if p not in sys.path:
+        sys.path.insert(0, p)
+    spec_path = RESOURCES_DIR / "custom_model_shared.py"
+    spec = importlib.util.spec_from_file_location("custom_model_shared_under_test", spec_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

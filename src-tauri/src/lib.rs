@@ -216,6 +216,8 @@ pub fn run() {
                 };
 
                 sync_file("mlx_funasr_daemon.py", false);
+                sync_file("custom_model_shared.py", false);
+                sync_file("custom_model_worker.py", false);
 
             }
 
@@ -282,17 +284,18 @@ pub fn run() {
 
                 if let Some(repo) = warmup_repo {
                     let handle = app.handle().clone();
+                    let warmup_id = selected_model.clone();
                     std::thread::spawn(move || {
                         let daemon = handle.state::<daemon::DaemonManager>();
-                        info!("[warmup] starting daemon for MLX model: {}", repo);
+                        info!("[warmup] starting daemon for MLX model: id={} repo={}", warmup_id, repo);
                         match daemon.start() {
                             Ok(()) => {
                                 info!("[warmup] daemon started, loading model...");
                                 let cmd = serde_json::json!({"action": "load", "model": &repo});
                                 match daemon.send_command(&cmd) {
                                     Ok(resp) if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" => {
-                                        daemon.set_loaded_model(Some(repo.clone()));
-                                        info!("[warmup] model loaded: {}", repo);
+                                        daemon.set_loaded_model(Some(warmup_id.clone()));
+                                        info!("[warmup] model loaded: {}", warmup_id);
                                         let _ = handle.emit("daemon-status-changed", ());
                                     }
                                     Ok(resp) => info!("[warmup] load response: {}", resp.status),

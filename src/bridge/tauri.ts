@@ -273,8 +273,8 @@ export const tauriBridge: Bridge = {
     return invoke('daemon_check_deps');
   },
 
-  daemonLoadModel(modelRepo: string): Promise<void> {
-    return invoke('daemon_load_model', { modelRepo });
+  daemonLoadModel(modelId: string): Promise<void> {
+    return invoke('daemon_load_model', { modelId });
   },
 
   daemonUnloadModel(): Promise<void> {

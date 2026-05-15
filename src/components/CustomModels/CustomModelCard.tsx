@@ -1,12 +1,28 @@
-import { Alert, Button, Card, Modal, Space, Tag, Typography, message } from 'antd';
+/**
+ * Custom-model card. Translates a `CustomModelStatus` (4-way union) into
+ * the unified `ModelCardViewModel` and delegates rendering to
+ * <ModelCard />, so custom models look and behave like the local/cloud
+ * tabs. The TrustDialog stays here since it's specific to custom models.
+ */
+import { Modal, message } from 'antd';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CustomModelStatus } from './types';
 import { getCustomBridge } from './bridge';
+import { invoke, formatError } from '../../lib/logger';
 import { TrustDialog } from './TrustDialog';
+import { ModelCard } from '../ModelCard';
+import useAppStore from '../../stores/useAppStore';
+import type {
+  ModelAction,
+  ModelCardViewModel,
+  ModelStatus,
+} from '../ModelCard/types';
 
 interface Props {
   status: CustomModelStatus;
+  /** True when this model is the currently selected one in app settings. */
+  isActive: boolean;
   onChange: () => void;
 }
 
@@ -23,41 +39,21 @@ type DownloadResult = {
   error?: string;
 };
 
-/**
- * Renders one custom-model entry in four discriminated states:
- *   - invalid       → YAML parse error display (no spec available)
- *   - depsMissing   → Alert + "Install Dependencies" action
- *   - notDownloaded → "Download Model" action
- *   - ready         → "Use" action (T20 wires this to TrustDialog)
- *
- * Mutating actions invoke IPC then call `onChange()` so the parent can
- * re-scan. Failures surface via Modal/message — no silent fallback.
- */
-export function CustomModelCard({ status, onChange }: Props) {
+export function CustomModelCard({ status, isActive, onChange }: Props) {
   const { t } = useTranslation();
+  const selectModel = useAppStore((s) => s.selectModel);
   const [busy, setBusy] = useState(false);
   const [trustOpen, setTrustOpen] = useState(false);
 
-  // ---- invalid: no spec, render error-only card -------------------------
+  // ---- invalid: no spec, render error-only card via ModelCard --------------
   if (status.kind === 'invalid') {
-    return (
-      <Card>
-        <Alert
-          type="error"
-          message={t('customModels.invalidYaml')}
-          description={
-            <>
-              <div>
-                <code>{status.sourcePath}</code>
-              </div>
-              <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
-                {status.error}
-              </pre>
-            </>
-          }
-        />
-      </Card>
-    );
+    const vm: ModelCardViewModel = {
+      kind: 'invalid',
+      sourcePath: status.sourcePath,
+      title: t('customModels.invalidYaml'),
+      error: status.error,
+    };
+    return <ModelCard vm={vm} />;
   }
 
   const spec = status.spec;
@@ -87,7 +83,7 @@ export function CustomModelCard({ status, onChange }: Props) {
     } catch (err) {
       Modal.error({
         title: t('customModels.installFailed'),
-        content: String(err),
+        content: formatError(err, t('customModels.installFailed')),
       });
     } finally {
       setBusy(false);
@@ -113,7 +109,7 @@ export function CustomModelCard({ status, onChange }: Props) {
     } catch (err) {
       Modal.error({
         title: t('customModels.downloadFailed'),
-        content: String(err),
+        content: formatError(err, t('customModels.downloadFailed')),
       });
     } finally {
       setBusy(false);
@@ -124,28 +120,27 @@ export function CustomModelCard({ status, onChange }: Props) {
     setTrustOpen(true);
   };
 
-  // Activation: mark this model as the selected one via the existing
-  // `select-model` IPC channel. This mirrors what the MLX path does after
-  // loading (it calls Tauri's `select_model` which sets `selected_model_id`).
-  //
-  // KNOWN GAP (deferred): the daemon `load` action accepts a `provider`
-  // parameter (T13) but the napi `daemon_load_model` bridge does not yet
-  // forward it — see `napi/src/lib.rs::daemon_load_model`. Until that's
-  // wired, we don't trigger a daemon-side load for custom models here;
-  // selection-only activation is sufficient for the trust-dialog milestone.
+  // Activation: daemon_load_model swaps the in-memory model (build_load_command
+  // on the Rust side detects the .yaml suffix and adds provider=custom + dirs);
+  // select_model persists the selection across restarts. Without step 1 the
+  // daemon would keep serving whatever model was loaded before.
   const handleTrust = useCallback(async () => {
     setTrustOpen(false);
+    setBusy(true);
     try {
-      await getCustomBridge().invoke('select-model', { modelId: spec.id });
+      await invoke('daemon_load_model', { modelId: spec.id });
+      await selectModel(spec.id);
       message.success(t('customModels.activated', { name: spec.name }));
       onChange();
     } catch (err) {
       Modal.error({
         title: t('customModels.activateFailed'),
-        content: String(err),
+        content: formatError(err, t('customModels.activateFailed')),
       });
+    } finally {
+      setBusy(false);
     }
-  }, [spec.id, spec.name, onChange, t]);
+  }, [spec.id, spec.sourcePath, spec.name, onChange, selectModel, t]);
 
   const handleRemove = () => {
     Modal.confirm({
@@ -160,66 +155,83 @@ export function CustomModelCard({ status, onChange }: Props) {
         } catch (err) {
           Modal.error({
             title: t('customModels.removeFailed'),
-            content: String(err),
+            content: formatError(err, t('customModels.removeFailed')),
           });
         }
       },
     });
   };
 
+  // ---- Build status + actions for the unified card -----------------------
+  let cardStatus: ModelStatus;
+  const actions: ModelAction[] = [];
+
+  if (status.kind === 'depsMissing') {
+    cardStatus = { kind: 'needsDeps', missing: status.missing };
+    actions.push({
+      key: 'install',
+      label: t('models.action.installDeps'),
+      type: 'primary',
+      loading: busy,
+      onClick: handleInstall,
+    });
+  } else if (status.kind === 'notDownloaded') {
+    cardStatus = { kind: 'notDownloaded' };
+    actions.push({
+      key: 'download',
+      label: t('models.action.download'),
+      type: 'primary',
+      loading: busy,
+      onClick: handleDownload,
+    });
+  } else {
+    // status.kind === 'ready'
+    cardStatus = isActive ? { kind: 'active' } : { kind: 'available' };
+    if (!isActive) {
+      actions.push({
+        key: 'use',
+        label: t('models.action.use'),
+        type: 'primary',
+        loading: busy,
+        onClick: handleUse,
+      });
+    }
+  }
+  actions.push({
+    key: 'delete',
+    label: t('models.action.delete'),
+    danger: true,
+    disabled: busy,
+    onClick: handleRemove,
+  });
+
+  const vm: ModelCardViewModel = {
+    kind: 'normal',
+    id: spec.id,
+    name: spec.name,
+    description: spec.description ?? undefined,
+    badge: { text: t('models.badge.custom'), color: 'purple' },
+    meta: [
+      { label: t('models.label.size'), value: `${(spec.sizeMb / 1024).toFixed(1)} GB` },
+      { label: t('models.label.language'), value: langs },
+    ],
+    status: cardStatus,
+    actions,
+    alert:
+      status.kind === 'depsMissing'
+        ? {
+            type: 'warning',
+            message: t('customModels.depsMissing', {
+              pkgs: status.missing.join(', '),
+            }),
+          }
+        : undefined,
+    testId: `model-${spec.id}`,
+  };
+
   return (
     <>
-      <Card>
-      <Space direction="vertical" style={{ width: '100%' }} size="small">
-        <Space style={{ justifyContent: 'space-between', width: '100%' }}>
-          <Typography.Text strong>{spec.name}</Typography.Text>
-          <Tag>{t('customModels.customBadge')}</Tag>
-        </Space>
-
-        {spec.description && (
-          <Typography.Text type="secondary">{spec.description}</Typography.Text>
-        )}
-
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {t('customModels.metaLine', {
-            langs,
-            size: (spec.sizeMb / 1024).toFixed(1),
-            speed: spec.speed,
-            accuracy: spec.accuracy,
-          })}
-        </Typography.Text>
-
-        {status.kind === 'depsMissing' && (
-          <Alert
-            type="warning"
-            message={t('customModels.depsMissing', {
-              pkgs: status.missing.join(', '),
-            })}
-          />
-        )}
-
-        <Space>
-          {status.kind === 'depsMissing' && (
-            <Button type="primary" loading={busy} onClick={handleInstall}>
-              {t('customModels.installDeps')}
-            </Button>
-          )}
-          {status.kind === 'notDownloaded' && (
-            <Button type="primary" loading={busy} onClick={handleDownload}>
-              {t('customModels.downloadModel')}
-            </Button>
-          )}
-          {status.kind === 'ready' && (
-            <Button type="primary" onClick={handleUse}>
-              {t('customModels.use')}
-            </Button>
-          )}
-          <Button danger onClick={handleRemove}>
-            {t('customModels.remove')}
-          </Button>
-        </Space>
-      </Space>
-    </Card>
+      <ModelCard vm={vm} />
       <TrustDialog
         spec={spec}
         open={trustOpen}

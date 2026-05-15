@@ -1,18 +1,26 @@
+import json
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
-from conftest_helpers import load_daemon_module, add_fixtures_to_path, FIXTURES_DIR
+from conftest_helpers import (
+    add_fixtures_to_path,
+    load_daemon_module,
+    load_shared_module,
+    FIXTURES_DIR,
+)
 
 
 class CheckDepsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         add_fixtures_to_path()
-        cls.daemon = load_daemon_module()
+        cls.shared = load_shared_module()
 
     def test_all_installed(self):
         spec_path = FIXTURES_DIR / "specs" / "mimo_like.yaml"
-        result = self.daemon.check_custom_dependencies(str(spec_path))
+        result = self.shared.check_custom_dependencies(str(spec_path))
         self.assertTrue(result["all_installed"])
         self.assertEqual(result["missing"], [])
         self.assertIn("fake_asr_pkg", result["installed"])
@@ -34,20 +42,18 @@ load:
   kwargs: {}
 """)
         try:
-            result = self.daemon.check_custom_dependencies(str(bad_spec))
+            result = self.shared.check_custom_dependencies(str(bad_spec))
             self.assertFalse(result["all_installed"])
             self.assertIn("definitely_nonexistent_pkg_xyz", result["missing"][0])
         finally:
             bad_spec.unlink(missing_ok=True)
 
 
-import subprocess
-
 class InstallDepsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         add_fixtures_to_path()
-        cls.daemon = load_daemon_module()
+        cls.shared = load_shared_module()
 
     def test_install_invokes_pip_with_correct_packages(self):
         captured = {}
@@ -59,13 +65,13 @@ class InstallDepsTest(unittest.TestCase):
                 stderr = ""
             return Result()
 
-        original = self.daemon.subprocess.run
-        self.daemon.subprocess.run = fake_run
+        original = self.shared.subprocess.run
+        self.shared.subprocess.run = fake_run
         try:
             spec_path = FIXTURES_DIR / "specs" / "mimo_like.yaml"
-            result = self.daemon.install_custom_dependencies(str(spec_path))
+            result = self.shared.install_custom_dependencies(str(spec_path))
         finally:
-            self.daemon.subprocess.run = original
+            self.shared.subprocess.run = original
 
         self.assertTrue(result["success"])
         self.assertIn("pip", captured["cmd"])
@@ -80,26 +86,23 @@ class InstallDepsTest(unittest.TestCase):
                 stderr = "ERROR: could not find package\n"
             return Result()
 
-        original = self.daemon.subprocess.run
-        self.daemon.subprocess.run = fake_run
+        original = self.shared.subprocess.run
+        self.shared.subprocess.run = fake_run
         try:
             spec_path = FIXTURES_DIR / "specs" / "mimo_like.yaml"
-            result = self.daemon.install_custom_dependencies(str(spec_path))
+            result = self.shared.install_custom_dependencies(str(spec_path))
         finally:
-            self.daemon.subprocess.run = original
+            self.shared.subprocess.run = original
 
         self.assertFalse(result["success"])
         self.assertIn("could not find", result["error"])
 
 
-import json
-import tempfile
-
 class DownloadFunctionVariantTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         add_fixtures_to_path()
-        cls.daemon = load_daemon_module()
+        cls.shared = load_shared_module()
 
     def test_function_variant_writes_sidecar(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -111,7 +114,7 @@ class DownloadFunctionVariantTest(unittest.TestCase):
             spec_path = custom_dir / "stub.yaml"
             spec_path.write_text((FIXTURES_DIR / "specs" / "mimo_like.yaml").read_text())
 
-            result = self.daemon.download_custom_model(
+            result = self.shared.download_custom_model(
                 str(spec_path),
                 voiceink_models_dir=str(voiceink_dir),
                 custom_models_dir=str(custom_dir),
@@ -131,7 +134,7 @@ class DownloadHfReposVariantTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         add_fixtures_to_path()
-        cls.daemon = load_daemon_module()
+        cls.shared = load_shared_module()
 
     def test_hf_repos_variant_calls_snapshot_download(self):
         calls = []
@@ -140,7 +143,8 @@ class DownloadHfReposVariantTest(unittest.TestCase):
             Path(local_dir).mkdir(parents=True, exist_ok=True)
             return local_dir
 
-        # Monkeypatch the daemon's huggingface_hub
+        # Monkeypatch huggingface_hub at module level — shared.download_custom_model
+        # imports it lazily, so patching the global module works.
         import huggingface_hub
         original = huggingface_hub.snapshot_download
         huggingface_hub.snapshot_download = fake_snapshot
@@ -152,7 +156,7 @@ class DownloadHfReposVariantTest(unittest.TestCase):
                 spec_path = custom_dir / "hf.yaml"
                 spec_path.write_text((FIXTURES_DIR / "specs" / "hf_repos.yaml").read_text())
 
-                result = self.daemon.download_custom_model(
+                result = self.shared.download_custom_model(
                     str(spec_path),
                     voiceink_models_dir=str(voiceink_dir),
                     custom_models_dir=str(custom_dir),
@@ -166,10 +170,15 @@ class DownloadHfReposVariantTest(unittest.TestCase):
 
 
 class LoadCustomTest(unittest.TestCase):
+    """Verifies the daemon path: `load_custom_model` is exposed on the
+    daemon module (re-exported from custom_model_shared) and is what
+    the `action: "load"` branch invokes when provider=='custom'."""
+
     @classmethod
     def setUpClass(cls):
         add_fixtures_to_path()
         cls.daemon = load_daemon_module()
+        cls.shared = load_shared_module()
 
     def _setup(self, tmp):
         tmp = Path(tmp)
@@ -182,8 +191,12 @@ class LoadCustomTest(unittest.TestCase):
     def test_load_after_download_succeeds(self):
         with tempfile.TemporaryDirectory() as tmp:
             spec_path, voiceink_dir, custom_dir = self._setup(tmp)
-            self.daemon.download_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
-            model = self.daemon.load_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
+            self.shared.download_custom_model(
+                str(spec_path), str(voiceink_dir), str(custom_dir)
+            )
+            model = self.daemon.load_custom_model(
+                str(spec_path), str(voiceink_dir), str(custom_dir)
+            )
             self.assertEqual(model._daemon_model_type, "custom")
             self.assertEqual(model.precision, "int4")
 
@@ -191,15 +204,21 @@ class LoadCustomTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             spec_path, voiceink_dir, custom_dir = self._setup(tmp)
             with self.assertRaises(FileNotFoundError) as ctx:
-                self.daemon.load_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
+                self.daemon.load_custom_model(
+                    str(spec_path), str(voiceink_dir), str(custom_dir)
+                )
             self.assertIn("paths.json", str(ctx.exception))
 
 
 class TranscribeCustomTest(unittest.TestCase):
+    """Verifies the daemon's transcribe() routes to the custom branch
+    when the loaded model has _daemon_model_type == 'custom'."""
+
     @classmethod
     def setUpClass(cls):
         add_fixtures_to_path()
         cls.daemon = load_daemon_module()
+        cls.shared = load_shared_module()
 
     def _load_stub(self, tmp):
         tmp = Path(tmp)
@@ -207,8 +226,12 @@ class TranscribeCustomTest(unittest.TestCase):
         voiceink_dir = tmp / "models"; voiceink_dir.mkdir()
         spec_path = custom_dir / "stub.yaml"
         spec_path.write_text((FIXTURES_DIR / "specs" / "mimo_like.yaml").read_text())
-        self.daemon.download_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
-        return self.daemon.load_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
+        self.shared.download_custom_model(
+            str(spec_path), str(voiceink_dir), str(custom_dir)
+        )
+        return self.daemon.load_custom_model(
+            str(spec_path), str(voiceink_dir), str(custom_dir)
+        )
 
     def test_dispatches_to_custom_branch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -225,10 +248,59 @@ class TranscribeCustomTest(unittest.TestCase):
             yaml_text += "\ntranscribe_method: transcribe\nlanguage_param: language\n"
             spec_path = custom_dir / "stub.yaml"
             spec_path.write_text(yaml_text)
-            self.daemon.download_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
-            model = self.daemon.load_custom_model(str(spec_path), str(voiceink_dir), str(custom_dir))
+            self.shared.download_custom_model(
+                str(spec_path), str(voiceink_dir), str(custom_dir)
+            )
+            model = self.daemon.load_custom_model(
+                str(spec_path), str(voiceink_dir), str(custom_dir)
+            )
             text = self.daemon.transcribe(model, "/x.wav", language="en")
             self.assertIn("[stub:int4:en]", text)
+
+
+class WorkerProtocolTest(unittest.TestCase):
+    """End-to-end: spawn the worker as a child process and verify the
+    stdin/stdout protocol that the Rust side relies on."""
+
+    @classmethod
+    def setUpClass(cls):
+        add_fixtures_to_path()
+        cls.worker_path = Path(__file__).resolve().parent.parent / "custom_model_worker.py"
+        cls.fixtures_path = FIXTURES_DIR
+
+    def _run_worker(self, cmd_dict):
+        env = {
+            **__import__("os").environ,
+            "PYTHONPATH": (
+                f"{self.worker_path.parent}:{self.fixtures_path}"
+            ),
+        }
+        proc = subprocess.run(
+            ["python3", str(self.worker_path)],
+            input=json.dumps(cmd_dict),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        return proc
+
+    def test_check_deps_success_and_zero_exit(self):
+        spec_path = self.fixtures_path / "specs" / "mimo_like.yaml"
+        proc = self._run_worker({"action": "check_deps", "spec_path": str(spec_path)})
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        last_line = [l for l in proc.stdout.splitlines() if l.strip()][-1]
+        resp = json.loads(last_line)
+        self.assertTrue(resp["ok"])
+        self.assertTrue(resp["all_installed"])
+
+    def test_unknown_action_fails_with_nonzero_exit(self):
+        proc = self._run_worker({"action": "nope"})
+        self.assertNotEqual(proc.returncode, 0)
+        last_line = [l for l in proc.stdout.splitlines() if l.strip()][-1]
+        resp = json.loads(last_line)
+        self.assertFalse(resp["ok"])
+        self.assertIn("nope", resp["error"])
 
 
 if __name__ == "__main__":

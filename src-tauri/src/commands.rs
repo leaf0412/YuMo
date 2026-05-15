@@ -10,8 +10,9 @@ use crate::mask;
 use crate::hotkey;
 use crate::pipeline::PipelineState;
 use crate::state::AppContext;
-use crate::daemon::DaemonManager;
+use crate::daemon::{DaemonManager, find_python};
 use crate::{audio_io, platform, text_processor, transcriber};
+use yumo_core::custom_worker;
 use crate::platform::{audio_ctrl, keychain, paster, permissions};
 
 // ---------------------------------------------------------------------------
@@ -433,13 +434,13 @@ pub async fn stop_recording(
             // Auto-load model if not loaded
             let model_repo = model_info.and_then(|m| m.model_repo.clone());
             let loaded = daemon.loaded_model();
-            if model_repo.is_some() && loaded.as_ref() != model_repo.as_ref() {
+            if model_repo.is_some() && loaded.as_deref() != Some(model_id.as_str()) {
                 let repo = model_repo.as_ref().unwrap();
-                info!("[pipeline] loading MLX model: {}", repo);
+                info!("[pipeline] loading MLX model: id={} repo={}", model_id, repo);
                 let cmd = yumo_core::custom_models::build_load_command(repo);
                 match daemon.send_command(&cmd) {
                     Ok(resp) if resp.status == "success" || resp.status == "loaded" || resp.status == "download_complete" => {
-                        daemon.set_loaded_model(model_repo.clone());
+                        daemon.set_loaded_model(Some(model_id.clone()));
                         let _ = app.emit("daemon-status-changed", ());
                         info!("[pipeline] MLX model loaded");
                     }
@@ -928,7 +929,7 @@ pub fn delete_model(state: State<AppContext>, daemon: State<DaemonManager>, mode
                     }
                 }
                 // If this model is currently loaded, unload it
-                if daemon.loaded_model().as_deref() == model.model_repo.as_deref() {
+                if daemon.loaded_model().as_deref() == Some(model.id.as_str()) {
                     let cmd = serde_json::json!({"action": "unload"});
                     let _ = daemon.send_command(&cmd);
                     daemon.set_loaded_model(None);
@@ -972,7 +973,7 @@ pub fn delete_model(state: State<AppContext>, daemon: State<DaemonManager>, mode
                 }
 
                 // If this model is currently loaded, unload it
-                if daemon.loaded_model().as_deref() == model.model_repo.as_deref() {
+                if daemon.loaded_model().as_deref() == Some(model.id.as_str()) {
                     let cmd = serde_json::json!({"action": "unload"});
                     let _ = daemon.send_command(&cmd);
                     daemon.set_loaded_model(None);
@@ -1457,10 +1458,26 @@ pub fn daemon_check_deps(daemon: State<DaemonManager>) -> Result<serde_json::Val
 #[tauri::command]
 pub async fn daemon_load_model(
     app: tauri::AppHandle,
+    state: State<'_, AppContext>,
     daemon: State<'_, DaemonManager>,
-    model_repo: String,
+    model_id: String,
 ) -> Result<(), AppError> {
     use crate::daemon::DaemonEventCallback;
+
+    // Resolve the daemon-facing identifier from the public model id.
+    // Built-in MLX models: model_repo is an HF repo string.
+    // Custom YAML plugins:  model_repo is the absolute path to the .yaml file.
+    let all = transcriber::all_models(&state.paths.models_dir);
+    let model_info = all
+        .iter()
+        .find(|m| m.id == model_id)
+        .ok_or_else(|| AppError::Transcription(format!("unknown model id: {model_id}")))?;
+    let model_repo = model_info
+        .model_repo
+        .clone()
+        .ok_or_else(|| AppError::Transcription(format!(
+            "model '{model_id}' has no model_repo (not loadable via daemon)"
+        )))?;
 
     if !daemon.is_running() {
         // Emit setup stages so frontend can show progress
@@ -1486,7 +1503,11 @@ pub async fn daemon_load_model(
         daemon.start()?;
         let _ = app.emit("daemon-setup-status", serde_json::json!({"stage": "ready"}));
     }
-    let cmd = serde_json::json!({"action": "load", "model": model_repo});
+    // Use build_load_command so YAML paths get provider="custom" + the
+    // voiceink_models_dir / custom_models_dir injected. Without this the
+    // daemon falls through to the generic load branch and the custom
+    // model never actually gets imported.
+    let cmd = yumo_core::custom_models::build_load_command(&model_repo);
     let timeout = std::time::Duration::from_secs(600);
     let rx = daemon.send_command_streaming(&cmd, timeout)?;
 
@@ -1499,7 +1520,14 @@ pub async fn daemon_load_model(
         let load_start = std::time::Instant::now();
         log::info!("[daemon] [load_model] begin repo={}", repo_clone);
 
-        while let Ok(resp) = rx.recv() {
+        while let Ok(item) = rx.recv() {
+            let resp = match item {
+                Ok(r) => r,
+                Err(e) => {
+                    log::error!("[daemon] [load_model] read error: {}", e);
+                    return Err(e);
+                }
+            };
             if resp.status == "downloading" {
                 let progress = resp.progress.as_ref()
                     .and_then(|p| p.as_f64())
@@ -1533,13 +1561,15 @@ pub async fn daemon_load_model(
             }
         }
 
-        last_resp.ok_or_else(|| AppError::Transcription("no response from daemon".into()))
+        last_resp.ok_or_else(|| AppError::Transcription(
+            "daemon stream closed before sending any response".into()
+        ))
     })
     .await
     .map_err(|e| AppError::Transcription(format!("spawn_blocking: {e}")))??;
 
     if final_resp.status == "success" || final_resp.status == "loaded" {
-        daemon.set_loaded_model(Some(model_repo));
+        daemon.set_loaded_model(Some(model_id));
         let _ = app.emit("daemon-status-changed", ());
         Ok(())
     } else {
@@ -1631,72 +1661,147 @@ pub fn list_custom_models() -> Result<serde_json::Value, AppError> {
     }))
 }
 
+// ---------------------------------------------------------------------------
+// Custom-model worker actions
+//
+// These three commands run in a one-shot Python child process
+// (`custom_model_worker.py`) that is independent of the long-running
+// transcription daemon. Doing so lets the user transcribe with the
+// currently loaded model while a different custom model is being
+// installed or downloaded — the two pipelines share no IPC channel.
+// ---------------------------------------------------------------------------
+
+fn worker_script_path(ctx: &AppContext) -> std::path::PathBuf {
+    ctx.paths.data_dir.join("custom_model_worker.py")
+}
+
 /// Check whether a custom spec's pip dependencies are satisfied.
+///
+/// Returns the frontend `CustomDepsCheckResult` shape (camelCase):
+/// `{ installed, missing, allInstalled }`. The worker emits
+/// `all_installed` (snake_case) — the snake→camel mapping is pinned
+/// here at the IPC boundary so the JS bridge never has to know.
 #[tauri::command]
 pub async fn custom_check_deps(
     spec_path: String,
-    daemon: State<'_, DaemonManager>,
+    ctx: State<'_, AppContext>,
 ) -> Result<serde_json::Value, AppError> {
     info!("[cmd] custom_check_deps spec_path={}", spec_path);
-    if !daemon.is_running() {
-        daemon.start()?;
-    }
+    let python = find_python()?;
+    let script = worker_script_path(&ctx);
     let cmd = serde_json::json!({
-        "action": "check_custom_dependencies",
+        "action": "check_deps",
         "spec_path": spec_path,
     });
-    let timeout = std::time::Duration::from_secs(60);
-    let resp = daemon.send_command_async(&cmd, timeout).await?;
-    if resp.status == "error" {
-        return Err(AppError::Transcription(
-            resp.error
-                .unwrap_or_else(|| "check_custom_dependencies failed".into()),
-        ));
-    }
-    let value = serde_json::to_value(&resp).unwrap_or_default();
-    Ok(value)
+    let resp = custom_worker::run_action(
+        &python,
+        &script,
+        cmd,
+        std::time::Duration::from_secs(60),
+    )
+    .await?;
+    let all_installed = resp
+        .get("all_installed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let installed = resp
+        .get("installed")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let missing = resp
+        .get("missing")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    Ok(serde_json::json!({
+        "installed": installed,
+        "missing": missing,
+        "allInstalled": all_installed,
+    }))
 }
 
-/// Install pip dependencies for a custom spec (long-running).
+/// Install pip dependencies for a custom spec (long-running, up to 10 min).
+///
+/// Returns `{ success, stdout, stderr, error }` matching the frontend
+/// `CustomDepsInstallResult` contract.
 #[tauri::command]
 pub async fn custom_install_deps(
     spec_path: String,
-    daemon: State<'_, DaemonManager>,
+    ctx: State<'_, AppContext>,
 ) -> Result<serde_json::Value, AppError> {
     info!("[cmd] custom_install_deps spec_path={}", spec_path);
-    if !daemon.is_running() {
-        daemon.start()?;
-    }
+    let python = find_python()?;
+    let script = worker_script_path(&ctx);
     let cmd = serde_json::json!({
-        "action": "install_custom_dependencies",
+        "action": "install_deps",
         "spec_path": spec_path,
     });
-    let timeout = std::time::Duration::from_secs(600);
-    let resp = daemon.send_command_async(&cmd, timeout).await?;
-    let value = serde_json::to_value(&resp).unwrap_or_default();
-    Ok(value)
+    let resp = custom_worker::run_action(
+        &python,
+        &script,
+        cmd,
+        std::time::Duration::from_secs(600),
+    )
+    .await?;
+    let success = resp
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let stdout = resp
+        .get("stdout")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let stderr = resp
+        .get("stderr")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let error = resp
+        .get("error")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    Ok(serde_json::json!({
+        "success": success,
+        "stdout": stdout,
+        "stderr": stderr,
+        "error": error,
+    }))
 }
 
-/// Run the spec's download step (function or hf_repos variant) — long-running.
+/// Run the spec's download step (function or hf_repos variant).
+///
+/// Long-running (up to 30 min for large hf_repos models). Returns
+/// `{ success, paths, error? }` matching the frontend
+/// `CustomDownloadResult` contract.
 #[tauri::command]
 pub async fn custom_download(
     spec_path: String,
-    daemon: State<'_, DaemonManager>,
+    ctx: State<'_, AppContext>,
 ) -> Result<serde_json::Value, AppError> {
     info!("[cmd] custom_download spec_path={}", spec_path);
-    if !daemon.is_running() {
-        daemon.start()?;
-    }
+    let python = find_python()?;
+    let script = worker_script_path(&ctx);
     let cmd = serde_json::json!({
-        "action": "download_custom_model",
+        "action": "download",
         "spec_path": spec_path,
         "voiceink_models_dir": voiceink_models_dir().to_string_lossy(),
         "custom_models_dir": custom_models_dir().to_string_lossy(),
     });
-    let timeout = std::time::Duration::from_secs(1800);
-    let resp = daemon.send_command_async(&cmd, timeout).await?;
-    let value = serde_json::to_value(&resp).unwrap_or_default();
-    Ok(value)
+    let resp = custom_worker::run_action(
+        &python,
+        &script,
+        cmd,
+        std::time::Duration::from_secs(1800),
+    )
+    .await?;
+    let paths = resp
+        .get("paths")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    Ok(serde_json::json!({
+        "success": true,
+        "paths": paths,
+    }))
 }
 
 /// Open ~/.voiceink/custom_models/ in the OS file manager.

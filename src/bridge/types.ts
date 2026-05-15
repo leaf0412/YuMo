@@ -320,7 +320,7 @@ export interface Bridge {
   daemonStop(): Promise<void>;
   daemonStatus(): Promise<DaemonStatus>;
   daemonCheckDeps(): Promise<unknown>;
-  daemonLoadModel(modelRepo: string): Promise<void>;
+  daemonLoadModel(modelId: string): Promise<void>;
   daemonUnloadModel(): Promise<void>;
 
   // --- Sprites ---

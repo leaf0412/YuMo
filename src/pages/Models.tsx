@@ -2,15 +2,17 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Card, Button, Flex, Space, Tag, Typography, Row, Col, Select,
-  Input, InputNumber, Slider, Progress, message, Divider, Tabs, Badge,
+  Input, InputNumber, Slider, message, Divider, Tabs, Badge,
 } from 'antd';
 import {
-  CheckCircleOutlined, CloudOutlined, ImportOutlined, ThunderboltOutlined,
+  CloudOutlined, ImportOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
 import { listen } from '../lib/events';
 import { invoke, formatError, logEvent } from '../lib/logger';
 import useAppStore from '../stores/useAppStore';
 import { CustomModelsSection } from '../components/CustomModels';
+import { ModelCard } from '../components/ModelCard';
+import type { ModelAction, ModelStatus, NormalModelViewModel } from '../components/ModelCard/types';
 const { Title, Text } = Typography;
 
 interface ModelSettings {
@@ -32,7 +34,7 @@ function formatSize(mb: number): string {
 
 export default function Models() {
   const { t } = useTranslation();
-  const { models, settings, daemonStatus, fetchModels, fetchSettings, fetchDaemonStatus, setSettings: storeSetSettings, setDaemonStatus: storeSetDaemonStatus } = useAppStore();
+  const { models, settings, daemonStatus, fetchModels, fetchSettings, fetchDaemonStatus, selectModel, setSettings: storeSetSettings, setDaemonStatus: storeSetDaemonStatus } = useAppStore();
   const [cloudApiKey, setCloudApiKey] = useState('');
   // Default to local AI tab (MLX on macOS, Qwen3-ASR on Linux)
   const [activeTab, setActiveTab] = useState('mlx');
@@ -53,7 +55,11 @@ export default function Models() {
   const handleModelSettingChange = async (modelId: string, key: keyof ModelSettings, value: number) => {
     const settingKey = `model_${modelId}_${key}`;
     try {
-      await invoke('update_setting', { key: settingKey, value: JSON.stringify(value) });
+      // Pass `value` as a number, NOT JSON.stringify(value). Tauri's invoke
+      // JSON-encodes args once on its own; double-encoding stores a string
+      // (`"0.5"`) which the backend's `Value::as_f64()` rejects, silently
+      // falling back to defaults — so the slider had no effect.
+      await invoke('update_setting', { key: settingKey, value });
       setModelSettings((prev) => ({
         ...prev,
         [modelId]: { ...getModelSettings(modelId), [key]: value },
@@ -100,8 +106,6 @@ export default function Models() {
   useEffect(() => {
     if (activeTab !== 'mlx') return;
     fetchDaemonStatus();
-    const interval = setInterval(fetchDaemonStatus, 3000);
-    return () => clearInterval(interval);
   }, [activeTab, fetchDaemonStatus]);
 
   // Listen for daemon setup status (venv bootstrap, etc.)
@@ -126,8 +130,7 @@ export default function Models() {
   const handleSelect = async (modelId: string) => {
     logEvent('Models', 'select_model', { model_id: modelId });
     try {
-      await invoke('select_model', { modelId });
-      storeSetSettings({ selected_model_id: modelId });
+      await selectModel(modelId);
       message.success(t('models.toast.modelSwitched'));
     } catch (e) {
       message.error(formatError(e, t('models.error.switchFailed')));
@@ -213,9 +216,8 @@ export default function Models() {
     setLoadingModel(modelId);
     setDaemonBusy(true);
     try {
-      await invoke('daemon_load_model', { modelRepo });
-      await invoke('select_model', { modelId });
-      storeSetSettings({ selected_model_id: modelId });
+      await invoke('daemon_load_model', { modelId });
+      await selectModel(modelId);
       logEvent('Models', 'load_model_complete', { model_id: modelId });
       message.success(t('models.toast.modelLoaded'));
       fetchDaemonStatus();
@@ -260,91 +262,206 @@ export default function Models() {
   // Local whisper models tab hidden — kept for future use
   void localModels;
 
+  // ---- ViewModel construction --------------------------------------------
+  // Both local-MLX and cloud models translate their domain shape to the
+  // unified `NormalModelViewModel` so all three tabs render through the
+  // same <ModelCard /> component. The custom-models tab does the same
+  // translation inside `CustomModelsSection`.
+
+  const renderParamControls = (modelId: string) => (
+    <Flex vertical gap={4} style={{ padding: '4px 0' }}>
+      <Flex align="center" gap={8}>
+        <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>
+          {t('models.label.temperature')}
+        </Text>
+        <Slider
+          min={0}
+          max={1}
+          step={0.1}
+          value={getModelSettings(modelId).temperature}
+          onChange={(v) => handleModelSettingChange(modelId, 'temperature', v)}
+          style={{ flex: 1 }}
+        />
+        <Text style={{ fontSize: 12, minWidth: 28 }}>
+          {getModelSettings(modelId).temperature}
+        </Text>
+      </Flex>
+      <Flex align="center" gap={8}>
+        <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>
+          {t('models.label.token')}
+        </Text>
+        <InputNumber
+          size="small"
+          min={100}
+          max={10000}
+          step={100}
+          value={getModelSettings(modelId).max_tokens}
+          onChange={(v) => v != null && handleModelSettingChange(modelId, 'max_tokens', v)}
+          style={{ flex: 1 }}
+        />
+      </Flex>
+    </Flex>
+  );
+
+  const mlxToViewModel = (model: typeof mlxModels[number]): NormalModelViewModel => {
+    const repo = model.model_repo;
+    const isLoading = loadingModel === model.id;
+    const downloadPercent = repo ? downloadProgress[repo] : undefined;
+    const isCurrent = isSelected(model.id);
+
+    let status: ModelStatus;
+    if (isLoading) {
+      status = { kind: 'downloading', percent: downloadPercent, note: setupMessage };
+    } else if (isCurrent && model.is_downloaded) {
+      status = { kind: 'active' };
+    } else if (model.is_downloaded) {
+      status = { kind: 'available' };
+    } else {
+      status = { kind: 'notDownloaded' };
+    }
+
+    const actions: ModelAction[] = [];
+    if (status.kind === 'notDownloaded') {
+      actions.push({
+        key: 'download',
+        label: t('models.action.download'),
+        type: 'primary',
+        onClick: () => {
+          if (repo) handleLoadModel(repo, model.id);
+        },
+      });
+    } else if (status.kind === 'available') {
+      actions.push({
+        key: 'use',
+        label: t('models.action.use'),
+        type: 'primary',
+        onClick: () => {
+          if (repo) handleLoadModel(repo, model.id);
+        },
+      });
+      actions.push({
+        key: 'delete',
+        label: t('models.action.delete'),
+        danger: true,
+        onClick: () => handleDeleteModel(model.id),
+      });
+    } else if (status.kind === 'active') {
+      actions.push({
+        key: 'delete',
+        label: t('models.action.delete'),
+        danger: true,
+        onClick: () => handleDeleteModel(model.id),
+      });
+    }
+    // `downloading` intentionally has no actions — the card-level Progress
+    // bar conveys state, and the user shouldn't be able to re-trigger.
+
+    return {
+      kind: 'normal',
+      id: model.id,
+      name: model.name,
+      description: model.description,
+      icon: <ThunderboltOutlined />,
+      badge: { text: t('models.badge.local'), color: 'geekblue' },
+      meta: [
+        { label: t('models.label.size'), value: formatSize(model.size_mb) },
+        {
+          label: t('models.label.language'),
+          value: (
+            <Space size={4} wrap>
+              {model.languages.map((lang) => (
+                <Tag key={lang} color="blue" bordered={false}>
+                  {languageLabelMap[lang] ?? lang}
+                </Tag>
+              ))}
+            </Space>
+          ),
+        },
+      ],
+      status,
+      actions,
+      extras: model.is_downloaded ? renderParamControls(model.id) : undefined,
+      testId: `model-${model.id}`,
+    };
+  };
+
+  const cloudToViewModel = (model: typeof cloudModels[number]): NormalModelViewModel => {
+    const isCurrent = isSelected(model.id);
+    const status: ModelStatus = isCurrent ? { kind: 'active' } : { kind: 'available' };
+    const actions: ModelAction[] = [];
+    if (status.kind === 'available') {
+      actions.push({
+        key: 'use',
+        label: t('models.action.use'),
+        type: 'primary',
+        onClick: () => handleSelect(model.id),
+      });
+    }
+    return {
+      kind: 'normal',
+      id: model.id,
+      name: model.name,
+      description: model.description,
+      icon: <CloudOutlined />,
+      badge: { text: t('models.badge.cloud'), color: 'cyan' },
+      meta: [],
+      status,
+      actions,
+      extras: renderParamControls(model.id),
+      testId: `model-${model.id}`,
+    };
+  };
+
   const mlxTabContent = (
     <>
-      <Flex justify="space-between" align="center" style={{ marginBottom: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 8 }}>
+      <Flex
+        justify="space-between"
+        align="center"
+        style={{ marginBottom: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 8 }}
+      >
         <Space>
-          <Badge status={daemonStatus.running ? (daemonStatus.loaded_model ? 'success' : 'warning') : 'default'} />
-          <Text>{daemonStatus.running ? (daemonStatus.loaded_model ? t('models.daemon.running') : t('models.daemon.idle')) : t('models.daemon.stopped')}</Text>
-          {daemonStatus.loaded_model && <Tag color="blue">{t('models.daemon.loaded', { name: daemonStatus.loaded_model.split('/').pop() })}</Tag>}
+          <Badge
+            status={
+              daemonStatus.running
+                ? daemonStatus.loaded_model
+                  ? 'success'
+                  : 'warning'
+                : 'default'
+            }
+          />
+          <Text>
+            {daemonStatus.running
+              ? daemonStatus.loaded_model
+                ? t('models.daemon.running')
+                : t('models.daemon.idle')
+              : t('models.daemon.stopped')}
+          </Text>
+          {daemonStatus.loaded_model && (
+            <Tag color="blue">
+              {t('models.daemon.loaded', {
+                name:
+                  models.find((m) => m.id === daemonStatus.loaded_model)?.name
+                  || daemonStatus.loaded_model,
+              })}
+            </Tag>
+          )}
         </Space>
         <Space>
-          {daemonStatus.running
-            ? <Button size="small" onClick={handleDaemonStop}>{t('models.daemon.stop')}</Button>
-            : <Button type="primary" size="small" loading={daemonBusy} onClick={handleDaemonStart}>{t('models.daemon.start')}</Button>}
+          {daemonStatus.running ? (
+            <Button size="small" onClick={handleDaemonStop}>
+              {t('models.daemon.stop')}
+            </Button>
+          ) : (
+            <Button type="primary" size="small" loading={daemonBusy} onClick={handleDaemonStart}>
+              {t('models.daemon.start')}
+            </Button>
+          )}
         </Space>
       </Flex>
       <Row gutter={[16, 16]} data-testid="model-list">
         {mlxModels.map((model) => (
           <Col xs={24} sm={12} md={8} key={model.id}>
-            <Card style={isSelected(model.id) ? { borderColor: '#52c41a' } : undefined} styles={{ body: { padding: 16 } }} data-testid={`model-${model.id}`}>
-              <Flex vertical gap={12}>
-                <Flex justify="space-between" align="center">
-                  <Space><ThunderboltOutlined /><Text strong>{model.name}</Text></Space>
-                  {daemonStatus.loaded_model === model.model_repo
-                    ? <Tag color="blue" icon={isSelected(model.id) ? <CheckCircleOutlined /> : undefined}>{isSelected(model.id) ? t('models.tag.activeLoaded') : t('models.tag.loaded')}</Tag>
-                    : model.is_downloaded
-                      ? <Tag color="green" icon={isSelected(model.id) ? <CheckCircleOutlined /> : undefined}>{isSelected(model.id) ? t('models.tag.activeCached') : t('models.tag.cached')}</Tag>
-                      : isSelected(model.id)
-                        ? <Tag color="red">{t('models.tag.needsDownload')}</Tag>
-                        : <Tag>{t('models.tag.notDownloaded')}</Tag>}
-                </Flex>
-                {model.description && <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>}
-                <Flex gap={16}>
-                  <div><Text type="secondary">{t('models.label.size')}</Text><Text>{formatSize(model.size_mb)}</Text></div>
-                  <div><Text type="secondary">{t('models.label.language')}</Text>{model.languages.map((lang) => <Tag key={lang} color="blue" bordered={false}>{languageLabelMap[lang] ?? lang}</Tag>)}</div>
-                </Flex>
-                {model.is_downloaded && (
-                  <Flex vertical gap={4} style={{ padding: '8px 0' }}>
-                    <Flex align="center" gap={8}>
-                      <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>{t('models.label.temperature')}</Text>
-                      <Slider
-                        min={0} max={1} step={0.1}
-                        value={getModelSettings(model.id).temperature}
-                        onChange={(v) => handleModelSettingChange(model.id, 'temperature', v)}
-                        style={{ flex: 1 }}
-                      />
-                      <Text style={{ fontSize: 12, minWidth: 28 }}>{getModelSettings(model.id).temperature}</Text>
-                    </Flex>
-                    <Flex align="center" gap={8}>
-                      <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>{t('models.label.token')}</Text>
-                      <InputNumber
-                        size="small"
-                        min={100} max={10000} step={100}
-                        value={getModelSettings(model.id).max_tokens}
-                        onChange={(v) => v != null && handleModelSettingChange(model.id, 'max_tokens', v)}
-                        style={{ flex: 1 }}
-                      />
-                    </Flex>
-                  </Flex>
-                )}
-                {loadingModel === model.id && setupMessage && (
-                  <Text type="warning" style={{ fontSize: 12 }}>{setupMessage}</Text>
-                )}
-                {model.model_repo && downloadProgress[model.model_repo] != null && (
-                  <Progress percent={downloadProgress[model.model_repo]} size="small" status="active" />
-                )}
-                <Flex justify="flex-end" gap={8}>
-                  {daemonStatus.loaded_model === model.model_repo ? (
-                    <>
-                      {!isSelected(model.id) && <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>{t('models.button.setDefault')}</Button>}
-                      <Button size="small" danger onClick={() => handleDeleteModel(model.id)}>{t('models.button.deleteModel')}</Button>
-                    </>
-                  ) : model.is_downloaded ? (
-                    <>
-                      <Button type="primary" size="small" onClick={() => handleLoadModel(model.model_repo!, model.id)}>{t('models.button.loadModel')}</Button>
-                      <Button size="small" danger onClick={() => handleDeleteModel(model.id)}>{t('common.delete')}</Button>
-                    </>
-                  ) : (
-                    <Button type="primary" size="small" loading={loadingModel === model.id} onClick={() => handleLoadModel(model.model_repo!, model.id)}>
-                      {loadingModel === model.id
-                        ? (model.model_repo && downloadProgress[model.model_repo] != null ? t('models.button.downloading') : t('models.button.loading'))
-                        : t('models.button.loadModel')}
-                    </Button>
-                  )}
-                </Flex>
-              </Flex>
-            </Card>
+            <ModelCard vm={mlxToViewModel(model)} />
           </Col>
         ))}
       </Row>
@@ -356,46 +473,7 @@ export default function Models() {
       <Row gutter={[16, 16]}>
         {cloudModels.map((model) => (
           <Col xs={24} sm={12} md={8} key={model.id}>
-            <Card style={isSelected(model.id) ? { borderColor: '#52c41a' } : undefined} styles={{ body: { padding: 16 } }} data-testid={`model-${model.id}`}>
-              <Flex vertical gap={12}>
-                <Flex justify="space-between" align="center">
-                  <Space><CloudOutlined /><Text strong>{model.name}</Text></Space>
-                  {isSelected(model.id) ? (
-                    <Tag color="green" icon={<CheckCircleOutlined />}>{t('models.tag.active')}</Tag>
-                  ) : (
-                    <Tag color="blue">{t('models.tag.cloudAvailable')}</Tag>
-                  )}
-                </Flex>
-                {model.description && <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>}
-                <Flex vertical gap={4} style={{ padding: '8px 0' }}>
-                  <Flex align="center" gap={8}>
-                    <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>{t('models.label.temperature')}</Text>
-                    <Slider
-                      min={0} max={1} step={0.1}
-                      value={getModelSettings(model.id).temperature}
-                      onChange={(v) => handleModelSettingChange(model.id, 'temperature', v)}
-                      style={{ flex: 1 }}
-                    />
-                    <Text style={{ fontSize: 12, minWidth: 28 }}>{getModelSettings(model.id).temperature}</Text>
-                  </Flex>
-                  <Flex align="center" gap={8}>
-                    <Text type="secondary" style={{ fontSize: 12, minWidth: 52 }}>{t('models.label.token')}</Text>
-                    <InputNumber
-                      size="small"
-                      min={100} max={10000} step={100}
-                      value={getModelSettings(model.id).max_tokens}
-                      onChange={(v) => v != null && handleModelSettingChange(model.id, 'max_tokens', v)}
-                      style={{ flex: 1 }}
-                    />
-                  </Flex>
-                </Flex>
-                <Flex justify="flex-end" gap={8}>
-                  {!isSelected(model.id) && (
-                    <Button type="primary" size="small" onClick={() => handleSelect(model.id)}>{t('models.button.useModel')}</Button>
-                  )}
-                </Flex>
-              </Flex>
-            </Card>
+            <ModelCard vm={cloudToViewModel(model)} />
           </Col>
         ))}
       </Row>
@@ -404,16 +482,28 @@ export default function Models() {
         <Flex vertical gap={8} style={{ width: '100%' }}>
           <div>
             <Text>{t('models.cloud.provider')}</Text>
-            <Select placeholder={t('models.cloud.selectProvider')} value={settings.cloud_provider} onChange={handleCloudProviderChange} style={{ width: '100%', marginTop: 8 }} options={CLOUD_PROVIDERS} />
+            <Select
+              placeholder={t('models.cloud.selectProvider')}
+              value={settings.cloud_provider}
+              onChange={handleCloudProviderChange}
+              style={{ width: '100%', marginTop: 8 }}
+              options={CLOUD_PROVIDERS}
+            />
           </div>
           <div>
             <Text>{t('models.cloud.apiKey')}</Text>
             <Space.Compact style={{ width: '100%', marginTop: 8 }}>
-              <Input.Password placeholder={t('models.cloud.enterApiKey')} value={cloudApiKey} onChange={(e) => setCloudApiKey(e.target.value)} />
+              <Input.Password
+                placeholder={t('models.cloud.enterApiKey')}
+                value={cloudApiKey}
+                onChange={(e) => setCloudApiKey(e.target.value)}
+              />
               <Button onClick={handleSaveApiKey}>{t('common.save')}</Button>
             </Space.Compact>
           </div>
-          <Button icon={<CloudOutlined />} onClick={handleTestConnection}>{t('models.cloud.testConnection')}</Button>
+          <Button icon={<CloudOutlined />} onClick={handleTestConnection}>
+            {t('models.cloud.testConnection')}
+          </Button>
         </Flex>
       </Card>
     </>
@@ -439,9 +529,9 @@ export default function Models() {
         items={[
           ...(mlxModels.length > 0 ? [{ key: 'mlx', label: <span data-testid="local-models-tab">{t('models.tab.localAI', { count: mlxModels.length })}</span>, children: mlxTabContent }] : []),
           { key: 'cloud', label: <span data-testid="cloud-models-tab">{t('models.tab.cloud', { count: cloudModels.length })}</span>, children: cloudTabContent },
+          { key: 'custom', label: <span data-testid="custom-models-tab">{t('models.tab.custom')}</span>, children: <CustomModelsSection /> },
         ]}
       />
-      <CustomModelsSection />
     </Flex>
   );
 }
