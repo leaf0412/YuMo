@@ -5,6 +5,24 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.2] - 2026-05-16
+
+### Added - 新增
+- **文本后处理 3 个开关** — 设置页新建「文本后处理」面板，独立控制转录后文本加工链路
+  - `append_period`（默认关）— 末尾自动追加句号，CJK 末尾→「。」/ ASCII 末尾→「.」，已有终止标点 `.?!。？！…⋯` 跳过
+  - `convert_cn_numerals`（默认关）— 中文数字转阿拉伯数字总开关，可托底「百度→100度」「万象→10000象」之类量词扫描结构性误伤
+  - `use_builtin_dictionary`（默认开）— 内置错别字 / 同音误识词典开关
+- **内置错别字词典** — `crates/yumo-core/src/text_processor/builtin_dictionary.json` 首批 22 条种子（百渡→百度、腾迅→腾讯、Github→GitHub、复务器→服务器…），JSON 随发版迭代
+  - CJK 词条用子串替换（regex `\b` 在 CJK 内部不触发，嵌入式才能命中）
+  - ASCII 词条仍走 word-boundary case-insensitive 匹配
+  - 用户自定义 Dictionary 先跑、内置后跑，用户规则可覆盖内置
+
+### Changed - 变更
+- **`process_text` 签名收敛**（仅 yumo-core crate 内部破坏性）—— 从 3 位置参数改为 `&ProcessOptions` struct，未来加 toggle 不再破坏 ABI
+
+### Removed - 移除
+- **Linux `.AppImage` 产物** — 项目仅承诺兼容 Ubuntu 22.04+，默认 apt 源直接有 `libwebkit2gtk-4.1`，`.deb` 5.7MB 已完美覆盖；AppImage 80MB「跨发行版兜底」对单一目标 distro 是冗余成本
+
 ## [0.8.1] - 2026-05-15
 
 ### Added - 新增
