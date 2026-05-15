@@ -5,10 +5,25 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.8.1] - 2026-05-15
 
-### Removed - 移除
+### Added - 新增
+- **ModelCard 卡片抽象** — 新增共享组件 `src/components/ModelCard/`，CustomModels / Models 页统一卡片渲染
+- **custom worker 解耦** — Rust 端 `crates/yumo-core/src/custom_worker.rs` + Python 端 `custom_model_shared.py` / `custom_model_worker.py`，custom 模型 worker 从 `mlx_funasr_daemon` 剥离
 
+### Changed - 变更
+- **模型主键 model_repo → model_id**（破坏性）—— daemon 主键改用 modelId，避免不同模型类型共用 HF repo 名时冲突
+  - bridge: `daemonLoadModel(modelRepo)` → `daemonLoadModel(modelId)`
+  - store 新增 `selectModel` action，统一走 `select_model` 命令
+  - 老安装升级后 daemon 已加载状态会重置（首次启动需重新选模型）
+- **mlx_funasr_daemon.py 瘦身 236 行** — custom 模型逻辑剥离到独立 worker
+- **recorder 日志降级** — 三平台 `list_devices` 路径 `info` → `debug`，避免 UI 启动时刷屏 log.txt
+
+### Fixed - 修复
+- **Models 页滑块设置无效** — `update_setting` value 双重 JSON 编码，后端 `Value::as_f64()` 拒绝字符串字面量、落回默认值
+- **`platform_integration_test`** 补 `PermissionStatus.paste_tools: None` 字段，跟上之前 struct 变更
+
+### Removed - 移除（破坏性）
 - **Electron 兼容壳全量移除** — 仓库瘦身为单运行时（Tauri）项目
   - 删除 `src-electron/`、`napi/` crate、`electron-builder.yml`、`dist-electron/`
   - `package.json` 清掉 `electron` / `electron-builder` / `electron-log` / `esbuild` 依赖和 `electron:*` scripts
@@ -16,6 +31,7 @@
   - CI release 工作流删 `electron` job，仅保留 Tauri 多平台矩阵
   - 前端 bridge / events / logger 简化为 Tauri-only，删除 runtime 双分支
 - **放弃 Ubuntu 20.04 兼容版** — 仅保留 Tauri 路径，最低支持 Ubuntu 22.04 + WebKitGTK 4.1
+- **删除 i18n `customModels.title` key** — 标题改由 ModelCard 内部统一处理
 
 ## [0.8.0] - 2026-05-07
 
