@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "entries": [
+    {"from": "百渡", "to": "百度", "comment": "Whisper 同音误识"},
+    {"from": "腾迅", "to": "腾讯", "comment": "常见错字"},
+    {"from": "腾汛", "to": "腾讯", "comment": "Whisper 同音误识"},
+    {"from": "支富宝", "to": "支付宝", "comment": "Whisper 同音误识"},
+    {"from": "微心", "to": "微信", "comment": "Whisper 同音误识"},
+    {"from": "Github", "to": "GitHub", "comment": "品牌大小写"},
+    {"from": "github", "to": "GitHub", "comment": "品牌大小写"},
+    {"from": "Vue js", "to": "Vue.js", "comment": "缺点号"},
+    {"from": "Node js", "to": "Node.js", "comment": "缺点号"},
+    {"from": "类星", "to": "类型", "comment": "Whisper 同音"},
+    {"from": "后段", "to": "后端", "comment": "同音错字"},
+    {"from": "数据裤", "to": "数据库", "comment": "同音错字"},
+    {"from": "复务器", "to": "服务器", "comment": "同音错字"},
+    {"from": "节口", "to": "接口", "comment": "同音错字"},
+    {"from": "函书", "to": "函数", "comment": "同音错字"},
+    {"from": "变两", "to": "变量", "comment": "同音错字"},
+    {"from": "换存", "to": "缓存", "comment": "同音错字"},
+    {"from": "部属", "to": "部署", "comment": "常见误用"},
+    {"from": "步署", "to": "部署", "comment": "同音错字"},
+    {"from": "测式", "to": "测试", "comment": "同音错字"},
+    {"from": "线城", "to": "线程", "comment": "同音错字"}
+  ]
+}

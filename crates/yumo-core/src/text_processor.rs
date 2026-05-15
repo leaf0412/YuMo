@@ -1,4 +1,6 @@
+mod builtin_dict;
 mod cn_numerals;
+pub use builtin_dict::apply_builtin_dict;
 pub use cn_numerals::convert_cn_numerals;
 
 use crate::mask;
@@ -153,26 +155,99 @@ pub fn add_cjk_spacing(text: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Append terminal period (locale-adaptive)
+// ---------------------------------------------------------------------------
+
+/// Append a sentence-ending period to `text` when it does not already end with
+/// one. Picks `。` for CJK-ending text, `.` for ASCII-ending text. Returns the
+/// original text unchanged when empty / whitespace-only or already terminated
+/// by `.?!。？！…⋯`.
+pub fn append_terminal_period(text: &str) -> String {
+    let trimmed = text.trim_end();
+    if trimmed.is_empty() {
+        return text.to_string();
+    }
+    let last = match trimmed.chars().last() {
+        Some(c) => c,
+        None => return text.to_string(),
+    };
+    if matches!(last, '.' | '?' | '!' | '。' | '？' | '！' | '…' | '⋯') {
+        return text.to_string();
+    }
+    let suffix = if is_cjk_terminator_char(last) { "。" } else { "." };
+    let mut s = String::with_capacity(trimmed.len() + suffix.len());
+    s.push_str(trimmed);
+    s.push_str(suffix);
+    s
+}
+
+fn is_cjk_terminator_char(c: char) -> bool {
+    let u = c as u32;
+    matches!(u,
+        0x3040..=0x30FF      // hiragana / katakana
+        | 0x3400..=0x4DBF    // CJK ext A
+        | 0x4E00..=0x9FFF    // CJK unified
+        | 0xF900..=0xFAFF    // CJK compatibility ideographs
+        | 0xFF00..=0xFFEF    // halfwidth / fullwidth forms
+        | 0x3000..=0x303F    // CJK symbols & punctuation
+    )
+}
+
+// ---------------------------------------------------------------------------
 // process_text — pipeline integration
 // ---------------------------------------------------------------------------
 
-/// Apply replacements → CJK numerals → CJK/ASCII spacing → optional capitalize.
-/// The numeral conversion and spacing are always-on formatting steps.
+/// Bundle of post-processing toggles. Each field maps 1:1 to a UI Switch in
+/// Settings (see `_docs/specs/2026-05-15-transcript-postprocess-toggles-design.md`).
+///
+/// `Default::default()` returns all-false. Product defaults are decided by
+/// the settings read site (`unwrap_or(...)` in `src-tauri/src/commands.rs`),
+/// **not** by this `Default` impl — keep these separate so tests can build a
+/// clean baseline without inheriting product defaults.
+#[derive(Debug, Clone, Default)]
+pub struct ProcessOptions {
+    pub auto_capitalize: bool,
+    pub append_period: bool,
+    pub convert_cn_numerals: bool,
+    pub use_builtin_dictionary: bool,
+}
+
+/// Apply the full transcript post-processing pipeline. The four conditional
+/// steps are gated by `opts`; the unconditional steps (user replacements,
+/// uppercase-letter merge, CJK/ASCII spacing) always run.
 pub fn process_text(
     text: &str,
-    replacements: &[(String, String)],
-    auto_capitalize: bool,
+    user_replacements: &[(String, String)],
+    opts: &ProcessOptions,
 ) -> String {
-    info!("[text_processor] process_text input={} auto_capitalize={}", mask::mask_text(text), auto_capitalize);
-    let after_replacements = apply_replacements(text, replacements);
-    let after_letter_merge = merge_uppercase_letter_sequences(&after_replacements);
-    let after_numerals = convert_cn_numerals(&after_letter_merge);
-    let after_spacing = add_cjk_spacing(&after_numerals);
-    let result = if auto_capitalize {
-        capitalize_sentences(&after_spacing)
+    info!(
+        "[text_processor] process_text input={} opts={:?}",
+        mask::mask_text(text),
+        opts
+    );
+    let s = apply_replacements(text, user_replacements);
+    let s = if opts.use_builtin_dictionary {
+        builtin_dict::apply_builtin_dict(&s)
     } else {
-        after_spacing
+        s
     };
-    info!("[text_processor] process_text output={}", mask::mask_text(&result));
-    result
+    let s = merge_uppercase_letter_sequences(&s);
+    let s = if opts.convert_cn_numerals {
+        convert_cn_numerals(&s)
+    } else {
+        s
+    };
+    let s = add_cjk_spacing(&s);
+    let s = if opts.auto_capitalize {
+        capitalize_sentences(&s)
+    } else {
+        s
+    };
+    let s = if opts.append_period {
+        append_terminal_period(&s)
+    } else {
+        s
+    };
+    info!("[text_processor] process_text output={}", mask::mask_text(&s));
+    s
 }

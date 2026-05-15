@@ -35,7 +35,11 @@ fn test_full_app_lifecycle() {
 
     // 8. Text processing
     let replacements = vec![("k8s".to_string(), "Kubernetes".to_string())];
-    let result = text_processor::process_text("i use k8s", &replacements, true);
+    let opts = text_processor::ProcessOptions {
+        auto_capitalize: true,
+        ..Default::default()
+    };
+    let result = text_processor::process_text("i use k8s", &replacements, &opts);
     assert_eq!(result, "I use Kubernetes");
 
     // 9. Pipeline state machine

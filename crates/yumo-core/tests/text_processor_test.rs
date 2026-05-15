@@ -7,6 +7,18 @@
 //!   设计文档: _docs/specs/2026-05-07-cn-numerals-redesign-design.md
 
 use yumo_core::text_processor;
+use yumo_core::text_processor::ProcessOptions;
+
+// Test helper: build a ProcessOptions with every step enabled. Useful for tests
+// that exercise the full historical pipeline (cn_numerals, capitalize, ...).
+fn opts_all_on() -> ProcessOptions {
+    ProcessOptions {
+        auto_capitalize: true,
+        append_period: true,
+        convert_cn_numerals: true,
+        use_builtin_dictionary: true,
+    }
+}
 
 #[test]
 fn test_apply_replacements() {
@@ -79,7 +91,10 @@ fn test_process_text_combined() {
     let result = text_processor::process_text(
         "i deploy to k8s. it works.",
         &replacements,
-        true, // auto_capitalize
+        &ProcessOptions {
+            auto_capitalize: true,
+            ..Default::default()
+        },
     );
     assert_eq!(result, "I deploy to Kubernetes. It works.");
 }
@@ -90,7 +105,7 @@ fn test_process_text_no_capitalize() {
     let result = text_processor::process_text(
         "i deploy to k8s. it works.",
         &replacements,
-        false,
+        &ProcessOptions::default(),
     );
     assert_eq!(result, "i deploy to Kubernetes. it works.");
 }
@@ -208,14 +223,28 @@ fn cjk_spacing_leaves_pure_text_alone() {
 
 #[test]
 fn process_text_applies_cn_numerals_and_spacing() {
-    let result = text_processor::process_text("我有一百块Hello", &[], false);
+    let result = text_processor::process_text(
+        "我有一百块Hello",
+        &[],
+        &ProcessOptions {
+            convert_cn_numerals: true,
+            ..Default::default()
+        },
+    );
     assert_eq!(result, "我有 100 块 Hello");
 }
 
 #[test]
 fn process_text_idiom_safe() {
     // Single-char numerals in idioms must not be touched even with formatting on.
-    let result = text_processor::process_text("一些事情发生了", &[], false);
+    let result = text_processor::process_text(
+        "一些事情发生了",
+        &[],
+        &ProcessOptions {
+            convert_cn_numerals: true,
+            ..Default::default()
+        },
+    );
     assert_eq!(result, "一些事情发生了");
 }
 
@@ -284,14 +313,28 @@ fn cn_version_no_change_on_plain_text() {
 #[test]
 fn process_text_version_pipeline() {
     // End-to-end: version numerals convert, then CJK/ASCII spacing kicks in.
-    let result = text_processor::process_text("可以发布零点六点零的版本", &[], false);
+    let result = text_processor::process_text(
+        "可以发布零点六点零的版本",
+        &[],
+        &ProcessOptions {
+            convert_cn_numerals: true,
+            ..Default::default()
+        },
+    );
     assert_eq!(result, "可以发布 0.6.0 的版本");
 }
 
 #[test]
 fn process_text_version_does_not_touch_time() {
     // A1 后行为变化：原期望 "下午两点开会"，新版本量词扫描会转
-    let result = text_processor::process_text("下午两点开会", &[], false);
+    let result = text_processor::process_text(
+        "下午两点开会",
+        &[],
+        &ProcessOptions {
+            convert_cn_numerals: true,
+            ..Default::default()
+        },
+    );
     assert_eq!(result, "下午 2 点开会");
 }
 
@@ -374,13 +417,198 @@ fn merge_letters_already_joined_acronym_untouched() {
 
 #[test]
 fn process_text_merge_cdn_pipeline() {
-    let result = text_processor::process_text("升级到 C D N 节点", &[], false);
+    let result = text_processor::process_text(
+        "升级到 C D N 节点",
+        &[],
+        &ProcessOptions::default(),
+    );
     assert_eq!(result, "升级到 CDN 节点");
 }
 
 #[test]
 fn process_text_merge_mr_pipeline() {
     // A1 后: "一个" 中"个"为量词，量词扫描转 "一" → "1"，再经 CJK/ASCII 间距变 "1 个"
-    let result = text_processor::process_text("提交一个 M R", &[], false);
+    let result = text_processor::process_text(
+        "提交一个 M R",
+        &[],
+        &ProcessOptions {
+            convert_cn_numerals: true,
+            ..Default::default()
+        },
+    );
     assert_eq!(result, "提交 1 个 MR");
+}
+
+// ---------------------------------------------------------------------------
+// append_terminal_period — 句末追加句号（locale-自适应）
+// ---------------------------------------------------------------------------
+
+#[test]
+fn period_chinese_end() {
+    assert_eq!(text_processor::append_terminal_period("今天天气好"), "今天天气好。");
+    assert_eq!(text_processor::append_terminal_period("好的"), "好的。");
+}
+
+#[test]
+fn period_english_end() {
+    assert_eq!(text_processor::append_terminal_period("the weather is good"), "the weather is good.");
+    assert_eq!(text_processor::append_terminal_period("ok"), "ok.");
+}
+
+#[test]
+fn period_already_terminal_skipped() {
+    // ASCII terminators
+    assert_eq!(text_processor::append_terminal_period("done."), "done.");
+    assert_eq!(text_processor::append_terminal_period("really?"), "really?");
+    assert_eq!(text_processor::append_terminal_period("wow!"), "wow!");
+    // Chinese terminators
+    assert_eq!(text_processor::append_terminal_period("好了。"), "好了。");
+    assert_eq!(text_processor::append_terminal_period("真的吗？"), "真的吗？");
+    assert_eq!(text_processor::append_terminal_period("绝了！"), "绝了！");
+    // Ellipsis
+    assert_eq!(text_processor::append_terminal_period("等等…"), "等等…");
+}
+
+#[test]
+fn period_empty_or_whitespace_only_returns_original() {
+    assert_eq!(text_processor::append_terminal_period(""), "");
+    assert_eq!(text_processor::append_terminal_period("   "), "   ");
+    assert_eq!(text_processor::append_terminal_period("\n\n"), "\n\n");
+}
+
+#[test]
+fn period_strips_trailing_whitespace_before_appending() {
+    assert_eq!(text_processor::append_terminal_period("hello  "), "hello.");
+    assert_eq!(text_processor::append_terminal_period("好的 \n"), "好的。");
+}
+
+#[test]
+fn period_picks_char_by_last_non_space_char() {
+    // 末字符是中文 → 中文句号
+    assert_eq!(text_processor::append_terminal_period("API 调用"), "API 调用。");
+    // 末字符是 ASCII 字母 → ASCII 句号
+    assert_eq!(text_processor::append_terminal_period("调用 API"), "调用 API.");
+    // 末字符是 ASCII 数字 → ASCII 句号
+    assert_eq!(text_processor::append_terminal_period("总共 100"), "总共 100.");
+}
+
+// ---------------------------------------------------------------------------
+// apply_builtin_dict — 内置错别字词典
+// ---------------------------------------------------------------------------
+
+#[test]
+fn builtin_dict_replaces_chinese_typo_inline() {
+    // 嵌入式 CJK 替换：百渡 → 百度（即使两侧都被其它中文字包围）
+    assert_eq!(text_processor::apply_builtin_dict("我用百渡搜索"), "我用百度搜索");
+}
+
+#[test]
+fn builtin_dict_replaces_ascii_brand_case_insensitive() {
+    assert_eq!(text_processor::apply_builtin_dict("clone from github"), "clone from GitHub");
+    assert_eq!(text_processor::apply_builtin_dict("Github page"), "GitHub page");
+}
+
+#[test]
+fn builtin_dict_ascii_respects_word_boundary() {
+    // "githubber" 不应被替换 — \b 限制
+    let result = text_processor::apply_builtin_dict("githubber is fake");
+    assert_eq!(result, "githubber is fake");
+}
+
+#[test]
+fn builtin_dict_no_op_when_no_match() {
+    assert_eq!(text_processor::apply_builtin_dict("一切正常"), "一切正常");
+    assert_eq!(text_processor::apply_builtin_dict(""), "");
+}
+
+#[test]
+fn builtin_dict_multiple_entries_in_one_text() {
+    let result = text_processor::apply_builtin_dict("找腾迅或者百渡");
+    assert_eq!(result, "找腾讯或者百度");
+}
+
+// ---------------------------------------------------------------------------
+// ProcessOptions — toggle 各组合的 process_text 行为
+// ---------------------------------------------------------------------------
+
+#[test]
+fn process_text_default_options_skip_optional_steps() {
+    // 默认 ProcessOptions: 全 false。仅 always-on 步骤生效（replace/letter_merge/cjk_spacing）。
+    let result = text_processor::process_text("我有一百块Hello", &[], &ProcessOptions::default());
+    // cn_numerals 关 → "一百块" 不变；只有 CJK/ASCII 空格生效
+    assert_eq!(result, "我有一百块 Hello");
+}
+
+#[test]
+fn process_text_period_toggle_appends_only_when_enabled() {
+    let on = ProcessOptions { append_period: true, ..Default::default() };
+    let result_on = text_processor::process_text("今天天气好", &[], &on);
+    assert_eq!(result_on, "今天天气好。");
+    let result_off = text_processor::process_text("今天天气好", &[], &ProcessOptions::default());
+    assert_eq!(result_off, "今天天气好");
+}
+
+#[test]
+fn process_text_cn_numerals_toggle_off_keeps_chinese_numerals() {
+    let result = text_processor::process_text(
+        "我有一百块",
+        &[],
+        &ProcessOptions::default(),
+    );
+    assert_eq!(result, "我有一百块");
+}
+
+#[test]
+fn process_text_cn_numerals_toggle_on_converts() {
+    let result = text_processor::process_text(
+        "我有一百块",
+        &[],
+        &ProcessOptions { convert_cn_numerals: true, ..Default::default() },
+    );
+    assert_eq!(result, "我有 100 块");
+}
+
+#[test]
+fn process_text_builtin_dict_toggle() {
+    // ON: 内置词典生效
+    let result_on = text_processor::process_text(
+        "找腾迅客服",
+        &[],
+        &ProcessOptions { use_builtin_dictionary: true, ..Default::default() },
+    );
+    assert_eq!(result_on, "找腾讯客服");
+    // OFF: 不替换
+    let result_off = text_processor::process_text(
+        "找腾迅客服",
+        &[],
+        &ProcessOptions::default(),
+    );
+    assert_eq!(result_off, "找腾迅客服");
+}
+
+#[test]
+fn process_text_user_replacement_runs_before_builtin_dict() {
+    // 用户规则: github → MyOrg。内置规则: github → GitHub。用户规则先跑，结果中 "github" 已不存在，内置不再触发。
+    let user = vec![("github".to_string(), "MyOrg".to_string())];
+    let result = text_processor::process_text(
+        "clone from github",
+        &user,
+        &ProcessOptions { use_builtin_dictionary: true, ..Default::default() },
+    );
+    assert_eq!(result, "clone from MyOrg");
+}
+
+#[test]
+fn process_text_all_toggles_on_pipeline() {
+    // 用 opts_all_on() 跑一遍混合场景：cn_numerals + capitalize + period + builtin_dict 都激活
+    let result = text_processor::process_text(
+        "i deploy to github with 一百块",
+        &[],
+        &opts_all_on(),
+    );
+    // builtin: github → GitHub
+    // cn_numerals: 一百块 → 100 块
+    // capitalize: I, ... (only句首/.?! 后)
+    // period: ends with "块" (CJK) → append "。"
+    assert_eq!(result, "I deploy to GitHub with 100 块。");
 }

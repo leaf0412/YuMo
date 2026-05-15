@@ -543,11 +543,25 @@ pub async fn stop_recording(
             .map(|r| (r.original, r.replacement))
             .collect()
     };
-    let auto_capitalize = settings_map
-        .get("auto_capitalize")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    let processed_text = text_processor::process_text(&text, &replacements, auto_capitalize);
+    let process_opts = text_processor::ProcessOptions {
+        auto_capitalize: settings_map
+            .get("auto_capitalize")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        append_period: settings_map
+            .get("append_period")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        convert_cn_numerals: settings_map
+            .get("convert_cn_numerals")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        use_builtin_dictionary: settings_map
+            .get("use_builtin_dictionary")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+    };
+    let processed_text = text_processor::process_text(&text, &replacements, &process_opts);
     info!("[pipeline] processed text={}", mask::mask_text(&processed_text));
 
     // 7. Optional AI enhancement
