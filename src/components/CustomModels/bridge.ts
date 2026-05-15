@@ -1,14 +1,10 @@
 /**
- * Runtime-detecting IPC bridge for the CustomModels feature.
+ * Tauri bridge for the CustomModels feature.
  *
- * The project ships under two desktop runtimes:
- *   - Tauri (primary)        — uses `@tauri-apps/api/core::invoke(name, args_obj)`
- *   - Electron (Linux fallback) — uses `window.electronAPI.invoke(channel, ...args)`
- *
- * Components in this folder call `getElectronAPI().invoke('custom-...', ...positional)`.
- * This module hides the runtime difference behind one shape:
- *   - In Tauri: kebab channel → snake command name + named-args map
- *   - In Electron: positional args passed through verbatim
+ * Components in this folder call `getCustomBridge().invoke('custom-...', ...positional)`.
+ * This module maps the kebab channel name + positional args to:
+ *   - Tauri command name (snake_case)
+ *   - Named-args map expected by `@tauri-apps/api/core::invoke(name, args_obj)`
  *
  * Channel name remains the source of truth. The mapping table below records
  * the Tauri command name + the arg-key names (in positional order) for each
@@ -39,10 +35,6 @@ const CHANNEL_MAP: Record<string, ChannelConfig> = {
   'custom-set-trusted': { tauri: 'custom_set_trusted', argNames: ['id'] },
 };
 
-function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-}
-
 async function tauriInvoke(channel: string, ...args: unknown[]): Promise<unknown> {
   const cfg = CHANNEL_MAP[channel];
   if (!cfg) {
@@ -58,15 +50,6 @@ async function tauriInvoke(channel: string, ...args: unknown[]): Promise<unknown
 
 const tauriBridge: Bridge = { invoke: tauriInvoke };
 
-export function getElectronAPI(): Bridge {
-  if (isTauri()) {
-    return tauriBridge;
-  }
-  const electronAPI = (window as unknown as { electronAPI?: Bridge }).electronAPI;
-  if (!electronAPI) {
-    throw new Error(
-      'No IPC bridge available — expected either Tauri (window.__TAURI_INTERNALS__) or Electron (window.electronAPI).',
-    );
-  }
-  return electronAPI;
+export function getCustomBridge(): Bridge {
+  return tauriBridge;
 }

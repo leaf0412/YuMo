@@ -4,7 +4,7 @@ import { FolderOpenOutlined, ImportOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { formatError } from '../../lib/logger';
 import { useCustomModels } from './useCustomModels';
-import { getElectronAPI } from './electronApi';
+import { getCustomBridge } from './bridge';
 import { CustomModelCard } from './CustomModelCard';
 
 /**
@@ -34,7 +34,7 @@ export function CustomModelsSection() {
 
   const handleImportExample = async () => {
     try {
-      await getElectronAPI().invoke('custom-import-example', 'mimo.yaml');
+      await getCustomBridge().invoke('custom-import-example', 'mimo.yaml');
       message.success(t('customModels.importSuccess'));
       safeRefresh();
     } catch (e) {
@@ -44,7 +44,7 @@ export function CustomModelsSection() {
 
   const handleOpenFolder = async () => {
     try {
-      await getElectronAPI().invoke('custom-open-dir');
+      await getCustomBridge().invoke('custom-open-dir');
     } catch (e) {
       message.error(formatError(e, t('customModels.openFolderFailed')));
     }

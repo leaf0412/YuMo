@@ -40,13 +40,12 @@ Groq Whisper · Deepgram Nova-2 · ElevenLabs Scribe · Mistral ASR · Gemini AS
 
 前往 [Releases](https://github.com/leaf0412/YuMo/releases) 下载适合你平台的安装包：
 
-| 平台 | 版本 | 格式 | 说明 |
-|------|------|------|------|
-| macOS (ARM) | Tauri | `.dmg` | Apple Silicon Mac，推荐 |
-| macOS (Intel) | Tauri | `.dmg` | Intel Mac |
-| Windows | Tauri | `.exe` | Windows 10+ |
-| Linux | Tauri | `.AppImage` / `.deb` | Ubuntu 22.04+，需要 WebKitGTK 4.1 |
-| Linux (兼容) | Electron | `.AppImage` / `.deb` | Ubuntu 20.04+，旧系统兼容版 |
+| 平台 | 格式 | 说明 |
+|------|------|------|
+| macOS (ARM) | `.dmg` | Apple Silicon Mac，推荐 |
+| macOS (Intel) | `.dmg` | Intel Mac |
+| Windows | `.exe` | Windows 10+ |
+| Linux | `.AppImage` / `.deb` | Ubuntu 22.04+，需要 WebKitGTK 4.1 |
 
 > macOS 首次打开可能被 Gatekeeper 拦截，右键点击 → 打开即可。
 
@@ -58,31 +57,12 @@ Groq Whisper · Deepgram Nova-2 · ElevenLabs Scribe · Mistral ASR · Gemini AS
 - pnpm 9+
 - Rust 1.80+
 
-#### Tauri 版本（推荐）
+#### 构建
 
 ```bash
 pnpm install
 pnpm tauri dev          # 开发模式
 pnpm tauri build        # 构建发布
-```
-
-#### Electron 版本
-
-```bash
-pnpm install
-
-# 构建 napi addon（Rust 核心库的 Node.js 绑定）
-cargo build --release -p yumo-napi
-cp target/release/libyumo_napi.dylib napi/yumo-napi.darwin-arm64.node  # macOS ARM
-# Linux: cp target/release/libyumo_napi.so napi/yumo-napi.linux-x64-gnu.node
-
-# 开发模式
-pnpm electron:dev
-
-# 构建发布
-pnpm electron:build
-pnpm electron-builder --mac    # macOS DMG
-pnpm electron-builder --linux  # Linux AppImage + deb
 ```
 
 ## 使用指南
@@ -163,34 +143,24 @@ voiceink-tauri/
 │       ├── macos/          # macOS 实现（CoreAudio）
 │       ├── windows/        # Windows 实现（cpal + WASAPI）
 │       └── linux/          # Linux 实现（cpal + PulseAudio）
-├── src/                    # 共享前端（React + TypeScript）
-│   ├── bridge/             # Tauri/Electron 平台桥接
-│   └── lib/events.ts       # 跨平台事件系统
+├── src/                    # 前端（React + TypeScript）
+│   ├── bridge/             # Tauri 桥接层
+│   └── lib/events.ts       # 事件系统
 ├── src-tauri/              # Tauri 壳（薄封装层）
-├── napi/                   # napi-rs 绑定（yumo-core → Node.js addon）
-├── src-electron/           # Electron 壳
-│   ├── main.ts             # 主进程
-│   ├── windows.ts          # 窗口管理
-│   ├── addon.ts            # napi addon 加载
-│   └── ipc/                # 模块化 IPC handlers（10 个领域）
 └── .github/workflows/      # CI/CD（多平台矩阵构建）
 ```
 
-### 双壳架构
+### 调用链
 
 ```
-Tauri:    前端 → bridge/tauri.ts → invoke → src-tauri/commands.rs → yumo-core
-Electron: 前端 → bridge/electron.ts → IPC → src-electron/ipc/*.ts → napi addon → yumo-core
+前端 → bridge/tauri.ts → invoke → src-tauri/commands.rs → yumo-core
 ```
-
-两套壳共享同一份 `yumo-core` Rust 核心库和同一份 React 前端代码。
 
 ## 技术栈
 
 - **前端**：React 19 + TypeScript + Ant Design + Zustand + i18next
 - **核心库**：Rust (`yumo-core` crate)
-- **Tauri 壳**：Tauri v2
-- **Electron 壳**：Electron + napi-rs + esbuild
+- **壳**：Tauri v2
 - **转写**：whisper.cpp (CPU) + MLX (GPU) + 云端 API
 - **音频**：CoreAudio (macOS) / cpal (Windows/Linux)
 - **凭据**：Keychain (macOS) / Credential Manager (Windows) / Secret Service (Linux)

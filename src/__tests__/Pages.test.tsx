@@ -13,6 +13,10 @@ vi.mock('@tauri-apps/api/core', () => ({
     return Promise.resolve({});
   }),
 }));
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(() => Promise.resolve(() => {})),
+  emit: vi.fn(),
+}));
 
 describe('Dashboard', () => {
   test('renders statistics empty state', async () => {

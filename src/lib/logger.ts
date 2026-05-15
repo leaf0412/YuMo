@@ -1,5 +1,5 @@
 /**
- * Unified logging layer for VoiceInk frontend.
+ * Unified logging layer for YuMo frontend (Tauri).
  *
  * Usage:
  *   import { invoke } from '../lib/logger';   // drop-in replacement
@@ -7,47 +7,27 @@
  *
  * Every invoke call is automatically logged (command, args, result/error)
  * to both the browser console AND the backend log.txt file.
+ *
+ * `__TAURI_INTERNALS__` is injected by the Tauri shell before the renderer
+ * loads. We guard the dynamic import so test environments (jsdom without
+ * the global) never reach the real Tauri IPC machinery.
  */
-// ---------------------------------------------------------------------------
-// Platform-aware invoke: Tauri or Electron IPC
-// ---------------------------------------------------------------------------
-
-type ElectronAPI = {
-  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
-};
 
 function isTauri(): boolean {
-  return '__TAURI_INTERNALS__' in window;
-}
-
-function getElectronAPI(): ElectronAPI | undefined {
-  return (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
 async function platformInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (isTauri()) {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return invoke<T>(cmd, args);
+  if (!isTauri()) {
+    throw new Error(`Tauri runtime not detected for invoke("${cmd}")`);
   }
-  const api = getElectronAPI();
-  if (api) {
-    const channel = cmd.replace(/_/g, '-');
-    const result = await api.invoke(channel, args);
-    return result as T;
-  }
-  throw new Error(`No backend available for invoke("${cmd}")`);
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<T>(cmd, args);
 }
 
-// ---------------------------------------------------------------------------
-// Low-level: send a log line to backend log.txt (fire-and-forget)
-// ---------------------------------------------------------------------------
 function sendToBackend(level: 'info' | 'error', message: string) {
   platformInvoke('frontend_log', { level, message }).catch(() => {});
 }
-
-// ---------------------------------------------------------------------------
-// Public: drop-in replacement for tauri invoke — auto-logs everything
-// ---------------------------------------------------------------------------
 
 const MAX_LOG_LEN = 200;
 
@@ -64,7 +44,6 @@ function summariseResult(result: unknown): string {
  *  Automatically logs command name, arguments, success, and errors
  *  to both console and backend log.txt. */
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  // Don't log the logging command itself to avoid infinite recursion
   if (cmd === 'frontend_log') {
     return platformInvoke<T>(cmd, args);
   }
@@ -89,10 +68,6 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   }
 }
 
-// ---------------------------------------------------------------------------
-// Public: extract readable message from Tauri AppError
-// ---------------------------------------------------------------------------
-
 /** Extract readable message from Tauri invoke errors (serialized AppError). */
 export function formatError(e: unknown, fallback: string): string {
   if (typeof e === 'string') return e;
@@ -103,13 +78,9 @@ export function formatError(e: unknown, fallback: string): string {
   return fallback;
 }
 
-// ---------------------------------------------------------------------------
-// Public: log structured frontend events
-// ---------------------------------------------------------------------------
-
 /**
  * Log a structured event to both console and backend log.txt.
- * Usage: logEvent('Models', 'select_model', { model_id: 'xxx' })
+ * Usage: logEvent('Models', 'select_model', { module: 'Models', event: 'select_model' })
  * Output: [frontend:Models] [select_model] model_id="xxx"
  */
 export function logEvent(module: string, event: string, data?: Record<string, unknown>) {

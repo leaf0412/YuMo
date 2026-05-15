@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Removed - 移除
+
+- **Electron 兼容壳全量移除** — 仓库瘦身为单运行时（Tauri）项目
+  - 删除 `src-electron/`、`napi/` crate、`electron-builder.yml`、`dist-electron/`
+  - `package.json` 清掉 `electron` / `electron-builder` / `electron-log` / `esbuild` 依赖和 `electron:*` scripts
+  - Cargo workspace 移除 `napi` 成员
+  - CI release 工作流删 `electron` job，仅保留 Tauri 多平台矩阵
+  - 前端 bridge / events / logger 简化为 Tauri-only，删除 runtime 双分支
+- **放弃 Ubuntu 20.04 兼容版** — 仅保留 Tauri 路径，最低支持 Ubuntu 22.04 + WebKitGTK 4.1
+
 ## [0.8.0] - 2026-05-07
 
 ### Added - 新增

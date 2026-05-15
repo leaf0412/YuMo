@@ -129,96 +129,11 @@ jobs:
           path: staging/*
 
   # =========================================================================
-  # Electron build (Linux compat — for systems without WebKitGTK 4.1)
-  # =========================================================================
-  electron:
-    name: electron (linux-compat)
-    runs-on: ubuntu-22.04
-    container:
-      image: ubuntu:20.04
-      options: --user root
-
-    steps:
-      - name: Install base tools
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          apt-get update
-          apt-get install -y \
-            curl \
-            git \
-            ca-certificates \
-            gnupg \
-            libpulse-dev \
-            libsecret-1-dev \
-            libasound2-dev \
-            cmake \
-            build-essential \
-            libdbus-1-dev \
-            libxdo-dev \
-            pkg-config \
-            libssl-dev \
-            libclang-dev \
-            libfuse2
-
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            crates/yumo-core
-            napi
-
-      - name: Install frontend dependencies
-        run: pnpm install
-
-      - name: Set whisper.cpp compat flags
-        run: |
-          echo "GGML_AVX2=OFF" >> "$GITHUB_ENV"
-          echo "GGML_AVX512=OFF" >> "$GITHUB_ENV"
-          echo "GGML_FMA=OFF" >> "$GITHUB_ENV"
-          echo "GGML_F16C=OFF" >> "$GITHUB_ENV"
-
-      - name: Build napi addon
-        run: cargo build --release -p yumo-napi
-
-      - name: Copy napi addon
-        run: cp target/release/libyumo_napi.so napi/yumo-napi.linux-x64.node
-
-      - name: Build frontend + Electron
-        run: pnpm electron:build
-
-      - name: Package Electron app
-        run: pnpm electron-builder --linux AppImage deb --publish never
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: electron-linux
-          path: |
-            release/*-linux.AppImage
-            release/*-linux.deb
-
-  # =========================================================================
   # Publish all artifacts to GitHub Release
   # =========================================================================
   publish:
     name: publish
-    needs: [tauri, electron]
+    needs: [tauri]
     runs-on: ubuntu-22.04
 
     steps:

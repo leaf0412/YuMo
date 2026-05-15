@@ -1,5 +1,5 @@
 /**
- * Bridge entry point — runtime detection and lazy initialization.
+ * Bridge entry point — Tauri runtime.
  *
  * Usage:
  *   const b = await getBridge();   // async, safe to call multiple times
@@ -10,20 +10,13 @@ import type { Bridge } from './types';
 let _bridge: Bridge | null = null;
 
 /**
- * Resolve and cache the platform-appropriate Bridge implementation.
+ * Resolve and cache the Tauri Bridge implementation.
  * Safe to call multiple times; initialization only happens once.
  */
 export async function getBridge(): Promise<Bridge> {
   if (_bridge) return _bridge;
-
-  if ('__TAURI_INTERNALS__' in window) {
-    const { tauriBridge } = await import('./tauri');
-    _bridge = tauriBridge;
-  } else {
-    const { electronBridge } = await import('./electron');
-    _bridge = electronBridge;
-  }
-
+  const { tauriBridge } = await import('./tauri');
+  _bridge = tauriBridge;
   return _bridge;
 }
 

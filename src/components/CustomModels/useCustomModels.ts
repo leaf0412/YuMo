@@ -4,7 +4,7 @@ import type {
   CustomModelScanResult,
   CustomDepsCheckResult,
 } from './types';
-import { getElectronAPI } from './electronApi';
+import { getCustomBridge } from './bridge';
 
 /**
  * Aggregates list-custom-models + custom-check-deps + custom-is-downloaded
@@ -30,7 +30,7 @@ export function useCustomModels(options: UseCustomModelsOptions = {}) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const api = getElectronAPI();
+      const api = getCustomBridge();
       const scan = (await api.invoke('list-custom-models')) as CustomModelScanResult;
       const next: CustomModelStatus[] = [];
 

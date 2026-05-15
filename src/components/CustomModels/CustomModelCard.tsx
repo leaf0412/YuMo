@@ -2,7 +2,7 @@ import { Alert, Button, Card, Modal, Space, Tag, Typography, message } from 'ant
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CustomModelStatus } from './types';
-import { getElectronAPI } from './electronApi';
+import { getCustomBridge } from './bridge';
 import { TrustDialog } from './TrustDialog';
 
 interface Props {
@@ -66,7 +66,7 @@ export function CustomModelCard({ status, onChange }: Props) {
   const handleInstall = async () => {
     setBusy(true);
     try {
-      const res = (await getElectronAPI().invoke(
+      const res = (await getCustomBridge().invoke(
         'custom-install-deps',
         spec.sourcePath,
       )) as InstallResult;
@@ -97,7 +97,7 @@ export function CustomModelCard({ status, onChange }: Props) {
   const handleDownload = async () => {
     setBusy(true);
     try {
-      const res = (await getElectronAPI().invoke(
+      const res = (await getCustomBridge().invoke(
         'custom-download',
         spec.sourcePath,
       )) as DownloadResult;
@@ -136,7 +136,7 @@ export function CustomModelCard({ status, onChange }: Props) {
   const handleTrust = useCallback(async () => {
     setTrustOpen(false);
     try {
-      await getElectronAPI().invoke('select-model', { modelId: spec.id });
+      await getCustomBridge().invoke('select-model', { modelId: spec.id });
       message.success(t('customModels.activated', { name: spec.name }));
       onChange();
     } catch (err) {
@@ -154,7 +154,7 @@ export function CustomModelCard({ status, onChange }: Props) {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          await getElectronAPI().invoke('custom-remove', spec.sourcePath);
+          await getCustomBridge().invoke('custom-remove', spec.sourcePath);
           message.success(t('customModels.removeSuccess'));
           onChange();
         } catch (err) {

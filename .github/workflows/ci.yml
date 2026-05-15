@@ -65,7 +65,6 @@ jobs:
           workspaces: |
             src-tauri
             crates/yumo-core
-            napi
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -88,9 +87,6 @@ jobs:
       - name: Rust tests (yumo-core)
         run: cargo test -p yumo-core
 
-      - name: Rust check (yumo-napi)
-        run: cargo check -p yumo-napi
-
       # Tauri — macOS only (depends on cocoa/objc)
       - name: Rust check (Tauri app)
         if: matrix.os == 'macos-latest'
@@ -99,7 +95,3 @@ jobs:
       - name: Rust tests (Tauri app)
         if: matrix.os == 'macos-latest'
         run: cargo test -p yumo
-
-      # Electron main process build
-      - name: Electron build check
-        run: pnpm electron:build-main

@@ -77,7 +77,8 @@ export default function RecorderFloat() {
     return cleanup;
   }, [loadSprite]);
 
-  // Listen for ESC hints from both BroadcastChannel (Tauri) and IPC (Electron)
+  // Listen for ESC hints — BroadcastChannel handles the renderer-side relay
+  // from App.tsx; the Tauri `escape-hint` event covers main-process emits.
   useEffect(() => {
     const handleHint = (hint: EscHintType) => {
       setEscHintType(hint);
@@ -87,12 +88,10 @@ export default function RecorderFloat() {
       }
     };
 
-    // BroadcastChannel: from App.tsx (same-origin, works in both Tauri and Electron)
     const cleanupBroadcast = onBroadcast('escape-hint', (payload) => {
       handleHint(payload as EscHintType);
     });
 
-    // IPC: from Electron main process (audio.ts sends escape-hint directly)
     const unlistenIpc = listen<string>('escape-hint', (event) => {
       handleHint(event.payload as EscHintType);
     });
@@ -183,7 +182,7 @@ export default function RecorderFloat() {
         height: '100%',
         userSelect: 'none',
         cursor: 'grab',
-        // @ts-expect-error Electron uses this for window dragging
+        // @ts-expect-error -webkit-app-region is WebKit-only, used by Tauri/macOS for native window dragging
         WebkitAppRegion: 'drag',
       }}
     >
@@ -245,7 +244,7 @@ export default function RecorderFloat() {
           style={{
             cursor: 'pointer',
             pointerEvents: 'auto',
-            // @ts-expect-error Electron: make button clickable (not draggable)
+            // @ts-expect-error -webkit-app-region opt-out so the button stays clickable
             WebkitAppRegion: 'no-drag',
             marginLeft: 4,
             opacity: 0.7,

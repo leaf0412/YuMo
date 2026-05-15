@@ -2,7 +2,7 @@ import { Modal, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CustomModelSpec } from './types';
-import { getElectronAPI } from './electronApi';
+import { getCustomBridge } from './bridge';
 
 interface Props {
   spec: CustomModelSpec;
@@ -38,7 +38,7 @@ export function TrustDialog({ spec, open, onCancel, onTrust }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const trusted = (await getElectronAPI().invoke(
+        const trusted = (await getCustomBridge().invoke(
           'custom-is-trusted',
           spec.id,
         )) as boolean;
@@ -70,7 +70,7 @@ export function TrustDialog({ spec, open, onCancel, onTrust }: Props) {
       onCancel={onCancel}
       onOk={async () => {
         try {
-          await getElectronAPI().invoke('custom-set-trusted', spec.id);
+          await getCustomBridge().invoke('custom-set-trusted', spec.id);
         } catch {
           // Persistence failure is surfaced indirectly: next time we will
           // re-prompt. But do not block the current activation — the user

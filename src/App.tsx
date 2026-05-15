@@ -277,10 +277,10 @@ export default function App() {
     return () => { unlisten.then((fn) => fn()); };
   }, []);
 
-  // Global hotkey listener — Tauri handles start via toggle_recording_internal,
-  // but Electron still needs frontend to invoke start/stop/cancel.
+  // Global hotkey listener — toggle-recording dispatches to start/stop/cancel
+  // based on the current pipeline state.
   useEffect(() => {
-    /** Electron-only: check if a downloaded model is selected before recording */
+    /** Block recording start if no usable model is selected. */
     const canStartRecording = (): boolean => {
       const { settings, models } = useAppStore.getState();
       const t = i18n.t;
@@ -329,10 +329,10 @@ export default function App() {
       logEvent('App', 'recording_state_changed', { state });
       pipelineRef.current = state;
       broadcast('pipeline-state', state);
-      // Linux clipboard-only mode: copy text when transcription completes
+      // Linux clipboard-only mode: copy text when transcription completes.
+      // The transcription-result event listener below performs the actual
+      // navigator.clipboard write; this branch only shows the toast.
       if (isLinux && prevState === 'processing' && state === 'idle') {
-        // Clipboard write is handled by Electron main process (audio.ts).
-        // For Tauri, listen for the transcription-result event below.
         import('antd').then(({ message }) => message.success(i18n.t('app.copiedToClipboard'), 3));
       }
     });
@@ -355,8 +355,9 @@ export default function App() {
       }
     });
 
-    // Linux (Tauri): write clipboard via browser API when transcription completes
-    // Electron handles this in audio.ts via electron.clipboard
+    // Linux: write clipboard via browser API when transcription completes.
+    // arboard loses content when the Clipboard object is dropped under X11,
+    // so the renderer-side Chromium clipboard API is used instead of Rust.
     const unlistenTranscription = isLinux
       ? listen<{ text: string }>('transcription-result', (event) => {
           const text = event.payload?.text;
