@@ -17,7 +17,7 @@ fn test_types_constructable_without_cfg() {
     let device = AudioInputDevice { id: 1, name: "Test".into(), is_default: true };
     let level = AudioLevel { rms: 0.5, peak: 0.8 };
     let data = AudioData { pcm_samples: vec![0.0; 100], sample_rate: 16000, channels: 1 };
-    let status = PermissionStatus { microphone: true, accessibility: false };
+    let status = PermissionStatus { microphone: true, accessibility: false, paste_tools: None };
     assert_eq!(device.id, 1);
     assert!(level.rms < level.peak);
     assert_eq!(data.sample_rate, 16000);
