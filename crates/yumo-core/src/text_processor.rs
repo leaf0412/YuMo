@@ -181,6 +181,42 @@ pub fn append_terminal_period(text: &str) -> String {
     s
 }
 
+/// Inverse of `append_terminal_period`: strip trailing terminal periods
+/// (`.` or `。`) so the result has no end-of-sentence period.
+///
+/// Wired to `ProcessOptions::append_period == false`: simply "not appending"
+/// is not enough — Whisper-class models already emit a trailing `。`/`.` on
+/// their own, and the toggle has zero visible effect unless we also strip.
+///
+/// Preserved: `?!？！…⋯` (questions / exclamations / ellipsis carry meaning),
+/// and ASCII `...` runs of 3+ dots (treated as ellipsis, not periods).
+pub fn strip_terminal_period(text: &str) -> String {
+    let trimmed = text.trim_end();
+    if trimmed.is_empty() {
+        return text.to_string();
+    }
+    // ASCII ellipsis "..." (3+ consecutive dots): not a period — preserve.
+    if trimmed.ends_with("...") {
+        return trimmed.to_string();
+    }
+    let last = match trimmed.chars().last() {
+        Some(c) => c,
+        None => return text.to_string(),
+    };
+    if last != '.' && last != '。' {
+        return trimmed.to_string();
+    }
+    let mut chars: Vec<char> = trimmed.chars().collect();
+    while let Some(&c) = chars.last() {
+        if c == '.' || c == '。' {
+            chars.pop();
+        } else {
+            break;
+        }
+    }
+    chars.into_iter().collect()
+}
+
 fn is_cjk_terminator_char(c: char) -> bool {
     let u = c as u32;
     matches!(u,
@@ -246,7 +282,9 @@ pub fn process_text(
     let s = if opts.append_period {
         append_terminal_period(&s)
     } else {
-        s
+        // Symmetric: OFF actively strips trailing 。/. that the ASR model
+        // emitted, otherwise the toggle has no observable effect to the user.
+        strip_terminal_period(&s)
     };
     info!("[text_processor] process_text output={}", mask::mask_text(&s));
     s

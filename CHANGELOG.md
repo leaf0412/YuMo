@@ -5,6 +5,11 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Fixed - 修复
+- **「末尾追加句号」OFF 不生效** — ASR 模型（含 `custom-mimo-v2.5-asr-int4`）自带末尾句号，原 toggle 仅做"缺则补"加法、不做减法，用户关闭后输出依然带「。」看上去全无效果。OFF 现在主动剥末尾连续的 `。/.`，`?!？！…⋯` 一律保留；`...`（≥3 ASCII 点）视作省略号也保留
+
 ## [0.8.2] - 2026-05-16
 
 ### Added - 新增

@@ -88,11 +88,13 @@ fn test_capitalize_already_capitalized() {
 #[test]
 fn test_process_text_combined() {
     let replacements = vec![("k8s".to_string(), "Kubernetes".to_string())];
+    // append_period: true → 句中 ". " 保留, 末尾 "." 已存在不补
     let result = text_processor::process_text(
         "i deploy to k8s. it works.",
         &replacements,
         &ProcessOptions {
             auto_capitalize: true,
+            append_period: true,
             ..Default::default()
         },
     );
@@ -102,12 +104,13 @@ fn test_process_text_combined() {
 #[test]
 fn test_process_text_no_capitalize() {
     let replacements = vec![("k8s".to_string(), "Kubernetes".to_string())];
+    // append_period: false (default) → 末尾 "." 主动剥掉, 句中 ". " 不动
     let result = text_processor::process_text(
         "i deploy to k8s. it works.",
         &replacements,
         &ProcessOptions::default(),
     );
-    assert_eq!(result, "i deploy to Kubernetes. it works.");
+    assert_eq!(result, "i deploy to Kubernetes. it works");
 }
 
 #[test]
@@ -493,6 +496,69 @@ fn period_picks_char_by_last_non_space_char() {
 }
 
 // ---------------------------------------------------------------------------
+// strip_terminal_period — append_period=false 时主动剥末尾句号
+// 只剥「。/.」, 「?!？！…⋯」一律保留 (疑问/感叹/省略号有表达力)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn strip_period_chinese_end() {
+    assert_eq!(text_processor::strip_terminal_period("你好。"), "你好");
+    assert_eq!(text_processor::strip_terminal_period("不输出句号的。"), "不输出句号的");
+}
+
+#[test]
+fn strip_period_ascii_end() {
+    assert_eq!(text_processor::strip_terminal_period("Skills."), "Skills");
+    assert_eq!(text_processor::strip_terminal_period("ok."), "ok");
+}
+
+#[test]
+fn strip_period_preserves_question_exclamation() {
+    assert_eq!(text_processor::strip_terminal_period("真的吗？"), "真的吗？");
+    assert_eq!(text_processor::strip_terminal_period("绝了！"), "绝了！");
+    assert_eq!(text_processor::strip_terminal_period("really?"), "really?");
+    assert_eq!(text_processor::strip_terminal_period("wow!"), "wow!");
+}
+
+#[test]
+fn strip_period_preserves_ellipsis() {
+    // CJK 省略号
+    assert_eq!(text_processor::strip_terminal_period("等等…"), "等等…");
+    assert_eq!(text_processor::strip_terminal_period("等等⋯"), "等等⋯");
+    // ASCII "..." (≥3 dots) 视为省略号, 保留
+    assert_eq!(text_processor::strip_terminal_period("Hello..."), "Hello...");
+    assert_eq!(text_processor::strip_terminal_period("etc...."), "etc....");
+}
+
+#[test]
+fn strip_period_no_terminal_punct_returns_original() {
+    assert_eq!(text_processor::strip_terminal_period("今天天气好"), "今天天气好");
+    assert_eq!(text_processor::strip_terminal_period("hello"), "hello");
+}
+
+#[test]
+fn strip_period_multiple_trailing_periods() {
+    // 连续 "。。" 全部剥掉, 不留半截
+    assert_eq!(text_processor::strip_terminal_period("你好。。"), "你好");
+    // "Hello.." (2 dots, 非省略号) 全部剥掉
+    assert_eq!(text_processor::strip_terminal_period("Hello.."), "Hello");
+}
+
+#[test]
+fn strip_period_handles_trailing_whitespace() {
+    // 末尾空白先 trim, 然后剥句号; 与 append_terminal_period 对称
+    assert_eq!(text_processor::strip_terminal_period("你好。 "), "你好");
+    assert_eq!(text_processor::strip_terminal_period("Skills. \n"), "Skills");
+}
+
+#[test]
+fn strip_period_empty_or_whitespace_only_returns_original() {
+    assert_eq!(text_processor::strip_terminal_period(""), "");
+    assert_eq!(text_processor::strip_terminal_period("   "), "   ");
+    assert_eq!(text_processor::strip_terminal_period("\n\n"), "\n\n");
+}
+
+// ---------------------------------------------------------------------------
 // apply_builtin_dict — 内置错别字词典
 // ---------------------------------------------------------------------------
 
@@ -546,6 +612,19 @@ fn process_text_period_toggle_appends_only_when_enabled() {
     assert_eq!(result_on, "今天天气好。");
     let result_off = text_processor::process_text("今天天气好", &[], &ProcessOptions::default());
     assert_eq!(result_off, "今天天气好");
+}
+
+#[test]
+fn process_text_period_toggle_off_strips_trailing_period() {
+    // append_period=false 不仅"不补"句号, 还要主动剥掉模型 (Whisper) 自带的尾句号,
+    // 否则用户视角看不出开关有任何影响。?!? ! 等保留。
+    let off = ProcessOptions::default();
+    assert_eq!(text_processor::process_text("你好。", &[], &off), "你好");
+    assert_eq!(text_processor::process_text("Skills.", &[], &off), "Skills");
+    assert_eq!(text_processor::process_text("真的吗？", &[], &off), "真的吗？");
+    assert_eq!(text_processor::process_text("绝了！", &[], &off), "绝了！");
+    // 省略号保留
+    assert_eq!(text_processor::process_text("等等…", &[], &off), "等等…");
 }
 
 #[test]
