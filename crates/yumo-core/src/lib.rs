@@ -17,6 +17,7 @@ pub mod downloader;
 pub mod vad;
 pub mod db;
 pub mod device_watcher;
+pub mod settings;
 pub mod state;
 
 pub mod audio_io;

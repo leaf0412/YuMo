@@ -331,7 +331,7 @@ export default function Settings() {
           {settingRow(t('settings.clipboardRestore'), <Switch checked={settings.clipboard_restore} onChange={(v) => updateSetting('clipboard_restore', v)} />)}
           <div style={{ padding: '8px 0' }}>
             <Text>{t('settings.pasteDelay')}</Text>
-            <Slider min={0} max={1000} step={50} value={settings.paste_delay ?? 100} onChange={(v) => updateSetting('paste_delay', v)} />
+            <Slider min={0} max={3000} step={50} value={settings.paste_delay ?? 1500} onChange={(v) => updateSetting('paste_delay', v)} />
           </div>
           {settingRow(t('settings.autoCapitalize'), <Switch checked={settings.auto_capitalize} onChange={(v) => updateSetting('auto_capitalize', v)} />)}
         </Flex>

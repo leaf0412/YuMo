@@ -75,10 +75,7 @@ fn start_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), App
     let settings = ctx.settings_cache.read()
         .map_err(|e| AppError::Recording(e.to_string()))?
         .clone();
-    let mute = settings
-        .get("system_mute_enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let mute = yumo_core::settings::resolve_system_mute(&settings);
     if mute {
         info!("[pipeline] muting system audio");
         let _ = audio_ctrl::set_system_muted(true);
@@ -192,7 +189,7 @@ fn cancel_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), Ap
 
     // Unmute if needed
     let mute = ctx.settings_cache.read()
-        .map(|c| c.get("system_mute_enabled").and_then(|v| v.as_bool()).unwrap_or(false))
+        .map(|c| yumo_core::settings::resolve_system_mute(&c))
         .unwrap_or(false);
     if mute {
         let _ = audio_ctrl::set_system_muted(false);
@@ -608,10 +605,7 @@ pub async fn stop_recording(
     let final_text = enhanced_text.as_deref().unwrap_or(&processed_text);
 
     let paste_error: Option<String> = if permissions::check_accessibility() {
-        let restore_delay = settings_map
-            .get("clipboard_restore_delay")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(1500.0) as u64;
+        let restore_delay = yumo_core::settings::resolve_paste_restore_delay_ms(&settings_map);
         info!("[pipeline] accessibility=true, paste+restore (delay={}ms)", restore_delay);
         #[cfg(target_os = "linux")]
         {
@@ -663,11 +657,7 @@ pub async fn stop_recording(
     }
 
     // 10. Unmute system audio
-    if settings_map
-        .get("system_mute_enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
+    if yumo_core::settings::resolve_system_mute(&settings_map) {
         let _ = audio_ctrl::set_system_muted(false);
         info!("[pipeline] unmuted system audio");
     }
