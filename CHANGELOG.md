@@ -9,6 +9,18 @@
 
 ### Fixed - 修复
 - **「末尾追加句号」OFF 不生效** — ASR 模型（含 `custom-mimo-v2.5-asr-int4`）自带末尾句号，原 toggle 仅做"缺则补"加法、不做减法，用户关闭后输出依然带「。」看上去全无效果。OFF 现在主动剥末尾连续的 `。/.`，`?!？！…⋯` 一律保留；`...`（≥3 ASCII 点）视作省略号也保留
+- **`paste_delay` / `system_mute` UI 键名与后端对不上** — UI 写 `paste_delay`，后端却读 `clipboard_restore_delay`；UI 写 `system_mute`，后端读 `system_mute_enabled`。两个 slider / toggle 拨拉一辈子都不会进 pipeline。新 `yumo_core::settings::{resolve_paste_restore_delay_ms, resolve_system_mute}` 集中 UI ↔ 后端 key 映射，10 单测覆盖含死键忽略
+- **`clipboard_restore` bool UI 早就有但后端从来不读** —— 关掉也照样恢复剪贴板。现在 false 时 `restore_delay=0`，走 paster 的 `if restore_delay_ms > 0` 旁路跳过 restore
+- **`paste_delay` UI 默认 100ms 与后端 1500ms 不一致** —— 历史用户实际行为是 1500ms，UI slider 默认改成 1500ms 对齐；100ms 在某些 app 下 paste 还没完就 restore，会把用户原剪贴板内容也粘出去
+
+### Added - 新增（启用沉睡的 UI 设置）
+- **`autostart` 真的能开机自启** — `tauri_plugin_autostart` 之前已 init 但 toggle 只往 DB 写 bool 从不调 plugin 的 enable/disable。现 toggle 真的去改 OS 的 LaunchAgent；启动时 `isEnabled()` 拿 OS 真实状态覆盖 DB，用户从系统设置 / launchctl 外部改过的也能即时反映；capability 补 `autostart:allow-{enable,disable,is-enabled}` 三条
+- **`sound_enabled` + `custom_sound_file` 录音提示音** — 之前两个 UI 在 Settings 外零引用，开关失效。新 `yumo_core::audio_cue` 模块基于 rodio：`sound_enabled=false` 直接禁用；`custom_sound_file` 非空走 rodio 解码播放（支持 WAV/MP3/FLAC/OGG）；否则生成默认正弦音（起 880Hz / 止 660Hz，120ms，振幅 0.18）。`play_async` fire-and-forget，播放失败 warn 日志静默吞，不拖崩录音管线。7 单测覆盖路径
+- **`menu_bar_mode` 真的隐藏 Dock 图标** — 启动 + 运行时切换都生效，调 `app.set_activation_policy(Accessory/Regular)`；Linux / Windows 无对应概念，`cfg(target_os=macos)` 门闸
+- **`auto_cleanup` + `auto_cleanup_days` 定时清理** — 之前 UI 摆设。`db::prune_older_than_days` 按 cutoff 删 SQLite 行 + 同名 WAV/.txt 旁路文件，`ErrorKind::NotFound` 不算失败（孤儿记录常见）；启动时若 `auto_cleanup=true` 在独立线程跑 prune，不阻塞 setup。5 单测含边界 cutoff / wav+txt 双删 / 缺文件容忍 / days=0 全删
+
+### Removed - 移除
+- **VAD 三个 UI 控件**（`vad_enabled` / `vad_sensitivity` / `vad_silence_timeout`） — 后端从来没接，录音管线不调用任何 VAD 逻辑。拨开关 / 拖 slider 全是装饰。`vad.rs::ChunkManager` 单测覆盖完好，留着备用；仅删 UI 入口与 i18n 翻译，DB 老 key 保留无害
 
 ## [0.8.2] - 2026-05-16
 
