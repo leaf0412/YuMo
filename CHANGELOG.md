@@ -5,7 +5,7 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.8.3] - 2026-05-20
 
 ### Fixed - 修复
 - **「末尾追加句号」OFF 不生效** — ASR 模型（含 `custom-mimo-v2.5-asr-int4`）自带末尾句号，原 toggle 仅做"缺则补"加法、不做减法，用户关闭后输出依然带「。」看上去全无效果。OFF 现在主动剥末尾连续的 `。/.`，`?!？！…⋯` 一律保留；`...`（≥3 ASCII 点）视作省略号也保留
@@ -19,7 +19,10 @@
 - **`menu_bar_mode` 真的隐藏 Dock 图标** — 启动 + 运行时切换都生效，调 `app.set_activation_policy(Accessory/Regular)`；Linux / Windows 无对应概念，`cfg(target_os=macos)` 门闸
 - **`auto_cleanup` + `auto_cleanup_days` 定时清理** — 之前 UI 摆设。`db::prune_older_than_days` 按 cutoff 删 SQLite 行 + 同名 WAV/.txt 旁路文件，`ErrorKind::NotFound` 不算失败（孤儿记录常见）；启动时若 `auto_cleanup=true` 在独立线程跑 prune，不阻塞 setup。5 单测含边界 cutoff / wav+txt 双删 / 缺文件容忍 / days=0 全删
 
-### Removed - 移除
+### Removed - 移除（清理装饰画 UI / 未实现 feature）
+- **AI 增强整条线** — `Enhancement` 页 + 6 个 UI 设置（`ai_enhancement_enabled` / `llm_provider` / `llm_model` / `ollama_url` / `cloud_provider` / `cloud_api_key`）+ commands.rs pipeline 中 `enhanced_text` 整段 TODO 桩（注释明写"enhancement not implemented yet, skipping"）+ `crates/yumo-core/src/enhancer.rs` 整个模块（`build_prompt` / `EnhancerConfig` 无人调用）+ 3 个 keychain API key 命令 + Prompts 子系统（Prompt 表 + 4 个 CRUD + 5 个 tauri 命令）+ `PipelineState::Enhancing` 状态变体。**-2272 行**，老 DB 列 + prompts 表保留无害
+- **7 个云端 ASR Provider** — Models 页云端 Tab + `cloud.rs` 整个模块（`CloudProvider` / `CloudConfig` / `build_request_info` / `parse_response` 无人调用）+ `ModelProvider` 枚举的 Groq / Deepgram / ElevenLabs / Mistral / Gemini / Soniox / OpenAI 变体 + `is_cloud()` + `ModelFilter::Cloud` + 7 个预定义模型条目。pipeline 只有 `needs_daemon()` 和 local Whisper 两个分支，选了云端模型等于什么都不发生
+- **`keychain` 模块 + `keyring` 依赖** — 三平台 `platform/*/keychain.rs` + `PlatformKeychain` trait 全删，唯一用户（API key 命令）已删
 - **VAD 三个 UI 控件**（`vad_enabled` / `vad_sensitivity` / `vad_silence_timeout`） — 后端从来没接，录音管线不调用任何 VAD 逻辑。拨开关 / 拖 slider 全是装饰。`vad.rs::ChunkManager` 单测覆盖完好，留着备用；仅删 UI 入口与 i18n 翻译，DB 老 key 保留无害
 
 ## [0.8.2] - 2026-05-16
