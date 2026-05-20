@@ -61,7 +61,6 @@ export interface ModelInfo {
 export interface TranscriptionRecord {
   id: string;
   text: string;
-  enhanced_text: string | null;
   timestamp: string;
   duration: number;
   model_name: string;
@@ -110,15 +109,6 @@ export interface Replacement {
   created_at: string;
 }
 
-export interface Prompt {
-  id: string;
-  name: string;
-  system_message: string;
-  user_message_template: string;
-  is_predefined: boolean;
-  created_at: string;
-}
-
 export interface ImportResult {
   transcriptions_imported: number;
   transcriptions_skipped: number;
@@ -144,7 +134,6 @@ export interface AppSettings {
   [key: string]: unknown;
   language?: string;
   selected_model_id?: string;
-  selected_prompt_id?: string;
   selected_sprite_id?: string;
   hotkey?: string;
   ui_locale?: string;
@@ -152,7 +141,7 @@ export interface AppSettings {
 }
 
 export interface PipelineState {
-  state: 'idle' | 'recording' | 'transcribing' | 'enhancing' | 'pasting';
+  state: 'idle' | 'recording' | 'transcribing' | 'pasting';
 }
 
 // ---------------------------------------------------------------------------
@@ -287,18 +276,6 @@ export interface Bridge {
   getReplacements(): Promise<Replacement[]>;
   setReplacement(original: string, replacement: string): Promise<string>;
   deleteReplacement(id: string): Promise<void>;
-
-  // --- Prompts ---
-  listPrompts(): Promise<Prompt[]>;
-  addPrompt(name: string, systemMsg: string, userMsg: string): Promise<string>;
-  updatePrompt(id: string, name: string, systemMsg: string, userMsg: string): Promise<void>;
-  deletePrompt(id: string): Promise<void>;
-  selectPrompt(id: string): Promise<void>;
-
-  // --- API Keys ---
-  storeApiKey(provider: string, key: string): Promise<void>;
-  getApiKey(provider: string): Promise<string | null>;
-  deleteApiKey(provider: string): Promise<void>;
 
   // --- Hotkey ---
   registerHotkey(shortcut: string): Promise<void>;

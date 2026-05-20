@@ -58,7 +58,6 @@ fn test_pipeline_cancel_from_any_state() {
         PipelineState::Recording,
         PipelineState::Processing,
         PipelineState::Transcribing,
-        PipelineState::Enhancing,
         PipelineState::Pasting,
     ] {
         let next = pipeline::transition(state, Action::Cancel);

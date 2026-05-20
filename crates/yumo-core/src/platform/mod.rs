@@ -22,8 +22,6 @@ pub use macos::audio_ctrl;
 pub use macos::paster;
 #[cfg(target_os = "macos")]
 pub use macos::permissions;
-#[cfg(target_os = "macos")]
-pub use macos::keychain;
 
 #[cfg(target_os = "windows")]
 pub use windows::recorder;
@@ -35,8 +33,6 @@ pub use windows::audio_ctrl;
 pub use windows::paster;
 #[cfg(target_os = "windows")]
 pub use windows::permissions;
-#[cfg(target_os = "windows")]
-pub use windows::keychain;
 
 #[cfg(target_os = "linux")]
 pub use linux::recorder;
@@ -48,5 +44,3 @@ pub use linux::audio_ctrl;
 pub use linux::paster;
 #[cfg(target_os = "linux")]
 pub use linux::permissions;
-#[cfg(target_os = "linux")]
-pub use linux::keychain;

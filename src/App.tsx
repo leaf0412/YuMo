@@ -8,7 +8,6 @@ import {
   HistoryOutlined,
   CloudDownloadOutlined,
   BookOutlined,
-  ThunderboltOutlined,
   SettingOutlined,
   SafetyCertificateOutlined,
   PictureOutlined,
@@ -28,7 +27,6 @@ import Dashboard from './pages/Dashboard';
 import History from './pages/History';
 import Models from './pages/Models';
 import Dictionary from './pages/Dictionary';
-import Enhancement from './pages/Enhancement';
 import Settings from './pages/Settings';
 import Permissions from './pages/Permissions';
 import Sprites from './pages/Sprites';
@@ -152,7 +150,6 @@ function AppLayout() {
       children: [
         { key: '/models', icon: <CloudDownloadOutlined />, label: t('menu.models') },
         { key: '/dictionary', icon: <BookOutlined />, label: t('menu.dictionary') },
-        { key: '/enhancement', icon: <ThunderboltOutlined />, label: t('menu.enhancement') },
       ],
     },
     { type: 'divider' as const },
@@ -206,7 +203,6 @@ const router = createHashRouter([
       { path: 'history', element: <History /> },
       { path: 'models', element: <Models /> },
       { path: 'dictionary', element: <Dictionary /> },
-      { path: 'enhancement', element: <Enhancement /> },
       { path: 'settings', element: <Settings /> },
       { path: 'permissions', element: <Permissions /> },
       { path: 'sprites', element: <Sprites /> },

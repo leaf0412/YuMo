@@ -26,8 +26,6 @@ export interface AppSettings {
   [key: string]: unknown;
   language?: string;
   selected_model_id?: string;
-  cloud_provider?: string;
-  cloud_api_key?: string;
 }
 
 interface AppState {

@@ -9,7 +9,6 @@ const { Text, Paragraph } = Typography;
 interface Transcription {
   id: string;
   text: string;
-  enhanced_text?: string;
   timestamp: string;
   model_name: string;
   recording_path?: string;
@@ -188,11 +187,6 @@ export default function History() {
                   <Paragraph style={{ cursor: 'pointer', marginBottom: 4, marginTop: 8 }} onClick={() => toggleExpand(item.id)}>
                     {expanded ? item.text : preview}
                   </Paragraph>
-                  {expanded && item.enhanced_text && (
-                    <Card size="small" title={t('history.aiEnhanced')} style={{ marginTop: 8 }}>
-                      <Paragraph>{item.enhanced_text}</Paragraph>
-                    </Card>
-                  )}
                 </div>
                 <Space>
                   {item.recording_path && (
@@ -203,7 +197,7 @@ export default function History() {
                       title={playingId === item.id ? t('history.stop') : t('history.play')}
                     />
                   )}
-                  <Button type="text" icon={<CopyOutlined />} onClick={() => handleCopy(item.enhanced_text || item.text)} />
+                  <Button type="text" icon={<CopyOutlined />} onClick={() => handleCopy(item.text)} />
                   <Popconfirm title={t('history.confirmDelete')} onConfirm={() => handleDelete(item.id)} okText={t('common.confirm')} cancelText={t('common.cancel')}>
                     <Button type="text" danger icon={<DeleteOutlined />} />
                   </Popconfirm>

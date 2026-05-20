@@ -19,7 +19,6 @@ fn test_init_creates_all_tables() {
     assert!(tables.contains(&"transcriptions".to_string()));
     assert!(tables.contains(&"vocabulary".to_string()));
     assert!(tables.contains(&"replacements".to_string()));
-    assert!(tables.contains(&"prompts".to_string()));
     assert!(tables.contains(&"settings".to_string()));
 }
 
@@ -28,7 +27,7 @@ fn test_insert_and_query_transcription() {
     let tmp = TempDir::new().unwrap();
     let conn = db::init_database(&tmp.path().join("test.db")).unwrap();
 
-    let id = db::insert_transcription(&conn, "hello world", None, 2.5, "ggml-base", 2, None).unwrap();
+    let id = db::insert_transcription(&conn, "hello world", 2.5, "ggml-base", 2, None).unwrap();
     let result = db::get_transcriptions(&conn, None, None, 20).unwrap();
     assert_eq!(result.items.len(), 1);
     assert_eq!(result.items[0].text, "hello world");
@@ -40,8 +39,8 @@ fn test_fulltext_search_transcriptions() {
     let tmp = TempDir::new().unwrap();
     let conn = db::init_database(&tmp.path().join("test.db")).unwrap();
 
-    db::insert_transcription(&conn, "the quick brown fox", None, 1.0, "base", 4, None).unwrap();
-    db::insert_transcription(&conn, "hello world goodbye", None, 1.0, "base", 3, None).unwrap();
+    db::insert_transcription(&conn, "the quick brown fox", 1.0, "base", 4, None).unwrap();
+    db::insert_transcription(&conn, "hello world goodbye", 1.0, "base", 3, None).unwrap();
 
     let result = db::get_transcriptions(&conn, None, Some("fox"), 20).unwrap();
     assert_eq!(result.items.len(), 1);
@@ -54,7 +53,7 @@ fn test_cursor_pagination() {
     let conn = db::init_database(&tmp.path().join("test.db")).unwrap();
 
     for i in 0..5 {
-        db::insert_transcription(&conn, &format!("entry {}", i), None, 1.0, "base", 2, None).unwrap();
+        db::insert_transcription(&conn, &format!("entry {}", i), 1.0, "base", 2, None).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
@@ -72,7 +71,7 @@ fn test_delete_transcription() {
     let tmp = TempDir::new().unwrap();
     let conn = db::init_database(&tmp.path().join("test.db")).unwrap();
 
-    let id = db::insert_transcription(&conn, "delete me", None, 1.0, "base", 2, None).unwrap();
+    let id = db::insert_transcription(&conn, "delete me", 1.0, "base", 2, None).unwrap();
     db::delete_transcription(&conn, &id).unwrap();
     let result = db::get_transcriptions(&conn, None, None, 20).unwrap();
     assert_eq!(result.items.len(), 0);
@@ -117,22 +116,5 @@ fn test_settings_crud() {
     assert_eq!(val, Some(serde_json::json!("zh")));
 
     assert_eq!(db::get_setting(&conn, "nonexistent").unwrap(), None);
-}
-
-#[test]
-fn test_prompts_crud() {
-    let tmp = TempDir::new().unwrap();
-    let conn = db::init_database(&tmp.path().join("test.db")).unwrap();
-
-    let id = db::add_prompt(&conn, "Fix Grammar", "You fix grammar.", "Fix: {{text}}", false).unwrap();
-    let prompts = db::list_prompts(&conn).unwrap();
-    assert!(prompts.iter().any(|p| p.name == "Fix Grammar"));
-
-    db::update_prompt(&conn, &id, "Fix Grammar v2", "Updated.", "Fix v2: {{text}}").unwrap();
-    let prompts = db::list_prompts(&conn).unwrap();
-    assert!(prompts.iter().any(|p| p.name == "Fix Grammar v2"));
-
-    db::delete_prompt(&conn, &id).unwrap();
-    assert!(!db::list_prompts(&conn).unwrap().iter().any(|p| p.id == id));
 }
 

@@ -1,9 +1,7 @@
-pub use yumo_core::cloud;
 pub mod commands;
 pub use yumo_core::daemon;
 pub use yumo_core::db;
 pub use yumo_core::downloader;
-pub use yumo_core::enhancer;
 pub use yumo_core::error;
 pub use yumo_core::mask;
 pub use yumo_core::pipeline;
@@ -416,17 +414,7 @@ pub fn run() {
             // Settings
             commands::get_settings,
             commands::update_setting,
-            // Prompts
-            commands::list_prompts,
-            commands::add_prompt,
-            commands::update_prompt,
-            commands::delete_prompt,
-            commands::select_prompt,
             commands::select_model,
-            // Keychain
-            commands::store_api_key,
-            commands::get_api_key,
-            commands::delete_api_key,
             // Hotkey
             commands::register_hotkey,
             commands::unregister_hotkey,

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Card, Button, Flex, Space, Tag, Typography, Row, Col, Select,
-  Input, InputNumber, Slider, message, Divider, Tabs, Badge,
+  Button, Flex, Space, Tag, Typography, Row, Col, Select,
+  InputNumber, Slider, message, Tabs, Badge,
 } from 'antd';
 import {
-  CloudOutlined, ImportOutlined, ThunderboltOutlined,
+  ImportOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
 import { listen } from '../lib/events';
 import { invoke, formatError, logEvent } from '../lib/logger';
@@ -22,12 +22,6 @@ interface ModelSettings {
 
 const DEFAULT_MODEL_SETTINGS: ModelSettings = { temperature: 0, max_tokens: 1900 };
 
-const CLOUD_PROVIDERS = [
-  { value: 'openai', label: 'OpenAI Whisper' },
-  { value: 'deepgram', label: 'Deepgram' },
-  { value: 'assemblyai', label: 'AssemblyAI' },
-];
-
 function formatSize(mb: number): string {
   return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${mb} MB`;
 }
@@ -35,7 +29,6 @@ function formatSize(mb: number): string {
 export default function Models() {
   const { t } = useTranslation();
   const { models, settings, daemonStatus, fetchModels, fetchSettings, fetchDaemonStatus, selectModel, setSettings: storeSetSettings, setDaemonStatus: storeSetDaemonStatus } = useAppStore();
-  const [cloudApiKey, setCloudApiKey] = useState('');
   // Default to local AI tab (MLX on macOS, Qwen3-ASR on Linux)
   const [activeTab, setActiveTab] = useState('mlx');
   const [loadingModel, setLoadingModel] = useState<string | null>(null);
@@ -127,15 +120,6 @@ export default function Models() {
   }, [t]);
 
 
-  const handleSelect = async (modelId: string) => {
-    logEvent('Models', 'select_model', { model_id: modelId });
-    try {
-      await selectModel(modelId);
-      message.success(t('models.toast.modelSwitched'));
-    } catch (e) {
-      message.error(formatError(e, t('models.error.switchFailed')));
-    }
-  };
 
   const handleImport = async () => {
     try {
@@ -157,29 +141,6 @@ export default function Models() {
     } catch (e) {
       message.error(formatError(e, t('models.error.settingFailed')));
     }
-  };
-
-  const handleCloudProviderChange = async (value: string) => {
-    try {
-      await invoke('update_setting', { key: 'cloud_provider', value });
-      storeSetSettings({ cloud_provider: value });
-    } catch (e) {
-      message.error(formatError(e, t('models.error.settingFailed')));
-    }
-  };
-
-  const handleSaveApiKey = async () => {
-    logEvent('Models', 'save_api_key', { provider: settings.cloud_provider ?? 'unknown' });
-    try {
-      await invoke('update_setting', { key: 'cloud_api_key', value: cloudApiKey });
-      message.success(t('models.toast.apiKeySaved'));
-    } catch (e) {
-      message.error(formatError(e, t('models.error.saveFailed')));
-    }
-  };
-
-  const handleTestConnection = () => {
-    message.info(t('models.toast.testNotImplemented'));
   };
 
   const handleDaemonStart = async () => {
@@ -253,20 +214,17 @@ export default function Models() {
   const isSelected = (modelId: string) => settings.selected_model_id === modelId;
   const LOCAL_PROVIDERS = ['local'];
   const MLX_PROVIDERS = ['mlxWhisper', 'mlxFunASR', 'qwen3ASR', 'vibeVoiceASR'];
-  const CLOUD_PROVIDERS_LIST = ['groq', 'deepgram', 'elevenLabs', 'mistral', 'gemini', 'soniox'];
 
   const localModels = models.filter(m => LOCAL_PROVIDERS.includes(m.provider));
   const mlxModels = models.filter(m => MLX_PROVIDERS.includes(m.provider));
-  const cloudModels = models.filter(m => CLOUD_PROVIDERS_LIST.includes(m.provider));
 
   // Local whisper models tab hidden — kept for future use
   void localModels;
 
   // ---- ViewModel construction --------------------------------------------
-  // Both local-MLX and cloud models translate their domain shape to the
-  // unified `NormalModelViewModel` so all three tabs render through the
-  // same <ModelCard /> component. The custom-models tab does the same
-  // translation inside `CustomModelsSection`.
+  // Local-MLX models translate to the unified NormalModelViewModel so the
+  // tab renders through <ModelCard />. The custom-models tab does the same
+  // translation inside CustomModelsSection.
 
   const renderParamControls = (modelId: string) => (
     <Flex vertical gap={4} style={{ padding: '4px 0' }}>
@@ -385,33 +343,6 @@ export default function Models() {
     };
   };
 
-  const cloudToViewModel = (model: typeof cloudModels[number]): NormalModelViewModel => {
-    const isCurrent = isSelected(model.id);
-    const status: ModelStatus = isCurrent ? { kind: 'active' } : { kind: 'available' };
-    const actions: ModelAction[] = [];
-    if (status.kind === 'available') {
-      actions.push({
-        key: 'use',
-        label: t('models.action.use'),
-        type: 'primary',
-        onClick: () => handleSelect(model.id),
-      });
-    }
-    return {
-      kind: 'normal',
-      id: model.id,
-      name: model.name,
-      description: model.description,
-      icon: <CloudOutlined />,
-      badge: { text: t('models.badge.cloud'), color: 'cyan' },
-      meta: [],
-      status,
-      actions,
-      extras: renderParamControls(model.id),
-      testId: `model-${model.id}`,
-    };
-  };
-
   const mlxTabContent = (
     <>
       <Flex
@@ -468,47 +399,6 @@ export default function Models() {
     </>
   );
 
-  const cloudTabContent = (
-    <>
-      <Row gutter={[16, 16]}>
-        {cloudModels.map((model) => (
-          <Col xs={24} sm={12} md={8} key={model.id}>
-            <ModelCard vm={cloudToViewModel(model)} />
-          </Col>
-        ))}
-      </Row>
-      <Divider />
-      <Card title={t('models.cloud.apiConfig')}>
-        <Flex vertical gap={8} style={{ width: '100%' }}>
-          <div>
-            <Text>{t('models.cloud.provider')}</Text>
-            <Select
-              placeholder={t('models.cloud.selectProvider')}
-              value={settings.cloud_provider}
-              onChange={handleCloudProviderChange}
-              style={{ width: '100%', marginTop: 8 }}
-              options={CLOUD_PROVIDERS}
-            />
-          </div>
-          <div>
-            <Text>{t('models.cloud.apiKey')}</Text>
-            <Space.Compact style={{ width: '100%', marginTop: 8 }}>
-              <Input.Password
-                placeholder={t('models.cloud.enterApiKey')}
-                value={cloudApiKey}
-                onChange={(e) => setCloudApiKey(e.target.value)}
-              />
-              <Button onClick={handleSaveApiKey}>{t('common.save')}</Button>
-            </Space.Compact>
-          </div>
-          <Button icon={<CloudOutlined />} onClick={handleTestConnection}>
-            {t('models.cloud.testConnection')}
-          </Button>
-        </Flex>
-      </Card>
-    </>
-  );
-
   return (
     <Flex vertical gap="large" style={{ width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -528,7 +418,6 @@ export default function Models() {
       <Tabs activeKey={activeTab} onChange={setActiveTab}
         items={[
           ...(mlxModels.length > 0 ? [{ key: 'mlx', label: <span data-testid="local-models-tab">{t('models.tab.localAI', { count: mlxModels.length })}</span>, children: mlxTabContent }] : []),
-          { key: 'cloud', label: <span data-testid="cloud-models-tab">{t('models.tab.cloud', { count: cloudModels.length })}</span>, children: cloudTabContent },
           { key: 'custom', label: <span data-testid="custom-models-tab">{t('models.tab.custom')}</span>, children: <CustomModelsSection /> },
         ]}
       />

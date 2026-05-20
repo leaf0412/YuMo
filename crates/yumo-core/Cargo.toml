@@ -23,7 +23,6 @@ uuid = { version = "1", features = ["v4"] }
 csv = "1"
 
 # 跨平台依赖
-keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 arboard = "3"
 cpal = "0.15"       # Windows/Linux 录音 + 音频设备枚举（macOS 保持 CoreAudio 原生）
 rodio = { version = "0.20", default-features = false, features = ["wav", "mp3", "flac", "vorbis"] }  # 录音提示音 (合成正弦 + 自定义文件播放)

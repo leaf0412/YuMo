@@ -15,7 +15,6 @@ import type {
   Statistics,
   VocabularyWord,
   Replacement,
-  Prompt,
   ImportResult,
   DaemonStatus,
   SpriteManifest,
@@ -175,42 +174,6 @@ export const tauriBridge: Bridge = {
 
   deleteReplacement(id: string): Promise<void> {
     return invoke('delete_replacement', { id });
-  },
-
-  // --- Prompts ---
-
-  listPrompts(): Promise<Prompt[]> {
-    return invoke('list_prompts');
-  },
-
-  addPrompt(name: string, systemMsg: string, userMsg: string): Promise<string> {
-    return invoke('add_prompt', { name, systemMsg, userMsg });
-  },
-
-  updatePrompt(id: string, name: string, systemMsg: string, userMsg: string): Promise<void> {
-    return invoke('update_prompt', { id, name, systemMsg, userMsg });
-  },
-
-  deletePrompt(id: string): Promise<void> {
-    return invoke('delete_prompt', { id });
-  },
-
-  selectPrompt(id: string): Promise<void> {
-    return invoke('select_prompt', { id });
-  },
-
-  // --- API Keys ---
-
-  storeApiKey(provider: string, key: string): Promise<void> {
-    return invoke('store_api_key', { provider, key });
-  },
-
-  getApiKey(provider: string): Promise<string | null> {
-    return invoke('get_api_key', { provider });
-  },
-
-  deleteApiKey(provider: string): Promise<void> {
-    return invoke('delete_api_key', { provider });
   },
 
   // --- Hotkey ---

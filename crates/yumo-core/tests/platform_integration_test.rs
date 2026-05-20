@@ -9,7 +9,6 @@ fn test_traits_importable() {
     fn _assert_audio_ctrl<T: PlatformAudioCtrl>() {}
     fn _assert_paster<T: PlatformPaster>() {}
     fn _assert_permissions<T: PlatformPermissions>() {}
-    fn _assert_keychain<T: PlatformKeychain>() {}
 }
 
 #[test]

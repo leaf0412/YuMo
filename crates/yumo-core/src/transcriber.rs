@@ -22,24 +22,11 @@ pub enum ModelProvider {
     VibeVoiceASR,
     /// Custom model defined via YAML plugin under ~/.voiceink/custom_models/
     Custom,
-    Groq,
-    Deepgram,
-    ElevenLabs,
-    Mistral,
-    Gemini,
-    Soniox,
 }
 
 impl ModelProvider {
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local | Self::MlxWhisper | Self::MlxFunASR | Self::Qwen3ASR | Self::VibeVoiceASR | Self::Custom)
-    }
-
-    pub fn is_cloud(&self) -> bool {
-        matches!(
-            self,
-            Self::Groq | Self::Deepgram | Self::ElevenLabs | Self::Mistral | Self::Gemini | Self::Soniox
-        )
     }
 
     pub fn needs_daemon(&self) -> bool {
@@ -56,7 +43,6 @@ impl ModelProvider {
 pub enum ModelFilter {
     Recommended,
     Local,
-    Cloud,
 }
 
 // ---------------------------------------------------------------------------
@@ -270,26 +256,6 @@ pub fn all_predefined_models() -> Vec<ModelInfo> {
             url: "", provider: ModelProvider::Qwen3ASR,
             repo: Some("Qwen/Qwen3-ASR-1.7B"),
             desc: Some("Qwen3 1.7B, higher accuracy, 30+ languages"), speed: 5, accuracy: 9, recommended: false }.build(),
-
-        // ---- Cloud models ----
-        M { id: "groq-whisper-large-v3", name: "Groq Whisper Large v3", size_mb: 0, langs: multilingual(),
-            url: "", provider: ModelProvider::Groq, repo: None,
-            desc: Some("Ultra-fast cloud transcription via Groq"), speed: 10, accuracy: 9, recommended: true }.build(),
-        M { id: "deepgram-nova-2", name: "Deepgram Nova-2", size_mb: 0, langs: multilingual(),
-            url: "", provider: ModelProvider::Deepgram, repo: None,
-            desc: Some("Enterprise-grade speech-to-text"), speed: 9, accuracy: 9, recommended: false }.build(),
-        M { id: "elevenlabs-scribe", name: "ElevenLabs Scribe", size_mb: 0, langs: multilingual(),
-            url: "", provider: ModelProvider::ElevenLabs, repo: None,
-            desc: Some("High quality transcription"), speed: 8, accuracy: 9, recommended: false }.build(),
-        M { id: "mistral-asr", name: "Mistral ASR", size_mb: 0, langs: multilingual(),
-            url: "", provider: ModelProvider::Mistral, repo: None,
-            desc: Some("Mistral speech recognition"), speed: 8, accuracy: 8, recommended: false }.build(),
-        M { id: "gemini-asr", name: "Gemini ASR", size_mb: 0, langs: multilingual(),
-            url: "", provider: ModelProvider::Gemini, repo: None,
-            desc: Some("Google Gemini speech recognition"), speed: 8, accuracy: 9, recommended: false }.build(),
-        M { id: "soniox-asr", name: "Soniox ASR", size_mb: 0, langs: multilingual(),
-            url: "", provider: ModelProvider::Soniox, repo: None,
-            desc: Some("Real-time speech recognition"), speed: 9, accuracy: 8, recommended: false }.build(),
     ]
 }
 
@@ -384,10 +350,6 @@ pub fn all_models_with_custom_dir(models_dir: &Path, custom_dir: &Path) -> Vec<M
             }
             ModelProvider::Custom => {
                 // Custom models compute is_downloaded below when merged
-            }
-            _ => {
-                // Cloud models: always "available" (no download needed)
-                model.is_downloaded = true;
             }
         }
     }

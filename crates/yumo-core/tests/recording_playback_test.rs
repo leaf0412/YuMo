@@ -5,7 +5,7 @@ use yumo_core::platform::AudioData;
 fn test_transcription_stores_recording_path() {
     let conn = db::init_database(std::path::Path::new(":memory:")).unwrap();
     let id = db::insert_transcription(
-        &conn, "hello", None, 1.0, "test-model", 1,
+        &conn, "hello", 1.0, "test-model", 1,
         Some("/tmp/recording_test.wav"),
     ).unwrap();
 
@@ -18,7 +18,7 @@ fn test_transcription_stores_recording_path() {
 fn test_transcription_without_recording_path() {
     let conn = db::init_database(std::path::Path::new(":memory:")).unwrap();
     let id = db::insert_transcription(
-        &conn, "hello", None, 1.0, "test-model", 1, None,
+        &conn, "hello", 1.0, "test-model", 1, None,
     ).unwrap();
 
     let result = db::get_transcriptions(&conn, None, None, 10).unwrap();

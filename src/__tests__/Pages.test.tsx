@@ -122,40 +122,6 @@ describe('Dictionary', () => {
   });
 });
 
-describe('Enhancement', () => {
-  test('renders AI enhancement toggle and title', async () => {
-    const Enhancement = (await import('../pages/Enhancement')).default;
-    render(
-      <MemoryRouter>
-        <Enhancement />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText('AI 增强')).toBeInTheDocument();
-    expect(screen.getByText('启用 AI 增强')).toBeInTheDocument();
-  });
-
-  test('renders prompt management section', async () => {
-    const Enhancement = (await import('../pages/Enhancement')).default;
-    render(
-      <MemoryRouter>
-        <Enhancement />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText('Prompt 管理')).toBeInTheDocument();
-    expect(screen.getByText('新建 Prompt')).toBeInTheDocument();
-  });
-
-  test('renders provider and model selects', async () => {
-    const Enhancement = (await import('../pages/Enhancement')).default;
-    render(
-      <MemoryRouter>
-        <Enhancement />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText('LLM 服务商')).toBeInTheDocument();
-    expect(screen.getByText('模型')).toBeInTheDocument();
-  });
-});
 
 describe('Settings', () => {
   test('renders settings title', async () => {

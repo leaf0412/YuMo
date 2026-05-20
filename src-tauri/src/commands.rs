@@ -4,7 +4,7 @@ use log::{info, error, warn};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::db::{self, PaginatedResult, Prompt, Replacement, VocabularyWord};
+use crate::db::{self, PaginatedResult, Replacement, VocabularyWord};
 use crate::error::AppError;
 use crate::mask;
 use crate::hotkey;
@@ -13,7 +13,7 @@ use crate::state::AppContext;
 use crate::daemon::{DaemonManager, find_python};
 use crate::{audio_io, platform, text_processor, transcriber};
 use yumo_core::custom_worker;
-use crate::platform::{audio_ctrl, keychain, paster, permissions};
+use crate::platform::{audio_ctrl, paster, permissions};
 
 // ---------------------------------------------------------------------------
 // Frontend log bridge — writes frontend logs to the same log.txt
@@ -393,10 +393,6 @@ pub async fn stop_recording(
         .and_then(|v| v.as_str())
         .unwrap_or("en")
         .to_string();
-    let enhancement_enabled = settings_map
-        .get("enhancement_enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
     let temperature_key = format!("model_{}_temperature", model_id);
     let max_tokens_key = format!("model_{}_max_tokens", model_id);
     let temperature: f64 = settings_map
@@ -409,8 +405,8 @@ pub async fn stop_recording(
         .map(|v| v as u32)
         .unwrap_or(1900);
     info!(
-        "[pipeline] settings: model_id={:?} language={:?} enhancement={} temperature={} max_tokens={}",
-        model_id, language, enhancement_enabled, temperature, max_tokens
+        "[pipeline] settings: model_id={:?} language={:?} temperature={} max_tokens={}",
+        model_id, language, temperature, max_tokens
     );
 
     // 5. Transcribe — route by model provider
@@ -575,35 +571,7 @@ pub async fn stop_recording(
     let processed_text = text_processor::process_text(&text, &replacements, &process_opts);
     info!("[pipeline] processed text={}", mask::mask_text(&processed_text));
 
-    // 7. Optional AI enhancement
-    let enhanced_text: Option<String> = if enhancement_enabled {
-        info!("[pipeline] enhancement enabled, entering Enhancing state");
-        {
-            let mut pipeline = state
-                .pipeline_state
-                .lock()
-                .map_err(|e| AppError::Recording(e.to_string()))?;
-            *pipeline = PipelineState::Enhancing;
-        }
-        let _ = app.emit(
-            "recording-state",
-            serde_json::json!({"state": "enhancing"}),
-        );
-
-        // TODO: integrate with keychain and enhancer module
-        let enhance_start = std::time::Instant::now();
-        info!("[pipeline] enhancement not implemented yet, skipping");
-        let enhanced_text_inner: Option<String> = None;
-        if let Some(ref et) = enhanced_text_inner {
-            info!("[pipeline] [enhance_complete] elapsed_ms={} text_len={}", enhance_start.elapsed().as_millis(), et.len());
-        }
-        enhanced_text_inner
-    } else {
-        info!("[pipeline] enhancement disabled, skipping");
-        None
-    };
-
-    // 8. Paste
+    // 7. Paste
     {
         let mut pipeline = state
             .pipeline_state
@@ -616,7 +584,7 @@ pub async fn stop_recording(
         serde_json::json!({"state": "pasting"}),
     );
 
-    let final_text = enhanced_text.as_deref().unwrap_or(&processed_text);
+    let final_text = processed_text.as_str();
 
     let paste_error: Option<String> = if permissions::check_accessibility() {
         let restore_delay = yumo_core::settings::resolve_paste_restore_delay_ms(&settings_map);
@@ -652,7 +620,6 @@ pub async fn stop_recording(
         db::insert_transcription(
             &conn,
             &processed_text,
-            enhanced_text.as_deref(),
             audio_duration_secs,
             &model_id,
             word_count,
@@ -689,7 +656,6 @@ pub async fn stop_recording(
         "transcription-result",
         serde_json::json!({
             "text": processed_text,
-            "enhanced_text": enhanced_text,
         }),
     );
     if let Some(ref err) = paste_error {
@@ -746,7 +712,6 @@ pub fn get_pipeline_state(state: State<AppContext>) -> Result<serde_json::Value,
         PipelineState::Recording => "recording",
         PipelineState::Processing => "processing",
         PipelineState::Transcribing => "transcribing",
-        PipelineState::Enhancing => "enhancing",
         PipelineState::Pasting => "pasting",
     };
     Ok(serde_json::json!({"state": s}))
@@ -1201,76 +1166,12 @@ pub fn update_setting(
 }
 
 // ---------------------------------------------------------------------------
-// Prompts
+// Convenience: select model (stored in settings)
 // ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn list_prompts(state: State<AppContext>) -> Result<Vec<Prompt>, AppError> {
-    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
-    db::list_prompts(&conn)
-}
-
-#[tauri::command]
-pub fn add_prompt(
-    state: State<AppContext>,
-    name: String,
-    system_msg: String,
-    user_msg: String,
-) -> Result<String, AppError> {
-    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
-    db::add_prompt(&conn, &name, &system_msg, &user_msg, false)
-}
-
-#[tauri::command]
-pub fn update_prompt(
-    state: State<AppContext>,
-    id: String,
-    name: String,
-    system_msg: String,
-    user_msg: String,
-) -> Result<(), AppError> {
-    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
-    db::update_prompt(&conn, &id, &name, &system_msg, &user_msg)
-}
-
-#[tauri::command]
-pub fn delete_prompt(state: State<AppContext>, id: String) -> Result<(), AppError> {
-    let conn = state.db.lock().map_err(|e| AppError::Database(e.to_string()))?;
-    db::delete_prompt(&conn, &id)
-}
-
-// ---------------------------------------------------------------------------
-// Convenience: select prompt / model (stored in settings)
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn select_prompt(state: State<AppContext>, id: String) -> Result<(), AppError> {
-    state.set_setting_cached("selected_prompt_id", &Value::String(id))
-}
 
 #[tauri::command]
 pub fn select_model(state: State<AppContext>, model_id: String) -> Result<(), AppError> {
     state.set_setting_cached("selected_model_id", &Value::String(model_id))
-}
-
-// ---------------------------------------------------------------------------
-// Keychain (API key storage)
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn store_api_key(provider: String, key: String) -> Result<(), AppError> {
-    info!("[cmd] store_api_key provider={} key={}", provider, mask::mask(&key));
-    keychain::store_key("com.voiceink.app", &provider, &key)
-}
-
-#[tauri::command]
-pub fn get_api_key(provider: String) -> Result<Option<String>, AppError> {
-    keychain::get_key("com.voiceink.app", &provider)
-}
-
-#[tauri::command]
-pub fn delete_api_key(provider: String) -> Result<(), AppError> {
-    keychain::delete_key("com.voiceink.app", &provider)
 }
 
 // ---------------------------------------------------------------------------

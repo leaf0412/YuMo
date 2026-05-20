@@ -11,20 +11,6 @@ fn test_provider_is_local() {
     assert!(ModelProvider::Local.is_local());
     assert!(ModelProvider::MlxWhisper.is_local());
     assert!(ModelProvider::MlxFunASR.is_local());
-    assert!(!ModelProvider::Groq.is_local());
-    assert!(!ModelProvider::Deepgram.is_local());
-}
-
-#[test]
-fn test_provider_is_cloud() {
-    assert!(ModelProvider::Groq.is_cloud());
-    assert!(ModelProvider::Deepgram.is_cloud());
-    assert!(ModelProvider::ElevenLabs.is_cloud());
-    assert!(ModelProvider::Mistral.is_cloud());
-    assert!(ModelProvider::Gemini.is_cloud());
-    assert!(ModelProvider::Soniox.is_cloud());
-    assert!(!ModelProvider::Local.is_cloud());
-    assert!(!ModelProvider::MlxFunASR.is_cloud());
 }
 
 #[test]
@@ -32,7 +18,6 @@ fn test_provider_needs_daemon() {
     assert!(ModelProvider::MlxFunASR.needs_daemon());
     assert!(ModelProvider::MlxWhisper.needs_daemon());
     assert!(!ModelProvider::Local.needs_daemon());
-    assert!(!ModelProvider::Groq.needs_daemon());
 }
 
 // ---------------------------------------------------------------------------
@@ -51,13 +36,6 @@ fn test_filter_local_only() {
     let all = transcriber::all_predefined_models();
     let local: Vec<_> = all.iter().filter(|m| m.provider.is_local()).collect();
     assert!(local.len() >= 4, "should have at least 4 local models, got {}", local.len());
-}
-
-#[test]
-fn test_filter_cloud_only() {
-    let all = transcriber::all_predefined_models();
-    let cloud: Vec<_> = all.iter().filter(|m| m.provider.is_cloud()).collect();
-    assert!(!cloud.is_empty(), "should have cloud models");
 }
 
 // ---------------------------------------------------------------------------
@@ -113,27 +91,6 @@ fn test_mlx_whisper_has_model_repo() {
     let mlx = all.iter().find(|m| m.id == "mlx-whisper-large-v3").unwrap();
     assert!(mlx.model_repo.is_some());
     assert!(mlx.model_repo.as_ref().unwrap().contains("mlx-community"));
-}
-
-// ---------------------------------------------------------------------------
-// Cloud models
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_groq_model_defined() {
-    let all = transcriber::all_predefined_models();
-    let groq: Vec<_> = all.iter()
-        .filter(|m| matches!(m.provider, ModelProvider::Groq))
-        .collect();
-    assert!(!groq.is_empty(), "should have Groq models");
-}
-
-#[test]
-fn test_cloud_models_have_no_download_url() {
-    let all = transcriber::all_predefined_models();
-    for m in all.iter().filter(|m| m.provider.is_cloud()) {
-        assert!(m.download_url.is_empty(), "cloud model {} should not have download_url", m.id);
-    }
 }
 
 // ---------------------------------------------------------------------------

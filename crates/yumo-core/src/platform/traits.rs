@@ -46,9 +46,3 @@ pub trait PlatformPermissions {
     fn open_microphone_settings() -> AppResult<()>;
     fn open_accessibility_settings() -> AppResult<()>;
 }
-
-pub trait PlatformKeychain {
-    fn store_key(service: &str, account: &str, password: &str) -> AppResult<()>;
-    fn get_key(service: &str, account: &str) -> AppResult<Option<String>>;
-    fn delete_key(service: &str, account: &str) -> AppResult<()>;
-}
