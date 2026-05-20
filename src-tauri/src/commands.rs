@@ -141,6 +141,12 @@ fn start_recording_internal(app: &AppHandle, ctx: &AppContext) -> Result<(), App
     };
     info!("[pipeline] recording started successfully");
 
+    // 5a. 提示音 — fire-and-forget, 不阻塞录音管线
+    yumo_core::audio_cue::play_async(yumo_core::audio_cue::resolve_cue_source(
+        &settings,
+        yumo_core::audio_cue::CueKind::Start,
+    ));
+
     // 5. Store handle (state already set to Recording in step 1)
     {
         let mut rec = ctx.recording_handle.lock()
@@ -314,6 +320,14 @@ pub async fn stop_recording(
         error!("[pipeline] recorder::stop_recording failed: {}", e);
         AppError::Recording(e.to_string())
     })?;
+
+    // 2.1 提示音 — 在 settings_map 读取前用 cache, fire-and-forget
+    if let Ok(settings_cache) = state.settings_cache.read() {
+        yumo_core::audio_cue::play_async(yumo_core::audio_cue::resolve_cue_source(
+            &settings_cache,
+            yumo_core::audio_cue::CueKind::Stop,
+        ));
+    }
 
     let rms = if audio_data.pcm_samples.is_empty() {
         0.0
