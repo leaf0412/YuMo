@@ -1178,6 +1178,25 @@ pub fn update_setting(
         });
     }
 
+    if key == "menu_bar_mode" {
+        // macOS 实时切换 activation policy: Accessory 隐藏 Dock 图标,
+        // Regular 恢复; 不重启进程即可见效。Linux / Windows 无对应概念。
+        #[cfg(target_os = "macos")]
+        {
+            let enabled = value.as_bool().unwrap_or(false);
+            let (policy, label) = if enabled {
+                (tauri::ActivationPolicy::Accessory, "Accessory")
+            } else {
+                (tauri::ActivationPolicy::Regular, "Regular")
+            };
+            if let Err(e) = app.set_activation_policy(policy) {
+                warn!("[settings] set_activation_policy failed: {:?}", e);
+            } else {
+                info!("[settings] activation_policy={} (menu_bar_mode={})", label, enabled);
+            }
+        }
+    }
+
     Ok(())
 }
 

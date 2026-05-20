@@ -243,6 +243,30 @@ pub fn run() {
                 }
             }
 
+            // Apply saved menu_bar_mode — macOS Accessory hides Dock icon
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Manager;
+                let ctx = app.handle().state::<state::AppContext>();
+                let menu_bar = ctx
+                    .settings_cache
+                    .read()
+                    .ok()
+                    .and_then(|c| c.get("menu_bar_mode").and_then(|v| v.as_bool()))
+                    .unwrap_or(false);
+                let policy = if menu_bar {
+                    tauri::ActivationPolicy::Accessory
+                } else {
+                    tauri::ActivationPolicy::Regular
+                };
+                let policy_label = if menu_bar { "Accessory" } else { "Regular" };
+                if let Err(e) = app.handle().set_activation_policy(policy) {
+                    warn!("[startup] set_activation_policy failed: {:?}", e);
+                } else {
+                    info!("[startup] activation_policy={} (menu_bar_mode={})", policy_label, menu_bar);
+                }
+            }
+
             // Restore saved hotkey — calls toggle_recording_internal directly
             if let Some(shortcut) = &saved_hotkey {
                 let handle = app.handle().clone();
