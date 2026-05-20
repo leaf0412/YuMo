@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use log::{error, info};
+use log::{error, info, warn};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -351,6 +351,70 @@ pub fn delete_all_transcriptions(conn: &Connection) -> Result<(), AppError> {
         e
     })?;
     Ok(())
+}
+
+/// 清理 N 天前的转录记录, 同步删除对应的 WAV / .txt 文件。
+/// 返回 (删除行数, 删除文件数, 文件删除失败数)。文件删除失败不算整体失败 —
+/// DB 行已删, 落盘文件残留就是孤儿, 下次清理 / 用户手动可处理。
+pub fn prune_older_than_days(
+    conn: &Connection,
+    days: u32,
+) -> Result<PruneSummary, AppError> {
+    info!("[db] prune_older_than_days days={}", days);
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
+    let cutoff_str = cutoff.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
+
+    // 先取要删的 recording_path 列表
+    let mut stmt = conn.prepare(
+        "SELECT recording_path FROM transcriptions WHERE timestamp < ?1",
+    )?;
+    let paths: Vec<Option<String>> = stmt
+        .query_map(params![cutoff_str], |row| row.get::<_, Option<String>>(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+
+    let mut files_deleted = 0usize;
+    let mut files_failed = 0usize;
+    for path_opt in &paths {
+        let Some(wav_path) = path_opt else { continue; };
+        match std::fs::remove_file(wav_path) {
+            Ok(()) => files_deleted += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => { /* 已不存在, ok */ }
+            Err(e) => {
+                warn!("[db] prune: remove {} failed: {}", wav_path, e);
+                files_failed += 1;
+            }
+        }
+        // 同名 .txt 一并清 (insert 时写在旁边)
+        let txt = std::path::Path::new(wav_path).with_extension("txt");
+        let _ = std::fs::remove_file(&txt);
+    }
+
+    let rows_deleted = conn.execute(
+        "DELETE FROM transcriptions WHERE timestamp < ?1",
+        params![cutoff_str],
+    ).map_err(|e| {
+        error!("[db] prune_older_than_days delete failed: {}", e);
+        e
+    })?;
+
+    info!(
+        "[db] prune_older_than_days done rows_deleted={} files_deleted={} files_failed={} cutoff={}",
+        rows_deleted, files_deleted, files_failed, cutoff_str
+    );
+    Ok(PruneSummary {
+        rows_deleted,
+        files_deleted,
+        files_failed,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PruneSummary {
+    pub rows_deleted: usize,
+    pub files_deleted: usize,
+    pub files_failed: usize,
 }
 
 

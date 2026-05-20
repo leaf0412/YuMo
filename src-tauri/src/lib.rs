@@ -243,6 +243,50 @@ pub fn run() {
                 }
             }
 
+            // Auto-cleanup: 若 auto_cleanup=true, 后台清掉 N 天前的转录 + 文件。
+            // 同步 + IO 慢, 丢到独立线程避免阻塞 setup。
+            {
+                use tauri::Manager;
+                let ctx = app.handle().state::<state::AppContext>();
+                let (enabled, days) = ctx
+                    .settings_cache
+                    .read()
+                    .map(|c| {
+                        let en = c
+                            .get("auto_cleanup")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let d = c
+                            .get("auto_cleanup_days")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(30) as u32;
+                        (en, d)
+                    })
+                    .unwrap_or((false, 30));
+                if enabled {
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        let ctx = handle.state::<state::AppContext>();
+                        let conn = match ctx.db.lock() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                warn!("[startup] auto_cleanup db lock failed: {}", e);
+                                return;
+                            }
+                        };
+                        match db::prune_older_than_days(&conn, days) {
+                            Ok(s) => info!(
+                                "[startup] auto_cleanup days={} rows={} files={} fail={}",
+                                days, s.rows_deleted, s.files_deleted, s.files_failed
+                            ),
+                            Err(e) => warn!("[startup] auto_cleanup failed: {}", e),
+                        }
+                    });
+                } else {
+                    info!("[startup] auto_cleanup disabled");
+                }
+            }
+
             // Apply saved menu_bar_mode — macOS Accessory hides Dock icon
             #[cfg(target_os = "macos")]
             {
