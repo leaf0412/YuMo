@@ -10,6 +10,7 @@ import {
   FormatPainterOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from '@tauri-apps/plugin-autostart';
 import { emit, listen } from '../lib/events';
 import i18n from '../i18n';
 import { getResolvedLocale, type UiLocale } from '../i18n/utils';
@@ -64,10 +65,26 @@ export default function Settings() {
   const loadSettings = useCallback(async () => {
     try {
       const result = await invoke<AppSettings>('get_settings');
+      // OS 是 autostart 的真实归宿 (LaunchAgent on macOS), DB 仅作 UI cache。
+      // 用户可能从 系统设置 / launchctl 改过, 这里以 OS 为准刷新 UI。
+      try {
+        const osAutostart = await isAutostartEnabled();
+        result.autostart = osAutostart;
+      } catch { /* plugin error — keep DB value */ }
       setSettings(result);
       setHotkeyInput(result.hotkey || '');
     } catch { /* logged */ }
   }, []);
+
+  const handleAutostartToggle = async (v: boolean) => {
+    try {
+      if (v) await enableAutostart();
+      else await disableAutostart();
+      await updateSetting('autostart', v);
+    } catch (e) {
+      message.error(formatError(e, t('settings.updateFailed')));
+    }
+  };
 
   const loadDevices = useCallback(async () => {
     try {
@@ -446,7 +463,7 @@ export default function Settings() {
               ]}
             />,
           )}
-          {settingRow(t('settings.autostart'), <Switch checked={settings.autostart} onChange={(v) => updateSetting('autostart', v)} />)}
+          {settingRow(t('settings.autostart'), <Switch checked={settings.autostart} onChange={handleAutostartToggle} />)}
           {settingRow(t('settings.dataPath'), <Text type="secondary" copyable>{settings.data_path || t('settings.dataPathNotSet')}</Text>)}
           <div style={{ padding: '8px 0' }}>
             <Text strong>{t('settings.sectionImport')}</Text>
