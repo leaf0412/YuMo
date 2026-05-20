@@ -37,9 +37,6 @@ interface AppSettings {
   language?: string;
   sound_enabled?: boolean;
   custom_sound_file?: string;
-  vad_enabled?: boolean;
-  vad_sensitivity?: number;
-  vad_silence_timeout?: number;
   clipboard_restore?: boolean;
   paste_delay?: number;
   auto_capitalize?: boolean;
@@ -328,15 +325,6 @@ export default function Settings() {
           {settingRow(t('settings.customSoundFile'),
             <Input value={settings.custom_sound_file || ''} onChange={(e) => updateSetting('custom_sound_file', e.target.value)} placeholder={t('settings.customSoundFilePlaceholder')} style={{ width: 250 }} />,
           )}
-          {settingRow(t('settings.enableVad'), <Switch checked={settings.vad_enabled} onChange={(v) => updateSetting('vad_enabled', v)} />)}
-          <div style={{ padding: '8px 0' }}>
-            <Text>{t('settings.vadSensitivity')}</Text>
-            <Slider min={0} max={100} value={settings.vad_sensitivity ?? 50} onChange={(v) => updateSetting('vad_sensitivity', v)} />
-          </div>
-          <div style={{ padding: '8px 0' }}>
-            <Text>{t('settings.vadSilenceTimeout')}</Text>
-            <Slider min={100} max={5000} step={100} value={settings.vad_silence_timeout ?? 1000} onChange={(v) => updateSetting('vad_silence_timeout', v)} />
-          </div>
         </Flex>
       ),
     },
